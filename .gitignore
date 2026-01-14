@@ -1,0 +1,48 @@
+# --- DEPENDENCIES ---
+# Never upload node_modules; AWS will install them from package.json
+node_modules/
+jspm_packages/
+
+# --- SECRETS & CONFIG ---
+# CRITICAL: Do not upload your database strings or API keys
+.env
+.env.local
+.env.*.local
+
+# --- LOGS ---
+logs
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+lerna-debug.log*
+
+# --- AWS & DEPLOYMENT ---
+# If using AWS Elastic Beanstalk or Amplify
+.elasticbeanstalk/
+.amplify/
+dist/
+build/
+
+# --- OPERATING SYSTEM ---
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# --- IDE / EDITORS ---
+.vscode/
+.idea/
+*.suo
+*.ntvs*
+*.njsproj
+*.sln
+*.sw?
+
+# --- TESTING ---
+coverage/
+.nyc_output
+
+# --- LOCAL DATABASE (if any) ---
+# If you are using local mongo data for testing
+data/
+db/
