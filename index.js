@@ -9,15 +9,22 @@ const tenantRoutes = require('./routes/tenantRoutes');
 const app = express();
 
 // Middleware
-app.use(cors());
+// --- UPDATED CORS CONFIGURATION ---
+app.use(cors({
+  origin: [
+    "https://www.lrbcloud.ai",
+    "https://lrbcloud.ai",
+    /\.lrbcloud\.ai$/   // This Regex allows all subdomains (e.g., test.lrbcloud.ai)
+  ],
+  credentials: true,
+  methods: ["GET", "POST", "PUT", "DELETE", "PATCH", "OPTIONS"],
+  allowedHeaders: ["Content-Type", "Authorization"]
+}));
+// ----------------------------------
+
 app.use(express.json());
 
 // 2. Register Routes
-/**
- * CRITICAL FIX: Map both prefixes to tenantRoutes.
- * This ensures /api/superadmin/update-branding AND /api/tasks/score 
- * both find their correct functions.
- */
 app.use('/api/superadmin', tenantRoutes);
 app.use('/api/tasks', tenantRoutes); 
 
