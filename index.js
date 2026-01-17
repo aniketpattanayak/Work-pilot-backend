@@ -12,10 +12,10 @@ const app = express();
 // --- UPDATED CORS CONFIGURATION ---
 app.use(cors({
   origin: [
-    "http://localhost:5173", // Added for your local Vite development
+    "http://localhost:5173", 
     "https://www.lrbcloud.ai",
     "https://lrbcloud.ai",
-    /\.lrbcloud\.ai$/   // This Regex allows all subdomains (e.g., test.lrbcloud.ai)
+    /\.lrbcloud\.ai$/   // Allows test.lrbcloud.ai, etc.
   ],
   credentials: true,
   methods: ["GET", "POST", "PUT", "DELETE", "PATCH", "OPTIONS"],
@@ -26,7 +26,7 @@ app.use(cors({
 app.use(express.json());
 
 // 2. Register Routes
-// Added '/api' prefix here to match VITE_API_URL=https://api.lrbcloud.ai/api
+// Added '/api' prefix to match VITE_API_URL=https://api.lrbcloud.ai/api
 app.use('/api/superadmin', tenantRoutes);
 app.use('/api/tasks', tenantRoutes); 
 
