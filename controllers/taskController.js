@@ -2,12 +2,12 @@ const DelegationTask = require('../models/DelegationTask');
 const Employee = require('../models/Employee'); // Ensure you import the Employee model
 const Tenant = require('../models/Tenant');
 const mongoose = require('mongoose');
+const sendWhatsAppMessage = require('../utils/whatsappNotify');
+
 
 const ChecklistTask = require('../models/ChecklistTask'); // The Model
 const { calculateNextDate } = require('../utils/scheduler'); // The Math
-// Fetch tasks specifically assigned to the logged-in Doer
-// Fetch tasks specifically for the logged-in Doer
-// server/controllers/taskController.js
+
 
 exports.getDoerTasks = async (req, res) => {
   try {
@@ -106,9 +106,6 @@ exports.getTaskOverview = async (req, res) => {
       res.status(500).json({ message: error.message });
   }
 };
-// server/controllers/taskController.js
-
-// server/controllers/taskController.js
 exports.getCompanyOverview = async (req, res) => {
   try {
     const { tenantId } = req.params;
@@ -204,12 +201,6 @@ exports.getEmployeeScore = async (req, res) => {
     }
 };
 
-// server/controllers/taskController.js
-
-// server/controllers/taskController.js
-
-// server/controllers/taskController.js
-
 exports.completeChecklistTask = async (req, res) => {
   try {
     /**
@@ -217,7 +208,9 @@ exports.completeChecklistTask = async (req, res) => {
      * req.body is populated by Multer (upload.single('evidence'))
      */
     const { checklistId, remarks, completedBy } = req.body;
-    const task = await ChecklistTask.findById(checklistId);
+    
+    // CRITICAL: We populate doerId to include the performer's name in the notification
+    const task = await ChecklistTask.findById(checklistId).populate('doerId');
 
     if (!task) return res.status(404).json({ message: "Task not found" });
 
@@ -265,6 +258,31 @@ exports.completeChecklistTask = async (req, res) => {
 
     console.log(`✅ Checklist "${task.taskName}" completed. Next due: ${task.nextDueDate.toDateString()}`);
 
+    // --- PHASE 2: WHATSAPP NOTIFICATION TRIGGER ---
+    // Since checklists are company-wide, we notify the Factory Admin/Assigner 
+    try {
+      if (tenant && tenant.adminEmail) {
+        // Find the admin employee record to get the WhatsApp number
+        const adminNode = await Employee.findOne({ 
+          email: tenant.adminEmail, 
+          tenantId: tenant._id 
+        });
+
+        if (adminNode && adminNode.whatsappNumber) {
+          const message = `📋 *Routine Protocol Finalized*\n\n` +
+                          `*Protocol:* ${task.taskName}\n` +
+                          `*Node Performed:* ${task.doerId?.name || 'Assigned Staff'}\n` +
+                          `*Next Due:* ${task.nextDueDate.toLocaleDateString()}\n\n` +
+                          `Evidence has been synchronized to the cloud. Review the Audit Log for details.`;
+          
+          // Dispatch via Maytapi Utility
+          await sendWhatsAppMessage(adminNode.whatsappNumber, message);
+        }
+      }
+    } catch (waError) {
+      console.error("⚠️ Checklist WhatsApp Dispatch Failed:", waError.message);
+    }
+
     // 6. Return confirmation
     res.status(200).json({ 
       message: "Work submitted with proof! Next occurrence scheduled.", 
@@ -279,11 +297,6 @@ exports.completeChecklistTask = async (req, res) => {
     });
   }
 };
-
-// server/controllers/taskController.js
-
-// 1. Fetch all checklists for the factory (Admin View)
-// server/controllers/taskController.js
 
 exports.getAllChecklists = async (req, res) => {
   try {
@@ -309,8 +322,6 @@ exports.getAllChecklists = async (req, res) => {
       });
   }
 };
-
-// 2. Update Checklist (Staff Rotation / Name Change)
 exports.updateChecklistTask = async (req, res) => {
     try {
         const { id } = req.params;
@@ -367,10 +378,6 @@ exports.createChecklistTask = async (req, res) => {
       res.status(500).json({ message: "Failed to create checklist", error: error.message });
     }
   };
-
-// Function for Coordinator to manually mark a task as done
-// server/controllers/taskController.js
-
 exports.coordinatorForceDone = async (req, res) => {
   try {
     const { taskId, coordinatorId, remarks } = req.body;
@@ -431,8 +438,7 @@ exports.coordinatorForceDone = async (req, res) => {
     res.status(500).json({ message: "Update failed", error: error.message });
   }
 };
-  
-  // Placeholder for WhatsApp Reminder Trigger
+
   exports.sendWhatsAppReminder = async (req, res) => {
     const { whatsappNumber, taskTitle } = req.body;
     // This will call your WhatsApp API provider
@@ -461,7 +467,6 @@ exports.getCoordinatorTasks = async (req, res) => {
       res.status(500).json({ message: "Error fetching tracking data", error: error.message });
     }
   };
-// server/controllers/taskController.js
 
 exports.handleRevision = async (req, res) => {
     try {
@@ -501,6 +506,7 @@ exports.handleRevision = async (req, res) => {
     }
 };
 
+
 exports.respondToTask = async (req, res) => {
   try {
       // 1. Safety check: ensure middleware correctly parsed the multipart/form-data
@@ -510,7 +516,8 @@ exports.respondToTask = async (req, res) => {
 
       const { taskId, status, revisedDeadline, remarks, doerId } = req.body;
       
-      const task = await DelegationTask.findById(taskId);
+      // CRITICAL: Populate assignerId and doerId to access their WhatsApp numbers later
+      const task = await DelegationTask.findById(taskId).populate('assignerId doerId');
       if (!task) return res.status(404).json({ message: "Task not found" });
 
       // 2. Handle Evidence Files (S3 or local path)
@@ -520,7 +527,7 @@ exports.respondToTask = async (req, res) => {
       }
 
       // --- PHASE 6.3: DUAL POINT & ACHIEVEMENT ENGINE (TRIGGERED ON COMPLETION) ---
-      // We trigger logic on 'Completed' to give instant gratification to the Doer
+      // Logic preserved exactly as per original requirements
       if (status === 'Completed' || status === 'Verified') {
           const Tenant = require('../models/Tenant'); 
           const Employee = require('../models/Employee');
@@ -528,11 +535,9 @@ exports.respondToTask = async (req, res) => {
           const tenant = await Tenant.findById(task.tenantId);
           const employee = await Employee.findById(task.doerId);
           
-          // Verify point engine is active and rules (brackets) exist
           if (tenant && tenant.pointSettings?.isActive && employee && tenant.pointSettings.brackets.length > 0) {
               const settings = tenant.pointSettings;
 
-              // A. Determine Bracket based on total task duration
               const totalDurationMs = new Date(task.deadline) - new Date(task.createdAt);
               const totalDurationDays = totalDurationMs / (1000 * 60 * 60 * 24);
 
@@ -540,7 +545,6 @@ exports.respondToTask = async (req, res) => {
               const bracket = sortedBrackets.find(b => totalDurationDays <= b.maxDurationDays) || sortedBrackets[sortedBrackets.length - 1];
 
               if (bracket) {
-                  // B. Calculate Time Delta (Deadline vs Current Completion Time)
                   const completionDate = new Date();
                   const deltaMs = new Date(task.deadline) - completionDate;
                   const deltaHours = deltaMs / (1000 * 60 * 60);
@@ -548,16 +552,12 @@ exports.respondToTask = async (req, res) => {
                   let pointsAwarded = 0;
                   const unitMultiplier = bracket.pointsUnit === 'day' ? 24 : 1;
 
-                  // C. Calculate Doer Points
                   if (deltaHours > 0) {
-                      // EARLY: Bonus points
                       pointsAwarded = Math.floor((deltaHours / unitMultiplier) * bracket.earlyBonus);
                   } else if (deltaHours < 0) {
-                      // LATE: Penalty points
                       pointsAwarded = -Math.floor((Math.abs(deltaHours) / unitMultiplier) * bracket.latePenalty);
                   }
 
-                  // D. Update Doer Wallet & Achievement Check
                   const newTotalPoints = (employee.totalPoints || 0) + pointsAwarded;
                   employee.totalPoints = newTotalPoints;
 
@@ -584,10 +584,8 @@ exports.respondToTask = async (req, res) => {
                       });
                   }
 
-                  await employee.save(); // Persist Doer updates
+                  await employee.save(); 
 
-                  // E. Update Assigner Management Bonus (Dual Reward)
-                  // Assigner gets 10% of Doer's points as a reward for successful delegation
                   if (pointsAwarded > 0) {
                       const assignerBonus = Math.max(5, Math.floor(pointsAwarded * 0.1));
                       await Employee.findByIdAndUpdate(task.assignerId, {
@@ -595,7 +593,6 @@ exports.respondToTask = async (req, res) => {
                       });
                   }
 
-                  // F. Log Transaction for Transparency
                   task.history.push({
                       action: 'Points Calculated',
                       performedBy: doerId,
@@ -634,7 +631,32 @@ exports.respondToTask = async (req, res) => {
 
       task.history.push(historyEntry);
 
-      await task.save(); // Persist all task history and status changes
+      await task.save(); // Persist all changes
+
+      // --- PHASE 2: WHATSAPP CONTEXTUAL NOTIFICATIONS ---
+      try {
+          // Trigger A: Notify Assigner of task completion
+          if (status === 'Completed' && task.assignerId?.whatsappNumber) {
+              const msg = `✅ *Mission Finalized*\n\n` +
+                          `*Task:* ${task.title}\n` +
+                          `*Submitted By:* ${task.doerId?.name}\n\n` +
+                          `Work proof has been uploaded to the terminal. Please review and verify the asset.`;
+              await sendWhatsAppMessage(task.assignerId.whatsappNumber, msg);
+          }
+
+          // Trigger B: Notify Doer that a revision is required
+          if (status === 'Revision Requested' && task.doerId?.whatsappNumber) {
+              const msg = `⚠️ *Rework Required*\n\n` +
+                          `*Task:* ${task.title}\n` +
+                          `*Commander Feedback:* ${remarks}\n` +
+                          `*New Target:* ${revisedDeadline}\n\n` +
+                          `Please update the task parameters and re-submit for verification.`;
+              await sendWhatsAppMessage(task.doerId.whatsappNumber, msg);
+          }
+      } catch (waError) {
+          console.error("⚠️ WhatsApp Response Notification Failed:", waError.message);
+      }
+
       res.status(200).json({ message: `Status updated to ${status}`, task });
 
   } catch (error) {
@@ -696,6 +718,11 @@ exports.getCoordinatorMapping = async (req, res) => {
 /**
  * Fully Updated createTask Controller
  * Fixes: Undefined property errors, broken S3 links, and history logging.
+ */
+/**
+ * Fully Updated createTask Controller with WhatsApp Integration
+ * Logic: Preserves S3 uploads, helper doer parsing, and audit history.
+ * Trigger: Notifies the lead Doer node via Maytapi upon successful assignment.
  */
 exports.createTask = async (req, res) => {
   try {
@@ -763,8 +790,28 @@ exports.createTask = async (req, res) => {
     
     console.log(`✅ Task "${newTask.title}" saved with ${uploadedFiles.length} files to S3.`);
 
+    // --- PHASE 2: WHATSAPP NOTIFICATION TRIGGER ---
+    // Look up the lead Doer's phone number to dispatch the directive
+    try {
+      const doer = await Employee.findById(newTask.doerId);
+      if (doer && doer.whatsappNumber) {
+        const message = `🚀 *New Directive Assigned*\n\n` +
+                        `*Objective:* ${newTask.title}\n` +
+                        `*Priority:* ${newTask.priority}\n` +
+                        `*Deadline:* ${new Date(newTask.deadline).toLocaleDateString()}\n\n` +
+                        `Please log in to the *Work Pilot* terminal to acknowledge and review instructions.`;
+        
+        // Dispatch via Maytapi Utility
+        await sendWhatsAppMessage(doer.whatsappNumber, message);
+      }
+    } catch (waError) {
+      // We catch WA errors separately so the user still gets their "Success" response
+      console.error("⚠️ WhatsApp Dispatch Failed (Non-Critical):", waError.message);
+    }
+
+    // 10. Return success response to the frontend
     res.status(201).json({ 
-      message: "Task Assigned Successfully", 
+      message: "Task Assigned Successfully & Node Notified", 
       task: newTask 
     });
 

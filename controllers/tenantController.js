@@ -4,6 +4,7 @@ const bcrypt = require('bcryptjs');
 const jwt = require('jsonwebtoken');
 const DelegationTask = require('../models/DelegationTask');
 const ChecklistTask = require('../models/ChecklistTask');
+const sendWhatsAppMessage = require('../utils/whatsappNotify');
 
 exports.getEmployeeList = async (req, res) => {
     try {
@@ -41,16 +42,18 @@ exports.getEmployeeList = async (req, res) => {
     }
   };
 
-// --- Missing Function: Company Overview for Viewer Role ---
-// server/controllers/taskController.js
-// server/controllers/taskController.js
 
 exports.handleRevision = async (req, res) => {
   try {
     const { taskId, action, newDeadline, newDoerId, remarks, assignerId } = req.body;
-    const task = await DelegationTask.findById(taskId);
+    
+    // We populate doerId to ensure we have the current doer's details for the "Approve" notification
+    const task = await DelegationTask.findById(taskId).populate('doerId');
 
     if (!task) return res.status(404).json({ message: "Task not found" });
+
+    let recipientPhone = null;
+    let notificationMessage = "";
 
     if (action === 'Approve') {
       // 1. Update deadline and reset status to 'Accepted'
@@ -64,6 +67,15 @@ exports.handleRevision = async (req, res) => {
         timestamp: new Date(),
         remarks: `New deadline set to: ${new Date(newDeadline).toLocaleDateString()}`
       });
+
+      // Prepare Notification for the current Doer
+      if (task.doerId?.whatsappNumber) {
+        recipientPhone = task.doerId.whatsappNumber;
+        notificationMessage = `✅ *Deadline Approved*\n\n` +
+                              `*Task:* ${task.title}\n` +
+                              `*New Deadline:* ${new Date(newDeadline).toLocaleDateString()}\n\n` +
+                              `The commander has accepted your revision request. Please proceed with the mission.`;
+      }
     } 
     else if (action === 'Reassign') {
       // 2. Transfer task to a new Doer
@@ -78,9 +90,31 @@ exports.handleRevision = async (req, res) => {
         timestamp: new Date(),
         remarks: `Task moved from original Doer to new assignee. Reason: ${remarks}`
       });
+
+      // We must fetch the NEW Doer's phone number from the database
+      const newDoer = await Employee.findById(newDoerId);
+      if (newDoer && newDoer.whatsappNumber) {
+        recipientPhone = newDoer.whatsappNumber;
+        notificationMessage = `🚀 *Task Reassigned to You*\n\n` +
+                              `*Mission:* ${task.title}\n` +
+                              `*Priority:* ${task.priority}\n` +
+                              `*Deadline:* ${new Date(task.deadline).toLocaleDateString()}\n\n` +
+                              `*Commander's Note:* ${remarks || 'New assignment initialized.'}\n\n` +
+                              `Please log in to the terminal to acknowledge this transfer.`;
+      }
     }
 
     await task.save();
+
+    // --- PHASE 2: WHATSAPP DISPATCH ---
+    if (recipientPhone && notificationMessage) {
+      try {
+        await sendWhatsAppMessage(recipientPhone, notificationMessage);
+      } catch (waError) {
+        console.error("⚠️ Revision WhatsApp Dispatch Failed:", waError.message);
+      }
+    }
+
     res.status(200).json({ message: `Revision handled: ${action}`, task });
   } catch (err) {
     console.error("handleRevision Error:", err.message);
@@ -181,39 +215,78 @@ exports.updateSettings = async (req, res) => {
     }
   };
 
-  
-  exports.addEmployee = async (req, res) => {
+
+exports.addEmployee = async (req, res) => {
+  try {
+    // Receive 'roles' as an array from req.body
+    const { 
+      tenantId, 
+      name, 
+      email, 
+      department, 
+      whatsappNumber, 
+      roles, 
+      password, 
+      managedDoers, 
+      managedAssigners 
+    } = req.body;
+
+    // 1. Initialize the new Employee node
+    const newEmployee = new Employee({
+      tenantId,
+      name,
+      email,
+      department,
+      whatsappNumber,
+      roles: roles || ['Doer'], // Save as array logic preserved
+      password, 
+      managedDoers: managedDoers || [],
+      managedAssigners: managedAssigners || []
+    });
+
+    // 2. Persist to MongoDB
+    let savedEmployee = await newEmployee.save();
+
+    // 3. Fetch Factory/Tenant details to personalize the message
+    const tenant = await Tenant.findById(tenantId);
+    const companyName = tenant ? tenant.companyName : "Work Pilot";
+
+    // 4. Populate team mapping for the frontend response
+    savedEmployee = await Employee.findById(savedEmployee._id)
+      .populate('managedDoers', 'name roles department')
+      .populate('managedAssigners', 'name roles department')
+      .select('-password');
+
+    // --- PHASE 2: WHATSAPP WELCOME HANDSHAKE ---
+    // Automatically send credentials to the new node for immediate terminal access
     try {
-      // Receive 'roles' as an array from req.body
-      const { tenantId, name, email, department, whatsappNumber, roles, password, managedDoers, managedAssigners } = req.body;
-  
-      const newEmployee = new Employee({
-        tenantId,
-        name,
-        email,
-        department,
-        whatsappNumber,
-        roles: roles || ['Doer'], // Save as array
-        password, 
-        managedDoers: managedDoers || [],
-        managedAssigners: managedAssigners || []
-      });
-  
-      let savedEmployee = await newEmployee.save();
-  
-      savedEmployee = await Employee.findById(savedEmployee._id)
-        .populate('managedDoers', 'name roles department')
-        .populate('managedAssigners', 'name roles department')
-        .select('-password');
-  
-      res.status(201).json({ 
-        message: "Employee Created with Multi-Roles Successfully!", 
-        employee: savedEmployee 
-      });
-    } catch (error) {
-      console.error("Add Employee Error:", error.message);
-      res.status(500).json({ message: "Server Error during creation", error: error.message });
+      if (whatsappNumber) {
+        const welcomeMessage = `👋 *Welcome to the Team, ${name}!*\n\n` +
+                               `You have been authorized as a staff node for *${companyName}*.\n\n` +
+                               `*Terminal Access Credentials:*\n` +
+                               `📧 *Email:* ${email}\n` +
+                               `🔑 *Password:* ${password}\n\n` +
+                               `*Assigned Roles:* ${roles.join(', ')}\n\n` +
+                               `Please log in to your dashboard to begin your missions.`;
+        
+        // Dispatch via Maytapi Utility
+        await sendWhatsAppMessage(whatsappNumber, welcomeMessage);
+      }
+    } catch (waError) {
+      // Log WA failure but do not crash the primary creation logic
+      console.error("⚠️ Welcome WhatsApp Dispatch Failed:", waError.message);
     }
+
+    // 5. Return success response with populated data
+    res.status(201).json({ 
+      message: "Employee Created with Multi-Roles Successfully!", 
+      employee: savedEmployee 
+    });
+
+  } catch (error) {
+    console.error("Add Employee Error:", error.message);
+    res.status(500).json({ message: "Server Error during creation", error: error.message });
+  }
 };
   // Create a new Company/Tenant (Superadmin only)
 
