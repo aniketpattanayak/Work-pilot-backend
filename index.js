@@ -12,6 +12,7 @@ const app = express();
 // --- UPDATED CORS CONFIGURATION ---
 app.use(cors({
   origin: [
+    "http://localhost:5173", // Added for your local Vite development
     "https://www.lrbcloud.ai",
     "https://lrbcloud.ai",
     /\.lrbcloud\.ai$/   // This Regex allows all subdomains (e.g., test.lrbcloud.ai)
@@ -25,13 +26,17 @@ app.use(cors({
 app.use(express.json());
 
 // 2. Register Routes
+// Added '/api' prefix here to match VITE_API_URL=https://api.lrbcloud.ai/api
 app.use('/api/superadmin', tenantRoutes);
 app.use('/api/tasks', tenantRoutes); 
 
 // Debugging Middleware: Catch 404s
 app.use((req, res) => {
     console.log(`404 Not Found: ${req.method} ${req.originalUrl}`);
-    res.status(404).json({ message: `Route ${req.originalUrl} not found on this server.` });
+    res.status(404).json({ 
+        message: `Route ${req.originalUrl} not found on this server.`,
+        receivedPath: req.originalUrl 
+    });
 });
 
 // Database Connection
