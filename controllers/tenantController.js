@@ -218,7 +218,7 @@ exports.updateSettings = async (req, res) => {
 
   exports.addEmployee = async (req, res) => {
     try {
-      // Receive 'roles' as an array from req.body
+      // Receive data from req.body
       const { 
         tenantId, 
         name, 
@@ -231,8 +231,7 @@ exports.updateSettings = async (req, res) => {
         managedAssigners 
       } = req.body;
   
-      // --- FIX: PASSWORD HASHING ---
-      // This ensures the password saved in DB matches the format expected by loginEmployee
+      // --- PRESERVE: PASSWORD HASHING ---
       const salt = await bcrypt.genSalt(10);
       const hashedPassword = await bcrypt.hash(password, salt);
   
@@ -245,7 +244,7 @@ exports.updateSettings = async (req, res) => {
         whatsappNumber,
         // Default to ['Doer'] if roles array is empty
         roles: (Array.isArray(roles) && roles.length > 0) ? roles : ['Doer'], 
-        password: hashedPassword, // Use the hashed password here
+        password: hashedPassword, 
         managedDoers: managedDoers || [],
         managedAssigners: managedAssigners || []
       });
@@ -263,21 +262,26 @@ exports.updateSettings = async (req, res) => {
         .populate('managedAssigners', 'name roles department')
         .select('-password');
   
-      // --- PHASE 2: WHATSAPP WELCOME HANDSHAKE ---
-      // Automatically send credentials to the new node for immediate terminal access
+      // --- UPDATED: WHATSAPP WELCOME MESSAGE WITH SUBDOMAIN LINK ---
       try {
-        if (whatsappNumber) {
-          // We use the original 'password' variable here for the message
-          // so the user sees their readable password, not the hash.
+        if (whatsappNumber && tenant) {
+          /**
+           * DYNAMIC SUBDOMAIN URL LOGIC
+           * Result: https://{subdomain}.lrbcloud.ai/login
+           */
+          const companySubdomain = tenant.subdomain || "portal"; 
+          const loginLink = `https://${companySubdomain}.lrbcloud.ai/login`;
+
+          // Simple message using normal Indian terminology
           const welcomeMessage = `👋 *Welcome to the Team, ${name}!*\n\n` +
-                                 `You have been authorized as a staff node for *${companyName}*.\n\n` +
-                                 `*Terminal Access Credentials:*\n` +
+                                 `You are now a registered staff member for *${companyName}*.\n\n` +
+                                 `*Your Login Details:*\n` +
                                  `📧 *Email:* ${email}\n` +
                                  `🔑 *Password:* ${password}\n\n` +
                                  `*Assigned Roles:* ${roles.join(', ')}\n\n` +
-                                 `Please log in to your dashboard to begin your missions.`;
+                                 `*Login to your Dashboard here:* \n${loginLink}`;
           
-          // Dispatch via Maytapi Utility
+          // Dispatch via WhatsApp Utility
           await sendWhatsAppMessage(whatsappNumber, welcomeMessage);
         }
       } catch (waError) {
@@ -550,25 +554,61 @@ exports.updateEmployee = async (req, res) => {
       managedAssigners: cleanAssigners 
     };
 
-      if (password && password.trim() !== "") {
-        const bcrypt = require('bcryptjs');
-        const salt = await bcrypt.genSalt(10);
-        updateData.password = await bcrypt.hash(password, salt);
-      }
-
-      const updatedEmployee = await Employee.findByIdAndUpdate(
-        id, 
-        { $set: updateData }, 
-        { new: true }
-      )
-      .populate('managedDoers', 'name role') 
-      .populate('managedAssigners', 'name role')
-      .select('-password');
-
-      res.status(200).json({ message: "Updated Successfully!", employee: updatedEmployee });
-    } catch (error) {
-      res.status(500).json({ message: "Server Error", error: error.message });
+    // Handle Password Hashing if provided
+    if (password && password.trim() !== "") {
+      const bcrypt = require('bcryptjs');
+      const salt = await bcrypt.genSalt(10);
+      updateData.password = await bcrypt.hash(password, salt);
     }
+
+    // Update the record in MongoDB
+    const updatedEmployee = await Employee.findByIdAndUpdate(
+      id, 
+      { $set: updateData }, 
+      { new: true }
+    )
+    .populate('managedDoers', 'name role department') 
+    .populate('managedAssigners', 'name role department')
+    .select('-password');
+
+    if (!updatedEmployee) {
+      return res.status(404).json({ message: "Staff not found" });
+    }
+
+    // --- UPDATED: WHATSAPP NOTIFICATION WITH SUBDOMAIN LINK ---
+    try {
+      // Find the Tenant to get the company subdomain and name
+      const tenant = await Tenant.findById(updatedEmployee.tenantId);
+      
+      if (updatedEmployee.whatsappNumber && tenant) {
+        /**
+         * 4. DYNAMIC SUBDOMAIN URL LOGIC
+         * Result: https://{subdomain}.lrbcloud.ai/login
+         */
+        const companySubdomain = tenant.subdomain || "portal"; 
+        const loginLink = `https://${companySubdomain}.lrbcloud.ai/login`;
+
+        // Simple message using normal Indian terminology
+        const updateMessage = `📝 *Staff Details Updated*\n\n` +
+                               `Hi ${name}, your details for *${tenant.companyName}* have been updated in the system.\n\n` +
+                               `*Department:* ${department || 'Not Set'}\n` +
+                               `*Your Roles:* ${roles.join(', ')}\n\n` +
+                               `Please log in to your dashboard to see the changes:\n` +
+                               `${loginLink}`;
+        
+        // Dispatch via WhatsApp Utility
+        await sendWhatsAppMessage(updatedEmployee.whatsappNumber, updateMessage);
+      }
+    } catch (waError) {
+      // Log WhatsApp failure but keep the response successful
+      console.error("⚠️ Profile Update WhatsApp Failed:", waError.message);
+    }
+
+    res.status(200).json({ message: "Updated Successfully!", employee: updatedEmployee });
+  } catch (error) {
+    console.error("Server Error (Update Employee):", error.message);
+    res.status(500).json({ message: "Server Error", error: error.message });
+  }
 };
 // Admin logic to link staff (Assigner -> Doers OR Coordinator -> Assigners)
 // Function to Update existing mapping links anytime
