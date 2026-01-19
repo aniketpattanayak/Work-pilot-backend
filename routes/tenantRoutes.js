@@ -4,6 +4,8 @@ const Tenant = require('../models/Tenant');
 const ChecklistTask = require('../models/ChecklistTask');
 const upload = require('../utils/s3Uploader'); // Ensure this utility path is correct
 const taskController = require('../controllers/taskController');
+const tenantController = require('../controllers/tenantController');
+
 const { 
     createTenant, 
     loginEmployee, 
@@ -18,7 +20,9 @@ const {
     deleteCompany,
     updateEmployeeMapping,
     updateEmployee,
-    updateBranding // New controller you added
+    updateBranding, // Added the missing comma here
+    verifyTenant,
+    
 } = require('../controllers/tenantController');
 
 // ==========================================
@@ -28,6 +32,7 @@ router.post('/master-login', superAdminLogin);
 router.post('/create-company', upload.single('logo'), createTenant);
 router.get('/all-companies', getAllCompanies);
 router.delete('/company/:id', deleteCompany);
+router.get('/verify/:subdomain', verifyTenant);
 
 // ==========================================
 // 2. BRANDING & FACTORY SETTINGS
@@ -103,18 +108,6 @@ router.post('/coordinator-force-done', taskController.coordinatorForceDone);
 // 6. LOGIN & VERIFICATION
 // ==========================================
 router.post('/login-employee', loginEmployee);
-router.get('/verify/:subdomain', async (req, res) => {
-    try {
-      const tenant = await Tenant.findOne({ subdomain: req.params.subdomain.toLowerCase() });
-      if (!tenant) return res.status(404).json({ message: "Tenant not found" });
-      res.json({ 
-        companyName: tenant.companyName, 
-        id: tenant._id,
-        whatsappActive: tenant.whatsappConfig ? tenant.whatsappConfig.isActive : false 
-      });
-    } catch (error) {
-      res.status(500).json({ message: "Server error" });
-    }
-});
+
 
 module.exports = router;

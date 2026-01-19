@@ -344,33 +344,41 @@ exports.updateChecklistTask = async (req, res) => {
     }
 };
 exports.createChecklistTask = async (req, res) => {
-    try {
-      const { tenantId, taskName, doerId, frequency, frequencyConfig } = req.body;
-  
-      // 1. Fetch the factory settings for this tenant
-      const tenant = await Tenant.findById(tenantId);
-      if (!tenant) return res.status(404).json({ message: "Factory settings not found" });
-  
-      // 2. Calculate next date while skipping holidays
-      const firstDueDate = calculateNextDate(
+  try {
+    // FIX: Added 'startDate' to destructuring
+    const { tenantId, taskName, doerId, frequency, frequencyConfig, startDate } = req.body;
+
+    const tenant = await Tenant.findById(tenantId);
+    if (!tenant) return res.status(404).json({ message: "Factory settings not found" });
+
+    // FIX: Logic to use user-defined start date or calculate immediately
+    let firstDueDate;
+    if (startDate) {
+      firstDueDate = new Date(startDate);
+      // Ensure it starts at the beginning of the day (e.g., 00:00)
+      firstDueDate.setHours(0, 0, 0, 0);
+    } else {
+      firstDueDate = calculateNextDate(
         frequency, 
         frequencyConfig, 
         tenant.holidays || []
       );
-  
-      const newChecklist = new ChecklistTask({
-        tenantId,
-        taskName,
-        doerId,
-        frequency,
-        frequencyConfig,
-        nextDueDate: firstDueDate,
-        history: [{
-          action: "Checklist Created",
-          remarks: `First occurrence scheduled for ${firstDueDate.toLocaleDateString()}`,
-          timestamp: new Date()
-        }]
-      });
+    }
+
+    const newChecklist = new ChecklistTask({
+      tenantId,
+      taskName,
+      doerId,
+      frequency,
+      frequencyConfig,
+      startDate: firstDueDate, // Store the official start date
+      nextDueDate: firstDueDate, // Set the first occurrence
+      history: [{
+        action: "Checklist Created",
+        remarks: `Protocol initiated. First occurrence scheduled for ${firstDueDate.toLocaleDateString()}`,
+        timestamp: new Date()
+      }]
+    });
   
       await newChecklist.save();
       res.status(201).json({ message: "Recurring Checklist Created", nextDue: firstDueDate });

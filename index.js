@@ -13,6 +13,7 @@ const app = express();
 app.use(cors({
   origin: [
     "http://localhost:5173", 
+    /^http:\/\/.*\.localhost:5173$/,
     "https://www.lrbcloud.ai",
     "https://lrbcloud.ai",
     /\.lrbcloud\.ai$/   // Allows test.lrbcloud.ai, etc.

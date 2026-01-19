@@ -216,78 +216,86 @@ exports.updateSettings = async (req, res) => {
   };
 
 
-exports.addEmployee = async (req, res) => {
-  try {
-    // Receive 'roles' as an array from req.body
-    const { 
-      tenantId, 
-      name, 
-      email, 
-      department, 
-      whatsappNumber, 
-      roles, 
-      password, 
-      managedDoers, 
-      managedAssigners 
-    } = req.body;
-
-    // 1. Initialize the new Employee node
-    const newEmployee = new Employee({
-      tenantId,
-      name,
-      email,
-      department,
-      whatsappNumber,
-      roles: roles || ['Doer'], // Save as array logic preserved
-      password, 
-      managedDoers: managedDoers || [],
-      managedAssigners: managedAssigners || []
-    });
-
-    // 2. Persist to MongoDB
-    let savedEmployee = await newEmployee.save();
-
-    // 3. Fetch Factory/Tenant details to personalize the message
-    const tenant = await Tenant.findById(tenantId);
-    const companyName = tenant ? tenant.companyName : "Work Pilot";
-
-    // 4. Populate team mapping for the frontend response
-    savedEmployee = await Employee.findById(savedEmployee._id)
-      .populate('managedDoers', 'name roles department')
-      .populate('managedAssigners', 'name roles department')
-      .select('-password');
-
-    // --- PHASE 2: WHATSAPP WELCOME HANDSHAKE ---
-    // Automatically send credentials to the new node for immediate terminal access
+  exports.addEmployee = async (req, res) => {
     try {
-      if (whatsappNumber) {
-        const welcomeMessage = `👋 *Welcome to the Team, ${name}!*\n\n` +
-                               `You have been authorized as a staff node for *${companyName}*.\n\n` +
-                               `*Terminal Access Credentials:*\n` +
-                               `📧 *Email:* ${email}\n` +
-                               `🔑 *Password:* ${password}\n\n` +
-                               `*Assigned Roles:* ${roles.join(', ')}\n\n` +
-                               `Please log in to your dashboard to begin your missions.`;
-        
-        // Dispatch via Maytapi Utility
-        await sendWhatsAppMessage(whatsappNumber, welcomeMessage);
+      // Receive 'roles' as an array from req.body
+      const { 
+        tenantId, 
+        name, 
+        email, 
+        department, 
+        whatsappNumber, 
+        roles, 
+        password, 
+        managedDoers, 
+        managedAssigners 
+      } = req.body;
+  
+      // --- FIX: PASSWORD HASHING ---
+      // This ensures the password saved in DB matches the format expected by loginEmployee
+      const salt = await bcrypt.genSalt(10);
+      const hashedPassword = await bcrypt.hash(password, salt);
+  
+      // 1. Initialize the new Employee node
+      const newEmployee = new Employee({
+        tenantId,
+        name,
+        email,
+        department,
+        whatsappNumber,
+        // Default to ['Doer'] if roles array is empty
+        roles: (Array.isArray(roles) && roles.length > 0) ? roles : ['Doer'], 
+        password: hashedPassword, // Use the hashed password here
+        managedDoers: managedDoers || [],
+        managedAssigners: managedAssigners || []
+      });
+  
+      // 2. Persist to MongoDB
+      let savedEmployee = await newEmployee.save();
+  
+      // 3. Fetch Factory/Tenant details to personalize the message
+      const tenant = await Tenant.findById(tenantId);
+      const companyName = tenant ? tenant.companyName : "Work Pilot";
+  
+      // 4. Populate team mapping for the frontend response
+      savedEmployee = await Employee.findById(savedEmployee._id)
+        .populate('managedDoers', 'name roles department')
+        .populate('managedAssigners', 'name roles department')
+        .select('-password');
+  
+      // --- PHASE 2: WHATSAPP WELCOME HANDSHAKE ---
+      // Automatically send credentials to the new node for immediate terminal access
+      try {
+        if (whatsappNumber) {
+          // We use the original 'password' variable here for the message
+          // so the user sees their readable password, not the hash.
+          const welcomeMessage = `👋 *Welcome to the Team, ${name}!*\n\n` +
+                                 `You have been authorized as a staff node for *${companyName}*.\n\n` +
+                                 `*Terminal Access Credentials:*\n` +
+                                 `📧 *Email:* ${email}\n` +
+                                 `🔑 *Password:* ${password}\n\n` +
+                                 `*Assigned Roles:* ${roles.join(', ')}\n\n` +
+                                 `Please log in to your dashboard to begin your missions.`;
+          
+          // Dispatch via Maytapi Utility
+          await sendWhatsAppMessage(whatsappNumber, welcomeMessage);
+        }
+      } catch (waError) {
+        // Log WA failure but do not crash the primary creation logic
+        console.error("⚠️ Welcome WhatsApp Dispatch Failed:", waError.message);
       }
-    } catch (waError) {
-      // Log WA failure but do not crash the primary creation logic
-      console.error("⚠️ Welcome WhatsApp Dispatch Failed:", waError.message);
+  
+      // 5. Return success response with populated data
+      res.status(201).json({ 
+        message: "Employee Created with Multi-Roles Successfully!", 
+        employee: savedEmployee 
+      });
+  
+    } catch (error) {
+      console.error("Add Employee Error:", error.message);
+      res.status(500).json({ message: "Server Error during creation", error: error.message });
     }
-
-    // 5. Return success response with populated data
-    res.status(201).json({ 
-      message: "Employee Created with Multi-Roles Successfully!", 
-      employee: savedEmployee 
-    });
-
-  } catch (error) {
-    console.error("Add Employee Error:", error.message);
-    res.status(500).json({ message: "Server Error during creation", error: error.message });
-  }
-};
+  };
   // Create a new Company/Tenant (Superadmin only)
 
 
@@ -524,22 +532,23 @@ exports.createTenant = async (req, res) => {
 // Function to update any employee detail (Name, Role, Dept, etc.)
 // This updated logic prevents duplicates by overwriting the array
 exports.updateEmployee = async (req, res) => {
-    try {
-      const { id } = req.params;
-      const { name, email, department, role, managedDoers, managedAssigners, password } = req.body;
+  try {
+    const { id } = req.params;
+    // FIX: Changed 'role' to 'roles' to match your frontend and model
+    const { name, email, department, roles, managedDoers, managedAssigners, password } = req.body;
 
-      // Map the IDs correctly to ensure we only store the ID strings
-      const cleanDoers = managedDoers ? managedDoers.map(d => d._id || d) : [];
-      const cleanAssigners = managedAssigners ? managedAssigners.map(a => a._id || a) : [];
+    // Map the IDs correctly to ensure we only store the ID strings
+    const cleanDoers = Array.isArray(managedDoers) ? managedDoers.map(d => d._id || d) : [];
+    const cleanAssigners = Array.isArray(managedAssigners) ? managedAssigners.map(a => a._id || a) : [];
 
-      const updateData = { 
-        name, 
-        email, 
-        department, 
-        role, 
-        managedDoers: cleanDoers, // Overwrites old list with new clean list
-        managedAssigners: cleanAssigners 
-      };
+    const updateData = { 
+      name, 
+      email, 
+      department, 
+      roles, // FIX: Use the plural 'roles' array
+      managedDoers: cleanDoers, 
+      managedAssigners: cleanAssigners 
+    };
 
       if (password && password.trim() !== "") {
         const bcrypt = require('bcryptjs');
@@ -586,4 +595,26 @@ exports.updateEmployeeMapping = async (req, res) => {
   }
 };
 
+// --- ADD THIS TO THE BOTTOM OF YOUR FILE ---
+exports.verifyTenant = async (req, res) => {
+  try {
+    const { subdomain } = req.params;
+    
+    // Find the factory by its subdomain
+    const tenant = await Tenant.findOne({ subdomain: subdomain.toLowerCase() });
+    
+    if (!tenant) {
+      return res.status(404).json({ message: "Factory infrastructure not found." });
+    }
 
+    // This is the CRITICAL part: we must return the logo and companyName
+    res.status(200).json({
+      id: tenant._id,
+      companyName: tenant.companyName,
+      logo: tenant.logo // The login page is currently receiving 'undefined' for this
+    });
+  } catch (error) {
+    console.error("Verification Error:", error.message);
+    res.status(500).json({ message: "Verification Error", error: error.message });
+  }
+};
