@@ -4,9 +4,9 @@ const multer = require("multer");
 const multerS3 = require("multer-s3");
 require("dotenv").config();
 
-// 1. Initialize S3 Client with your .env credentials
+// 1. Initialize S3 Client with Mumbai region for your new bucket
 const s3 = new S3Client({
-  region: process.env.AWS_REGION || "us-east-1",
+  region: process.env.AWS_REGION || "ap-south-1", // Updated to match your Mumbai bucket
   credentials: {
     accessKeyId: process.env.AWS_ACCESS_KEY,
     secretAccessKey: process.env.AWS_SECRET_KEY,
@@ -18,16 +18,20 @@ const upload = multer({
   storage: multerS3({
     s3: s3,
     bucket: process.env.AWS_BUCKET_NAME,
-    // REMOVED: acl: "public-read"
-    // Modern S3 buckets do not support ACLs by default. 
-    // Use Bucket Policies to make files public if needed.
+    
+    // CRITICAL: Automatically detects the file type (image/png, etc.) 
+    // This prevents images from downloading instead of opening in the browser
+    contentType: multerS3.AUTO_CONTENT_TYPE, 
     
     metadata: function (req, file, cb) {
       cb(null, { fieldName: file.fieldname });
     },
+    
     key: function (req, file, cb) {
-      // Create a unique filename: timestamp + original name
-      // Files will be stored in the 'task-evidence' folder inside your bucket
+      /**
+       * Create a unique filename: timestamp + original name
+       * Stored in the 'task-evidence' folder inside your bucket
+       */
       cb(null, `task-evidence/${Date.now().toString()}-${file.originalname}`);
     },
   }),
