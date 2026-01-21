@@ -7,7 +7,8 @@ const ChecklistTaskSchema = new mongoose.Schema({
   doerId: { type: mongoose.Schema.Types.ObjectId, ref: 'Employee', required: true },
   frequency: {
     type: String, 
-    enum: ['Daily', 'Weekly', 'Monthly', 'Yearly'],
+    // UPDATED: Added 'Quarterly' and 'Half-Yearly' to support new intervals
+    enum: ['Daily', 'Weekly', 'Monthly', 'Quarterly', 'Half-Yearly', 'Yearly'],
     required: true
   },
   frequencyConfig: {

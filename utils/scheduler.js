@@ -3,7 +3,7 @@ const moment = require('moment');
 
 /**
  * Calculates the next valid working day while skipping holidays and weekends.
- * @param {String} frequency - Daily, Weekly, Monthly, Yearly, etc.
+ * @param {String} frequency - Daily, Weekly, Monthly, Quarterly, Half-Yearly, Yearly, etc.
  * @param {Object} config - Config for specific days (dayOfWeek, dayOfMonth, month, etc.)
  * @param {Array} holidays - Array of holiday objects [{date: Date}]
  */
@@ -27,6 +27,16 @@ exports.calculateNextDate = (frequency, config = {}, holidays = []) => {
 
     case 'Monthly':
       nextDate.add(1, 'months').date(config.dayOfMonth || 1);
+      break;
+
+    // NEW: Quarterly Logic - Jumps exactly 3 months ahead
+    case 'Quarterly':
+      nextDate.add(3, 'months').date(config.dayOfMonth || 1);
+      break;
+
+    // NEW: Half-Yearly Logic - Jumps exactly 6 months ahead
+    case 'Half-Yearly':
+      nextDate.add(6, 'months').date(config.dayOfMonth || 1);
       break;
 
     case 'Yearly':
