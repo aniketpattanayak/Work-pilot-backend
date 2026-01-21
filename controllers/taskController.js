@@ -135,62 +135,169 @@ exports.getCompanyOverview = async (req, res) => {
 exports.getEmployeeScore = async (req, res) => {
   try {
     const { employeeId } = req.params;
-
-    // --- NEW: FETCH EMPLOYEE DATA (For Points & Badges) ---
-    // We need to import the Employee model if not already at the top of the file
+    const { range = 'Monthly' } = req.query; // Accepts: 'Daily', 'Weekly', 'Monthly'
+    
+    // --- PERSISTENCE: MODEL IMPORTS ---
     const Employee = require('../models/Employee');
     const employee = await Employee.findById(employeeId);
 
-    // 1. Fetch all tasks for this doer
-    // Note: Removed 'Completed' filter to match your 'Verified' tasks in screenshots
-    const tasks = await DelegationTask.find({ 
-      doerId: employeeId,
-      $or: [{ status: 'Completed' }, { status: 'Verified' }]
-    });
+    const now = new Date();
+    let startDate = new Date();
 
-    if (!tasks || tasks.length === 0) {
-      return res.json({ 
-        score: 0, 
-        totalPoints: employee ? employee.totalPoints : 0,
-        earnedBadges: employee ? employee.earnedBadges : [],
-        message: "No tasks found for this node." 
-      });
+    // 1. CALCULATE TEMPORAL BOUNDARIES
+    if (range === 'Daily') {
+      startDate.setHours(0, 0, 0, 0);
+    } else if (range === 'Weekly') {
+      startDate.setDate(now.getDate() - 7);
+    } else if (range === 'Monthly') {
+      startDate.setDate(1);
+      startDate.setHours(0, 0, 0, 0);
     }
 
-    let onTimeCount = 0;
-    
-    tasks.forEach(task => {
-      // Find the "Completed" entry in history
-      const completionEntry = task.history.find(h => h.action === 'Completed' || h.action.includes('Done'));
+    /**
+     * 2. DATA ACQUISITION: UNIFIED ANALYTICS
+     * Fetching DelegationTasks and Checklist entries within the specified range.
+     */
+    const [delegations, checklists] = await Promise.all([
+      DelegationTask.find({ 
+        doerId: employeeId,
+        $or: [
+          { createdAt: { $gte: startDate } },
+          { deadline: { $gte: startDate } },
+          { "history.timestamp": { $gte: startDate } }
+        ]
+      }),
+      ChecklistTask.find({ 
+        doerId: employeeId,
+        $or: [
+          { lastCompleted: { $gte: startDate } },
+          { nextDueDate: { $gte: startDate } }
+        ]
+      })
+    ]);
+
+    let stats = {
+      onTime: 0,
+      late: 0,
+      missed: 0,
+      total: 0
+    };
+
+    // 3. LOGIC: DELEGATION TASK PROCESSING
+    delegations.forEach(task => {
+      const completion = task.history.find(h => h.action === 'Completed' || h.action === 'Verified');
       
-      if (completionEntry) {
-        // Compare completion time with the deadline
-        if (new Date(completionEntry.timestamp) <= new Date(task.deadline)) {
-          onTimeCount++;
+      if (completion) {
+        stats.total++;
+        if (new Date(completion.timestamp) <= new Date(task.deadline)) {
+          stats.onTime++;
+        } else {
+          stats.late++;
         }
+      } else if (new Date(task.deadline) < now) {
+        // Task expired without completion
+        stats.total++;
+        stats.missed++;
       }
     });
 
-    const scorePercentage = (onTimeCount / tasks.length) * 100;
+    // 4. LOGIC: CHECKLIST TASK PROCESSING
+    checklists.forEach(task => {
+      const rangeHistory = task.history.filter(h => 
+        (h.action === 'Completed' || h.action === 'Administrative Completion') &&
+        new Date(h.timestamp) >= startDate
+      );
+
+      // Routine Logic: Every scheduled occurrence in range counts toward total
+      // This counts how many times they actually did it vs missed it
+      stats.onTime += rangeHistory.length;
+      stats.total += rangeHistory.length;
+
+      // Check if current routine is missed
+      if (!rangeHistory.some(h => new Date(h.timestamp).toDateString() === now.toDateString()) && 
+          new Date(task.nextDueDate) < now) {
+        stats.missed++;
+        stats.total++;
+      }
+    });
+
+    const total = stats.total || 0;
 
     // --- UPDATED RESPONSE OBJECT ---
+    // Preserves all existing fields for your Efficiency % and Top Scoreboard.
     res.status(200).json({
-      totalTasks: tasks.length,
-      onTimeTasks: onTimeCount,
-      score: scorePercentage.toFixed(2), // This drives the Efficiency %
+      range,
+      totalTasks: total,
+      onTimeTasks: stats.onTime,
       
-      // CRITICAL: These fields drive the Top Right Scoreboard
+      // Calculations for the Rewards Log Analytics
+      onTimePercentage: total > 0 ? ((stats.onTime / total) * 100).toFixed(2) : 0,
+      latePercentage: total > 0 ? ((stats.late / total) * 100).toFixed(2) : 0,
+      missedPercentage: total > 0 ? ((stats.missed / total) * 100).toFixed(2) : 0,
+      
+      // Existing Scoreboard Logic
+      score: total > 0 ? ((stats.onTime / total) * 100).toFixed(2) : 0,
       totalPoints: employee ? employee.totalPoints : 0, 
       earnedBadges: employee ? employee.earnedBadges : [],
       
-      notDoneOnTime: tasks.length - onTimeCount
+      notDoneOnTime: stats.late + stats.missed
     });
   } catch (error) {
-    console.error("Score Error:", error.message);
-    res.status(500).json({ message: "Score calculation failed", error: error.message });
+    console.error("Performance Analytics Error:", error.message);
+    res.status(500).json({ message: "Analytics calculation failed", error: error.message });
   }
 };
 
+
+exports.getGlobalPerformance = async (req, res) => {
+  try {
+    const { tenantId } = req.params;
+    const { range = 'Daily' } = req.query;
+    const now = new Date();
+    let startDate = new Date();
+
+    if (range === 'Daily') startDate.setHours(0, 0, 0, 0);
+    else if (range === 'Weekly') startDate.setDate(now.getDate() - 7);
+    else startDate.setDate(1);
+
+    /**
+     * UNIFIED AGGREGATION:
+     * Fetch all tasks for the factory within the time range.
+     */
+    const [delegations, checklists] = await Promise.all([
+      DelegationTask.find({ tenantId, createdAt: { $gte: startDate } }),
+      ChecklistTask.find({ tenantId, "history.timestamp": { $gte: startDate } })
+    ]);
+
+    let globalStats = { onTime: 0, late: 0, missed: 0 };
+
+    delegations.forEach(t => {
+      const done = t.history.find(h => h.action === 'Completed' || h.action === 'Verified');
+      if (done) {
+        if (new Date(done.timestamp) <= new Date(t.deadline)) globalStats.onTime++;
+        else globalStats.late++;
+      } else if (new Date(t.deadline) < now) globalStats.missed++;
+    });
+
+    // Add checklist history entries to onTime counts
+    checklists.forEach(t => {
+      const count = t.history.filter(h => new Date(h.timestamp) >= startDate).length;
+      globalStats.onTime += count;
+    });
+
+    const grandTotal = globalStats.onTime + globalStats.late + globalStats.missed;
+
+    res.status(200).json({
+      range,
+      totalActiveItems: grandTotal,
+      onTimePercentage: grandTotal > 0 ? ((globalStats.onTime / grandTotal) * 100).toFixed(0) : 0,
+      latePercentage: grandTotal > 0 ? ((globalStats.late / grandTotal) * 100).toFixed(0) : 0,
+      missedPercentage: grandTotal > 0 ? ((globalStats.missed / grandTotal) * 100).toFixed(0) : 0
+    });
+  } catch (error) {
+    res.status(500).json({ message: "Global Analytics Error", error: error.message });
+  }
+};
   exports.deleteTask = async (req, res) => {
     try {
         const { taskId } = req.params;
