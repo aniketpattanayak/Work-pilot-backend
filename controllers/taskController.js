@@ -588,27 +588,66 @@ exports.sendWhatsAppReminder = async (req, res) => {
   }
 };
 
+// server/controllers/taskController.js
+
 exports.getCoordinatorTasks = async (req, res) => {
-    try {
-      const { coordinatorId } = req.params;
-  
-      // 1. Find the Coordinator to see which Assigners they track
-      const coordinator = await Employee.findById(coordinatorId);
-      if (!coordinator) return res.status(404).json({ message: "Coordinator not found" });
-  
-      // 2. Fetch tasks where the Assigner is in the Coordinator's managed list
-      const tasks = await DelegationTask.find({
-        assignerId: { $in: coordinator.managedAssigners }
+  try {
+    const { coordinatorId } = req.params;
+
+    // 1. Find the Coordinator to identify managed staff (the "flock")
+    const coordinator = await Employee.findById(coordinatorId);
+    if (!coordinator) return res.status(404).json({ message: "Coordinator not found" });
+
+    // 2. Identify the list of staff IDs this coordinator is authorized to monitor
+    const monitoredStaffIds = coordinator.managedAssigners || [];
+
+    /**
+     * 3. UNIFIED DATA ACQUISITION:
+     * Fetch tasks where monitored staff are either the ASSIGNER OR the DOER.
+     * This ensures tasks like Murthy's (where he is the Doer) are captured.
+     */
+    const [delegationTasks, checklistTasks] = await Promise.all([
+      DelegationTask.find({ 
+        $or: [
+          { assignerId: { $in: monitoredStaffIds } },
+          { doerId: { $in: monitoredStaffIds } }
+        ]
       })
       .populate('assignerId', 'name role')
       .populate('doerId', 'name role whatsappNumber')
-      .sort({ deadline: 1 }); // Show closest deadlines first
-  
-      res.status(200).json(tasks);
-    } catch (error) {
-      res.status(500).json({ message: "Error fetching tracking data", error: error.message });
-    }
-  };
+      .lean(),
+
+      ChecklistTask.find({ 
+        doerId: { $in: monitoredStaffIds } 
+      })
+      .populate('doerId', 'name department whatsappNumber')
+      .lean()
+    ]);
+
+    // 4. Normalization: Tagging and mapping fields for UI consistency
+    const normalizedChecklists = checklistTasks.map(t => ({
+      ...t,
+      title: t.taskName, // Standardize taskName to title for the frontend table
+      deadline: t.nextDueDate, // Standardize nextDueDate to deadline for the frontend table
+      taskType: 'Checklist'
+    }));
+
+    const normalizedDelegations = delegationTasks.map(t => ({
+      ...t,
+      taskType: 'Delegation'
+    }));
+
+    // 5. Merge and Chronological Sort (Closest deadlines first)
+    const allTasks = [...normalizedDelegations, ...normalizedChecklists].sort(
+      (a, b) => new Date(a.deadline) - new Date(b.deadline)
+    );
+
+    res.status(200).json(allTasks);
+  } catch (error) {
+    console.error("Coordinator Unified Fetch Error:", error.message);
+    res.status(500).json({ message: "Error fetching tracking data", error: error.message });
+  }
+};
 
   exports.handleRevision = async (req, res) => {
     try {
