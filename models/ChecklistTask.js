@@ -1,3 +1,4 @@
+// server/models/ChecklistTask.js
 const mongoose = require('mongoose');
 
 const ChecklistTaskSchema = new mongoose.Schema({

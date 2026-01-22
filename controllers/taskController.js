@@ -1,3 +1,4 @@
+// server/controllers/taskController.js
 const DelegationTask = require('../models/DelegationTask');
 const Employee = require('../models/Employee'); // Ensure you import the Employee model
 const Tenant = require('../models/Tenant');
@@ -15,7 +16,7 @@ exports.getDoerTasks = async (req, res) => {
 
       // 1. Validation: Prevent crash if ID is malformed
       if (!mongoose.Types.ObjectId.isValid(doerId)) {
-          console.error("❌ Invalid Doer ID received:", doerId);
+          
           return res.status(400).json({ message: "Invalid Doer ID format" });
       }
 
@@ -29,7 +30,7 @@ exports.getDoerTasks = async (req, res) => {
 
       res.status(200).json(tasks);
   } catch (error) {
-      console.error("❌ Error in getDoerTasks:", error.message);
+      
       res.status(500).json({ message: "Internal Server Error", error: error.message });
   }
 };
@@ -314,134 +315,133 @@ exports.completeChecklistTask = async (req, res) => {
      * 1. Extract data from the Multi-part Form Body
      * req.body is populated by Multer (upload.single('evidence'))
      */
-    const { checklistId, remarks, completedBy } = req.body;
+    const { checklistId, remarks, completedBy, instanceDate } = req.body;
     
-    // CRITICAL: We populate doerId to include the performer's name in the notification
+    // CRITICAL: Populate doerId to include the performer's name in notifications
     const task = await ChecklistTask.findById(checklistId).populate('doerId');
 
     if (!task) return res.status(404).json({ message: "Task not found" });
 
     const now = new Date();
-    const startOfToday = new Date();
-    startOfToday.setHours(0, 0, 0, 0); 
-
+    
     /**
-     * --- DATE-WISE INTEGRITY CHECK ---
-     * Prevents staff from marking an expired/missed task as 'Done' today
+     * TACTICAL INSTANCE TARGETING
+     * We use the specific date sent from the card (e.g., 21 Jan).
+     * This ensures that marking 21 Jan does not conflict with 22 Jan.
      */
-    if (new Date(task.nextDueDate) < startOfToday) {
-      return res.status(400).json({ 
-        message: "This task has already expired. You cannot mark it as done today." 
-      });
-    }
+    const targetDate = instanceDate ? new Date(instanceDate) : new Date();
+    // Normalize target date to start of day for accurate comparison
+    targetDate.setHours(0, 0, 0, 0);
 
-    // 2. Fetch Factory/Tenant settings to calculate next occurrence
+    // 2. Fetch Factory/Tenant settings for scheduling logic
     const tenant = await Tenant.findById(task.tenantId);
     const holidays = tenant ? tenant.holidays : [];
 
-    // 3. Update the last completion timestamp
+    // 3. Update core tracking fields
     task.lastCompleted = now;
 
-    // 4. Update the Audit History Log
+    // 4. Update the Audit History Log with Instance precision
     if (!task.history) task.history = [];
     
+    // IMPROVED: Store the exact instanceDate for precise tracking
     task.history.push({
       action: "Completed",
-      timestamp: now,
-      remarks: remarks || "Daily routine finished.", 
+      timestamp: now, // When the action was actually performed
+      instanceDate: new Date(targetDate), // Which day's card was completed
+      remarks: remarks || (instanceDate ? `Backlog catch-up for ${targetDate.toDateString()}` : "Daily routine finished."), 
       attachmentUrl: req.file ? (req.file.location || req.file.path) : null, 
       completedBy: completedBy || task.doerId 
     });
 
-    // 5. Schedule the Next Task Occurrence
-    task.nextDueDate = calculateNextDate(
-      task.frequency, 
-      task.frequencyConfig || {}, 
-      holidays
-    );
+    /**
+     * 5. SMART POINTER ADVANCEMENT
+     * We only move 'nextDueDate' forward if the doer finished the EXACT date 
+     * that the pointer was currently waiting for. 
+     * 
+     * IMPROVED LOGIC:
+     * - If completing today's card → advance pointer to next occurrence
+     * - If completing a backlog card → pointer stays at current position
+     * - This allows multiple cards to exist simultaneously
+     */
+    const currentNextDue = new Date(task.nextDueDate);
+    currentNextDue.setHours(0, 0, 0, 0);
+    
+    if (targetDate.toDateString() === currentNextDue.toDateString()) {
+        // They completed the current "nextDueDate" card, so advance the pointer
+        task.nextDueDate = calculateNextDate(
+            task.frequency, 
+            task.frequencyConfig || {}, 
+            holidays,
+            new Date(targetDate) // Use the target date as the base for the next jump
+        );
+    }
+    // CRITICAL: If targetDate is in the past (backlog), we DON'T advance nextDueDate
+    // This ensures today's card remains visible even after completing yesterday's card
 
     await task.save();
 
-    console.log(`✅ Checklist "${task.taskName}" completed. Next due: ${task.nextDueDate.toDateString()}`);
+    console.log(`✅ Checklist "${task.taskName}" for ${targetDate.toDateString()} completed.`);
 
-    // --- UPDATED: WHATSAPP NOTIFICATIONS FOR ALL PARTIES ---
+    // --- PRESERVED: WHATSAPP NOTIFICATIONS FOR ALL PARTIES ---
     try {
-      /**
-       * 4. DYNAMIC SUBDOMAIN URL LOGIC
-       * Uses the 'subdomain' field from TenantSchema
-       */
       const companySubdomain = tenant?.subdomain || "portal"; 
       const loginLink = `https://${companySubdomain}.lrbcloud.ai/login`;
 
-      const formattedNextDate = new Date(task.nextDueDate).toLocaleDateString('en-IN', {
+      // Format date for better readability in messages
+      const formattedInstanceDate = targetDate.toLocaleDateString('en-IN', {
         day: '2-digit', month: 'short', year: 'numeric'
       });
 
-      // Find Quality Coordinator and Support Team if they exist for this routine
-      // NOTE: ChecklistTask model typically links to a doerId; 
-      // if you store helpers/coordinators here too, they are fetched now.
       const coordinator = task.coordinatorId ? await Employee.findById(task.coordinatorId) : null;
       const helperIds = Array.isArray(task.helperDoers) ? task.helperDoers.map(h => h.helperId) : [];
       const helpers = helperIds.length > 0 ? await Employee.find({ _id: { $in: helperIds } }) : [];
       const helperNames = helpers.map(h => h.name).join(", ") || "None";
 
-      // Preparation of reference links
+      // Evidence handling for message body
       const evidenceLink = req.file ? `\n📎 Work Proof: ${req.file.location || req.file.path}` : "\nNo proof attached.";
 
-      // FULL DETAILS BLOCK (Simple Language)
       const fullTaskDetails = `\n\n` +
         `*Task Name:* ${task.taskName}\n` +
-        `*Description:* ${task.description || "Daily Routine Work."}\n` +
+        `*For Date:* ${formattedInstanceDate}\n` +
         `*Done By:* ${task.doerId?.name || 'Staff member'}\n` +
         `*Coordinator:* ${coordinator?.name || 'Admin'}\n` +
         `*Support Team:* ${helperNames}\n` +
-        `*Next Schedule:* ${formattedNextDate}\n` +
+        `*Recorded At:* ${now.toLocaleTimeString()}\n` +
         `*Proof:* ${evidenceLink}\n\n` +
         `*Login Link:* ${loginLink}`;
 
-      // --- DISPATCH MESSAGES ---
-
-      // A. Notify Admin (Factory Head)
+      // A. Notify Admin
       if (tenant && tenant.adminEmail) {
         const adminNode = await Employee.findOne({ email: tenant.adminEmail, tenantId: tenant._id });
         if (adminNode?.whatsappNumber) {
-          const adminMsg = `📋 *Routine Work Done*\n\nHi ${adminNode.name}, a routine task has been updated.` + fullTaskDetails;
+          const adminMsg = `📋 *Routine Entry: ${formattedInstanceDate}*` + fullTaskDetails;
           await sendWhatsAppMessage(adminNode.whatsappNumber, adminMsg);
         }
       }
 
       // B. Notify the Primary Doer
       if (task.doerId?.whatsappNumber) {
-        const doerMsg = `✅ *Work Recorded*\n\nHi ${task.doerId.name}, your routine task has been saved.` + fullTaskDetails;
+        const doerMsg = `✅ *Work Saved for ${formattedInstanceDate}*` + fullTaskDetails;
         await sendWhatsAppMessage(task.doerId.whatsappNumber, doerMsg);
       }
 
       // C. Notify Quality Coordinator
       if (coordinator?.whatsappNumber) {
-        const coordMsg = `🛡️ *Routine Check Update*\n\nHi ${coordinator.name}, a routine you coordinate was finished.` + fullTaskDetails;
+        const coordMsg = `🛡️ *Routine Verified: ${formattedInstanceDate}*` + fullTaskDetails;
         await sendWhatsAppMessage(coordinator.whatsappNumber, coordMsg);
-      }
-
-      // D. Notify Support Team (Helpers)
-      if (helpers.length > 0) {
-        for (const helper of helpers) {
-          if (helper.whatsappNumber) {
-            const helperMsg = `🤝 *Team Work Update*\n\nHi ${helper.name}, a routine task you help with was finished.` + fullTaskDetails;
-            await sendWhatsAppMessage(helper.whatsappNumber, helperMsg);
-          }
-        }
       }
 
     } catch (waError) {
       console.error("⚠️ Checklist WhatsApp Dispatch Failed:", waError.message);
     }
 
-    // 6. Return confirmation
+    // 6. Final Confirmation
     res.status(200).json({ 
-      message: "Work submitted! Next routine scheduled.", 
+      message: `Instance for ${targetDate.toLocaleDateString()} submitted successfully!`, 
       nextDue: task.nextDueDate,
       fileUrl: req.file ? (req.file.location || req.file.path) : null 
     });
+
   } catch (error) {
     console.error("❌ Checklist Completion Error:", error.message);
     res.status(500).json({ 
@@ -1250,51 +1250,138 @@ exports.createTask = async (req, res) => {
 // server/controllers/taskController.js
 
 exports.getChecklistTasks = async (req, res) => {
-    try {
-        const { doerId } = req.params;
-        const now = new Date();
-        const todayStr = now.toISOString().split('T')[0];
+  try {
+    const { doerId } = req.params;
+    const now = new Date();
+    const startOfToday = new Date();
+    startOfToday.setHours(0, 0, 0, 0);
 
-        // 1. Fetch the employee and their factory settings
-        const employee = await Employee.findById(doerId);
-        if (!employee) return res.status(404).json({ message: "Employee not found" });
+    const employee = await Employee.findById(doerId);
+    if (!employee) return res.status(404).json({ message: "Employee not found" });
 
-        const tenant = await Tenant.findById(employee.tenantId);
+    const tenant = await Tenant.findById(employee.tenantId);
+
+    const tasks = await ChecklistTask.find({ doerId, status: 'Active' });
+    let allVisibleInstances = [];
+
+    tasks.forEach((task) => {
+      let instancePointer = new Date(task.nextDueDate);
+      instancePointer.setHours(0, 0, 0, 0);
+      
+      let loopCount = 0;
+      const maxLoops = 30;
+
+      while (instancePointer <= startOfToday && loopCount < maxLoops) {
+        loopCount++;
+        const dateStr = instancePointer.toDateString();
         
-        // 2. Determine Office Opening Hours
-        const openingTime = tenant?.officeHours?.opening || "09:00";
-        const [openHour, openMin] = openingTime.split(':').map(Number);
-        
-        // 3. Create a timestamp for when the office opens TODAY
-        const officeOpeningToday = new Date();
-        officeOpeningToday.setHours(openHour, openMin, 0, 0);
-
-        // 4. Find active tasks for this doer where nextDueDate has arrived
-        const tasks = await ChecklistTask.find({ 
-            doerId,
-            status: 'Active',
-            nextDueDate: { $lte: now } 
+        // Check if this specific date was already completed
+        const alreadyDone = task.history && task.history.some(h => {
+          if (h.action !== "Completed" && h.action !== "Administrative Completion") return false;
+          
+          const historyDate = new Date(h.instanceDate || h.timestamp);
+          historyDate.setHours(0, 0, 0, 0);
+          return historyDate.toDateString() === dateStr;
         });
 
-        // 5. FILTER: Apply the renewal and office hour logic
-        const visibleTasks = tasks.filter(task => {
-            // If never completed, show it immediately
-            if (!task.lastCompleted) return true;
-            
-            const lastDoneStr = new Date(task.lastCompleted).toISOString().split('T')[0];
-            
-            // HIDE if it was already done today
-            if (lastDoneStr === todayStr) return false;
-            
-            // HIDE if the current time is still before the office opening time
-            if (now < officeOpeningToday) return false;
+        if (!alreadyDone) {
+          const isBacklog = instancePointer < startOfToday;
+          
+          allVisibleInstances.push({
+            ...task.toObject(),
+            instanceDate: new Date(instancePointer),
+            isBacklog: isBacklog
+          });
+        }
 
-            return true;
+        // Advance pointer
+        if (task.frequency === 'Daily') {
+          instancePointer.setDate(instancePointer.getDate() + 1);
+        } else if (task.frequency === 'Weekly') {
+          instancePointer.setDate(instancePointer.getDate() + 7);
+        } else {
+          const nextVal = calculateNextDate(
+            task.frequency, 
+            task.frequencyConfig || {}, 
+            tenant?.holidays || [],
+            new Date(instancePointer) 
+          );
+          
+          if (!nextVal || nextVal <= instancePointer) break;
+          instancePointer = new Date(nextVal);
+        }
+        
+        instancePointer.setHours(0, 0, 0, 0);
+      }
+    });
+
+    // Sort chronologically
+    const sorted = allVisibleInstances.sort((a, b) => a.instanceDate - b.instanceDate);
+    
+    res.status(200).json(sorted);
+    
+  } catch (error) {
+    console.error("❌ Checklist fetch error:", error);
+    res.status(500).json({ message: "Multi-card generation failed", error: error.message });
+  }
+};
+
+// DIAGNOSTIC ENDPOINT - Add this temporarily
+exports.debugChecklistCards = async (req, res) => {
+  try {
+    const { doerId } = req.params;
+    const now = new Date();
+    const startOfToday = new Date();
+    startOfToday.setHours(0, 0, 0, 0);
+
+    const tasks = await ChecklistTask.find({ doerId, status: 'Active' });
+    const debugInfo = [];
+
+    tasks.forEach(task => {
+      let instancePointer = new Date(task.nextDueDate);
+      instancePointer.setHours(0, 0, 0, 0);
+      
+      const taskDebug = {
+        taskName: task.taskName,
+        nextDueDate: task.nextDueDate,
+        frequency: task.frequency,
+        cards: []
+      };
+
+      let loopCount = 0;
+      while (instancePointer <= startOfToday && loopCount < 10) {
+        loopCount++;
+        const dateStr = instancePointer.toDateString();
+        
+        const alreadyDone = task.history && task.history.some(h => {
+          if (h.action !== "Completed" && h.action !== "Administrative Completion") return false;
+          const historyDate = new Date(h.instanceDate || h.timestamp);
+          historyDate.setHours(0, 0, 0, 0);
+          return historyDate.toDateString() === dateStr;
         });
 
-        res.status(200).json(visibleTasks || []);
-    } catch (error) {
-        console.error("Checklist Fetch Error:", error.message);
-        res.status(500).json({ message: "Error loading checklist", error: error.message });
-    }
+        taskDebug.cards.push({
+          date: dateStr,
+          instanceDate: instancePointer.toISOString(),
+          alreadyDone,
+          isBacklog: instancePointer < startOfToday,
+          willCreateCard: !alreadyDone
+        });
+
+        if (task.frequency === 'Daily') {
+          instancePointer.setDate(instancePointer.getDate() + 1);
+        }
+        instancePointer.setHours(0, 0, 0, 0);
+      }
+
+      debugInfo.push(taskDebug);
+    });
+
+    res.status(200).json({
+      today: startOfToday.toDateString(),
+      debugInfo
+    });
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
 };

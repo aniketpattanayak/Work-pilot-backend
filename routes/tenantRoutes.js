@@ -1,3 +1,4 @@
+// server/routes/tenantRoutes.js
 const express = require('express');
 const router = express.Router();
 const Tenant = require('../models/Tenant');
@@ -20,9 +21,8 @@ const {
     deleteCompany,
     updateEmployeeMapping,
     updateEmployee,
-    updateBranding, // Added the missing comma here
+    updateBranding,
     verifyTenant,
-    
 } = require('../controllers/tenantController');
 
 // ==========================================
@@ -81,15 +81,9 @@ router.post('/checklist-done', upload.single('evidence'), taskController.complet
 router.get('/checklist-all/:tenantId', taskController.getAllChecklists);
 router.put('/checklist-update/:id', taskController.updateChecklistTask);
 
-// Doer: Fetch personal routine checklist
-router.get('/checklist/:doerId', async (req, res) => {
-    try {
-        const tasks = await ChecklistTask.find({ doerId: req.params.doerId }).populate('doerId', 'name');
-        res.status(200).json(tasks);
-    } catch (err) {
-        res.status(500).json({ message: err.message });
-    }
-});
+// ⚠️ CRITICAL FIX: Use the controller function instead of inline query
+// This now generates multiple instance cards for missed dates
+router.get('/checklist/:doerId', taskController.getChecklistTasks);
 
 // ==========================================
 // 5. EMPLOYEE & MAPPING ADMINISTRATION
@@ -104,10 +98,12 @@ router.get('/company-overview/:tenantId', getCompanyOverview);
 router.get('/mapping-overview/:tenantId', taskController.getMappingOverview);
 router.get('/score/:employeeId', taskController.getEmployeeScore);
 router.post('/coordinator-force-done', taskController.coordinatorForceDone);
+router.post('/send-whatsapp-reminder', taskController.sendWhatsAppReminder);
+router.get('/global-performance/:tenantId', taskController.getGlobalPerformance);
+
 // ==========================================
 // 6. LOGIN & VERIFICATION
 // ==========================================
 router.post('/login-employee', loginEmployee);
-
 
 module.exports = router;
