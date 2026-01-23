@@ -1246,7 +1246,36 @@ exports.createTask = async (req, res) => {
 };
   // Add this to server/controllers/taskController.js if not there
 // server/controllers/taskController.js
+exports.deleteChecklistTask = async (req, res) => {
+  try {
+      const { id } = req.params;
 
+      // 1. Validate ID format to prevent server-side casting errors
+      if (!mongoose.Types.ObjectId.isValid(id)) {
+          return res.status(400).json({ message: "Invalid Checklist ID provided." });
+      }
+
+      // 2. Execute deletion
+      const deletedTask = await ChecklistTask.findByIdAndDelete(id);
+
+      if (!deletedTask) {
+          return res.status(404).json({ message: "Checklist not found in active registry." });
+      }
+
+      console.log(`🗑️ Node Purged: ${deletedTask.taskName}`);
+      
+      res.status(200).json({ 
+          message: "Protocol successfully terminated and purged.",
+          deletedId: id 
+      });
+  } catch (error) {
+      console.error("❌ Deletion Crash:", error.message);
+      res.status(500).json({ 
+          message: "Action failed: Node deletion error.", 
+          error: error.message 
+      });
+  }
+};
 // server/controllers/taskController.js
 
 exports.getChecklistTasks = async (req, res) => {

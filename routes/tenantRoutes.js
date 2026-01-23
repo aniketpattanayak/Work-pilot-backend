@@ -33,7 +33,7 @@ router.post('/create-company', upload.single('logo'), createTenant);
 router.get('/all-companies', getAllCompanies);
 router.delete('/company/:id', deleteCompany);
 router.get('/verify/:subdomain', verifyTenant);
-
+router.delete('/checklist/:id', taskController.deleteChecklistTask);
 // ==========================================
 // 2. BRANDING & FACTORY SETTINGS
 // ==========================================

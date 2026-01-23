@@ -15,17 +15,18 @@ const {
     deleteCompany,
     updateEmployeeMapping,
     updateEmployee,
-    updateBranding, // Import the new controller function
+    updateBranding, 
 } = require('../controllers/tenantController');
 const Tenant = require('../models/Tenant');
-const upload = require('../utils/s3Uploader'); // Use your existing S3 uploader
+const upload = require('../utils/s3Uploader'); 
+const taskController = require('../controllers/taskController');
 
 // --- AUTH & SUPERADMIN ROUTES ---
 router.post('/master-login', superAdminLogin);
-router.post('/create-company', upload.single('logo'), createTenant); // Added upload here too for initial registration
+router.post('/create-company', upload.single('logo'), createTenant); 
 router.get('/all-companies', getAllCompanies);
 router.delete('/company/:id', deleteCompany);
-
+router.delete('/checklist/:id', taskController.deleteChecklistTask);
 // --- EMPLOYEE MANAGEMENT ROUTES ---
 router.get('/employees/:tenantId', getEmployeeList);
 router.post('/add-employee', addEmployee);
