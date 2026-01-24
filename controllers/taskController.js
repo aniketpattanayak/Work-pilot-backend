@@ -529,8 +529,8 @@ exports.createChecklistTask = async (req, res) => {
   try {
     /**
      * 1. EXTRACT DATA
-     * description: Captured for the high-density Excel grid.
-     * frequencyConfig: Now supports daysOfWeek: [], daysOfMonth: [], and intervalDays: Number.
+     * Captured from the new v3.0 high-density Create Protocol UI.
+     * frequencyConfig now includes arrays: daysOfWeek: [] and daysOfMonth: [].
      */
     const { 
       tenantId, 
@@ -547,30 +547,24 @@ exports.createChecklistTask = async (req, res) => {
     if (!tenant) return res.status(404).json({ message: "Factory settings not found" });
 
     /**
-     * 3. INITIAL DUE DATE CALCULATION
-     * Priority 1: User-defined startDate (Manual Entry).
-     * Priority 2: Automated Calculation using the new dynamic scheduler.
+     * 3. INITIAL SMART-DATE CALCULATION (v3.1)
+     * We pass the user-selected startDate as the baseDate.
+     * isInitial: true tells the scheduler to anchor to this date for Daily/Q/H/Y
+     * or scan forward from this date for Weekly/Monthly.
      */
-    let firstDueDate;
-    if (startDate) {
-      firstDueDate = new Date(startDate);
-      // Normalize to start of day (00:00) to ensure consistent grid sorting
-      firstDueDate.setHours(0, 0, 0, 0);
-    } else {
-      /**
-       * Utilizing the updated calculateNextDate (v2.5) 
-       * This now handles arrays like [1, 3, 5] for Mon/Wed/Fri automatically.
-       */
-      firstDueDate = calculateNextDate(
-        frequency, 
-        frequencyConfig || {}, 
-        tenant.holidays || []
-      );
-    }
+    const baseAnchorDate = startDate ? new Date(startDate) : new Date();
+    
+    const firstDueDate = calculateNextDate(
+      frequency, 
+      frequencyConfig || {}, 
+      tenant.holidays || [],
+      baseAnchorDate,
+      true // <--- CRITICAL: Identifies this as the protocol initiation
+    );
 
     /**
      * 4. INITIALIZE NEW CHECKLIST NODE
-     * All properties are mapped to support the high-density Excel grid view.
+     * Mapping for the Excel Grid View (Description/Department support).
      */
     const newChecklist = new ChecklistTask({
       tenantId,
@@ -579,16 +573,16 @@ exports.createChecklistTask = async (req, res) => {
       doerId,
       frequency,
       /**
-       * Storing the full config object to enable dynamic repeat logic 
-       * (e.g., repeating twice a week or every 3 days).
+       * Persisting the full config object to enable iterative repeat logic
+       * (e.g., repeating on the 1st, 15th, and 30th of every month).
        */
       frequencyConfig: frequencyConfig || {}, 
-      startDate: firstDueDate, 
-      nextDueDate: firstDueDate, 
+      startDate: baseAnchorDate, // Store the official initiation anchor
+      nextDueDate: firstDueDate,  // Set the first active mission date
       status: 'Active',
       history: [{
         action: "Checklist Created",
-        remarks: `Protocol initiated. First instance scheduled for ${firstDueDate.toLocaleDateString('en-IN')}`,
+        remarks: `Master directive initiated. First mission anchored for ${firstDueDate.toLocaleDateString('en-IN')}`,
         timestamp: new Date()
       }]
     });
@@ -596,7 +590,7 @@ exports.createChecklistTask = async (req, res) => {
     // 5. PERSIST TO REGISTRY
     await newChecklist.save();
 
-    console.log(`✅ [LEDGER] Created: ${taskName} | Frequency: ${frequency} | Next Due: ${firstDueDate.toDateString()}`);
+    console.log(`✅ [LEDGER] Directive Synchronized: ${taskName} | Frequency: ${frequency} | Start: ${firstDueDate.toDateString()}`);
 
     res.status(201).json({ 
       message: "Recurring Checklist Created Successfully", 
