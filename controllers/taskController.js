@@ -476,69 +476,142 @@ exports.getAllChecklists = async (req, res) => {
   }
 };
 exports.updateChecklistTask = async (req, res) => {
-    try {
-        const { id } = req.params;
-        const { taskName, doerId, status } = req.body;
+  try {
+      const { id } = req.params;
+      
+      /**
+       * 1. EXTRACT UPDATED FIELDS
+       * Added 'description' to the destructuring to ensure it is captured 
+       * from the high-density grid's edit mode.
+       */
+      const { taskName, description, doerId, status } = req.body;
 
-        const updatedTask = await ChecklistTask.findByIdAndUpdate(
-            id,
-            { $set: { taskName, doerId, status } },
-            { new: true }
-        ).populate('doerId', 'name');
+      /**
+       * 2. EXECUTE ATOMIC UPDATE
+       * We use $set to target specific fields, including the description.
+       * { new: true } ensures the response contains the modified record.
+       */
+      const updatedTask = await ChecklistTask.findByIdAndUpdate(
+          id,
+          { 
+              $set: { 
+                  taskName, 
+                  description: description || "", // FIXED: Now strictly included in updates
+                  doerId, 
+                  status 
+              } 
+          },
+          { new: true }
+      ).populate('doerId', 'name department'); // Populating department for the Excel view
 
-        if (!updatedTask) return res.status(404).json({ message: "Checklist not found" });
+      // 3. REGISTRY VERIFICATION
+      if (!updatedTask) {
+          return res.status(404).json({ message: "Checklist record not found in system registry" });
+      }
 
-        res.status(200).json({ 
-            message: "Checklist updated successfully!", 
-            task: updatedTask 
-        });
-    } catch (error) {
-        res.status(500).json({ message: "Update failed", error: error.message });
-    }
+      console.log(`✅ Record Updated: ${updatedTask.taskName}`);
+
+      // 4. SYNCHRONIZED RESPONSE
+      res.status(200).json({ 
+          message: "Checklist ledger record updated successfully!", 
+          task: updatedTask 
+      });
+
+  } catch (error) {
+      console.error("❌ Ledger Update Error:", error.message);
+      res.status(500).json({ 
+          message: "Action failed: Task update sequence error", 
+          error: error.message 
+      });
+  }
 };
 exports.createChecklistTask = async (req, res) => {
   try {
-    // FIX: Added 'startDate' to destructuring
-    const { tenantId, taskName, doerId, frequency, frequencyConfig, startDate } = req.body;
+    /**
+     * 1. EXTRACT DATA
+     * description: Captured for the high-density Excel grid.
+     * frequencyConfig: Now supports daysOfWeek: [], daysOfMonth: [], and intervalDays: Number.
+     */
+    const { 
+      tenantId, 
+      taskName, 
+      description, 
+      doerId, 
+      frequency, 
+      frequencyConfig, 
+      startDate 
+    } = req.body;
 
+    // 2. FETCH TENANT SETTINGS
     const tenant = await Tenant.findById(tenantId);
     if (!tenant) return res.status(404).json({ message: "Factory settings not found" });
 
-    // FIX: Logic to use user-defined start date or calculate immediately
+    /**
+     * 3. INITIAL DUE DATE CALCULATION
+     * Priority 1: User-defined startDate (Manual Entry).
+     * Priority 2: Automated Calculation using the new dynamic scheduler.
+     */
     let firstDueDate;
     if (startDate) {
       firstDueDate = new Date(startDate);
-      // Ensure it starts at the beginning of the day (e.g., 00:00)
+      // Normalize to start of day (00:00) to ensure consistent grid sorting
       firstDueDate.setHours(0, 0, 0, 0);
     } else {
+      /**
+       * Utilizing the updated calculateNextDate (v2.5) 
+       * This now handles arrays like [1, 3, 5] for Mon/Wed/Fri automatically.
+       */
       firstDueDate = calculateNextDate(
         frequency, 
-        frequencyConfig, 
+        frequencyConfig || {}, 
         tenant.holidays || []
       );
     }
 
+    /**
+     * 4. INITIALIZE NEW CHECKLIST NODE
+     * All properties are mapped to support the high-density Excel grid view.
+     */
     const newChecklist = new ChecklistTask({
       tenantId,
       taskName,
+      description: description || "", 
       doerId,
       frequency,
-      frequencyConfig,
-      startDate: firstDueDate, // Store the official start date
-      nextDueDate: firstDueDate, // Set the first occurrence
+      /**
+       * Storing the full config object to enable dynamic repeat logic 
+       * (e.g., repeating twice a week or every 3 days).
+       */
+      frequencyConfig: frequencyConfig || {}, 
+      startDate: firstDueDate, 
+      nextDueDate: firstDueDate, 
+      status: 'Active',
       history: [{
         action: "Checklist Created",
-        remarks: `Protocol initiated. First occurrence scheduled for ${firstDueDate.toLocaleDateString()}`,
+        remarks: `Protocol initiated. First instance scheduled for ${firstDueDate.toLocaleDateString('en-IN')}`,
         timestamp: new Date()
       }]
     });
   
-      await newChecklist.save();
-      res.status(201).json({ message: "Recurring Checklist Created", nextDue: firstDueDate });
-    } catch (error) {
-      res.status(500).json({ message: "Failed to create checklist", error: error.message });
-    }
-  };
+    // 5. PERSIST TO REGISTRY
+    await newChecklist.save();
+
+    console.log(`✅ [LEDGER] Created: ${taskName} | Frequency: ${frequency} | Next Due: ${firstDueDate.toDateString()}`);
+
+    res.status(201).json({ 
+      message: "Recurring Checklist Created Successfully", 
+      nextDue: firstDueDate,
+      taskId: newChecklist._id 
+    });
+
+  } catch (error) {
+    console.error("❌ [LEDGER ERROR]:", error.message);
+    res.status(500).json({ 
+      message: "Registry error: Failed to initiate checklist protocol", 
+      error: error.message 
+    });
+  }
+};
   // 1. Updated: Supervisor/Coordinator Force Done
 exports.coordinatorForceDone = async (req, res) => {
   try {
