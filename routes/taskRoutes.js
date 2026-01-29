@@ -43,6 +43,7 @@ router.delete('/employees/:id', deleteEmployee);
 router.put('/update-mapping', updateEmployeeMapping);
 router.put('/update-settings', updateSettings);
 router.put('/respond', taskController.respondToTask);
+router.post('/checklist-done', upload.single('evidence'), taskController.completeChecklistTask);
 /**
  * BRANDING UPDATE: Supports updating Company Name and Logo.
  * Middleware: upload.single('logo') matches the key used in Settings.jsx FormData.
