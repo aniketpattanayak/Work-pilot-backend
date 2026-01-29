@@ -369,11 +369,13 @@ exports.completeChecklistTask = async (req, res) => {
     if (targetDate.toDateString() === currentNextDue.toDateString()) {
         // They completed the current "nextDueDate" card, so advance the pointer
         task.nextDueDate = calculateNextDate(
-            task.frequency, 
-            task.frequencyConfig || {}, 
-            holidays,
-            new Date(targetDate) // Use the target date as the base for the next jump
-        );
+          task.frequency, 
+          task.frequencyConfig || {}, 
+          holidays,
+          new Date(targetDate),
+          false,
+          tenant.weekends || [0] // Pass weekends array
+      );
     }
     // CRITICAL: If targetDate is in the past (backlog), we DON'T advance nextDueDate
     // This ensures today's card remains visible even after completing yesterday's card
@@ -559,13 +561,11 @@ exports.createChecklistTask = async (req, res) => {
       frequencyConfig || {}, 
       tenant.holidays || [],
       baseAnchorDate,
-      true // <--- CRITICAL: Identifies this as the protocol initiation
+      true, 
+      tenant.weekends || [0]
     );
 
-    /**
-     * 4. INITIALIZE NEW CHECKLIST NODE
-     * Mapping for the Excel Grid View (Description/Department support).
-     */
+    
     const newChecklist = new ChecklistTask({
       tenantId,
       taskName,
@@ -1352,12 +1352,50 @@ exports.getChecklistTasks = async (req, res) => {
     const startOfToday = new Date();
     startOfToday.setHours(0, 0, 0, 0);
 
-    const employee = await Employee.findById(doerId);
-    if (!employee) return res.status(404).json({ message: "Employee not found" });
+    // 1. FETCH REQUESTER DATA
+    const requester = await Employee.findById(doerId);
+    if (!requester) return res.status(404).json({ message: "Employee not found" });
 
-    const tenant = await Tenant.findById(employee.tenantId);
+    const tenant = await Tenant.findById(requester.tenantId);
+    const holidays = tenant?.holidays || [];
+    const weekends = tenant?.weekends || [0];
 
-    const tasks = await ChecklistTask.find({ doerId, status: 'Active' });
+    /**
+     * 2. DEFINE TASK VISIBILITY LIST
+     */
+    let authorizedIdList = [];
+
+    // A. Verify if the requester themselves is currently on leave
+    const requesterIsOnLeave = 
+      requester.leaveStatus?.onLeave && 
+      new Date(requester.leaveStatus.startDate) <= now && 
+      new Date(requester.leaveStatus.endDate) >= startOfToday;
+
+    // If NOT on leave, they see their own tasks
+    if (!requesterIsOnLeave) {
+      authorizedIdList.push(doerId);
+    }
+
+    // B. Find anyone who has assigned THIS requester as their Buddy and is currently away
+    const staffOnLeave = await Employee.find({
+      'leaveStatus.buddyId': doerId,
+      'leaveStatus.onLeave': true,
+      'leaveStatus.startDate': { $lte: now },
+      'leaveStatus.endDate': { $gte: startOfToday }
+    }).select('_id name');
+
+    // Add those IDs to the list so their tasks flow to the Buddy's dashboard
+    const substitutedIds = staffOnLeave.map(s => s._id.toString());
+    authorizedIdList = [...authorizedIdList, ...substitutedIds];
+
+    /**
+     * 3. FETCH TASKS FOR ALL AUTHORIZED IDs
+     */
+    const tasks = await ChecklistTask.find({ 
+      doerId: { $in: authorizedIdList }, 
+      status: 'Active' 
+    }).populate('doerId', 'name');
+
     let allVisibleInstances = [];
 
     tasks.forEach((task) => {
@@ -1371,10 +1409,9 @@ exports.getChecklistTasks = async (req, res) => {
         loopCount++;
         const dateStr = instancePointer.toDateString();
         
-        // Check if this specific date was already completed
+        // Check if this specific date instance was already completed
         const alreadyDone = task.history && task.history.some(h => {
           if (h.action !== "Completed" && h.action !== "Administrative Completion") return false;
-          
           const historyDate = new Date(h.instanceDate || h.timestamp);
           historyDate.setHours(0, 0, 0, 0);
           return historyDate.toDateString() === dateStr;
@@ -1383,42 +1420,50 @@ exports.getChecklistTasks = async (req, res) => {
         if (!alreadyDone) {
           const isBacklog = instancePointer < startOfToday;
           
+          /**
+           * 4. SUBSTITUTION TAGGING
+           * Flag tasks that belong to the person on leave so the Buddy knows
+           * who they are covering for.
+           */
+          const isBuddySubstitution = task.doerId._id.toString() !== doerId;
+
           allVisibleInstances.push({
             ...task.toObject(),
             instanceDate: new Date(instancePointer),
-            isBacklog: isBacklog
+            isBacklog: isBacklog,
+            isBuddyTask: isBuddySubstitution,
+            originalOwnerName: isBuddySubstitution ? task.doerId.name : null
           });
         }
 
-        // Advance pointer
-        if (task.frequency === 'Daily') {
-          instancePointer.setDate(instancePointer.getDate() + 1);
-        } else if (task.frequency === 'Weekly') {
-          instancePointer.setDate(instancePointer.getDate() + 7);
-        } else {
-          const nextVal = calculateNextDate(
-            task.frequency, 
-            task.frequencyConfig || {}, 
-            tenant?.holidays || [],
-            new Date(instancePointer) 
-          );
-          
-          if (!nextVal || nextVal <= instancePointer) break;
-          instancePointer = new Date(nextVal);
-        }
+        /**
+         * 5. SMART POINTER ADVANCEMENT
+         * Respects factory-defined weekends and holidays during generation.
+         */
+        const nextVal = calculateNextDate(
+          task.frequency, 
+          task.frequencyConfig || {}, 
+          holidays,
+          new Date(instancePointer),
+          false, 
+          weekends 
+        );
         
+        if (!nextVal || nextVal <= instancePointer) break;
+        
+        instancePointer = new Date(nextVal);
         instancePointer.setHours(0, 0, 0, 0);
       }
     });
 
-    // Sort chronologically
+    // Final sorting: Oldest backlog items appear at the top
     const sorted = allVisibleInstances.sort((a, b) => a.instanceDate - b.instanceDate);
     
     res.status(200).json(sorted);
     
   } catch (error) {
-    console.error("❌ Checklist fetch error:", error);
-    res.status(500).json({ message: "Multi-card generation failed", error: error.message });
+    console.error("❌ Checklist Routing Error:", error);
+    res.status(500).json({ message: "Multi-card buddy generation failed", error: error.message });
   }
 };
 
@@ -1481,3 +1526,113 @@ exports.debugChecklistCards = async (req, res) => {
     res.status(500).json({ error: error.message });
   }
 };
+exports.getReviewAnalytics = async (req, res) => {
+  try {
+    const { tenantId } = req.params;
+    const { view = 'Weekly', date = new Date() } = req.query;
+    
+    const now = new Date();
+    const referenceDate = new Date(date);
+    let startDate = new Date(referenceDate);
+    let endDate = new Date(referenceDate);
+
+    // 1. TIMELINE BOUNDARIES
+    if (view === 'Daily') {
+      startDate.setHours(0, 0, 0, 0);
+      endDate.setHours(23, 59, 59, 999);
+    } else if (view === 'Weekly') {
+      const day = startDate.getDay();
+      const diff = startDate.getDate() - day + (day === 0 ? -6 : 1); 
+      startDate.setDate(diff);
+      startDate.setHours(0, 0, 0, 0);
+      endDate = new Date(startDate);
+      endDate.setDate(startDate.getDate() + 6);
+      endDate.setHours(23, 59, 59, 999);
+    } else {
+      startDate.setDate(1); 
+      startDate.setHours(0, 0, 0, 0);
+      endDate = new Date(startDate.getFullYear(), startDate.getMonth() + 1, 0);
+      endDate.setHours(23, 59, 59, 999);
+    }
+
+    const [employees, delegations, checklists] = await Promise.all([
+      Employee.find({ tenantId }).select('name department'),
+      DelegationTask.find({ tenantId, deadline: { $gte: startDate, $lte: endDate } }),
+      ChecklistTask.find({ tenantId, status: 'Active' })
+    ]);
+
+    const report = employees.map(emp => {
+      const stats = {
+        employeeName: emp.name,
+        department: emp.department,
+        delegation: { total: 0, done: 0, overdue: 0, late: 0, notDone: 0 },
+        checklist: { total: 0, done: 0, overdue: 0, late: 0, notDone: 0 }
+      };
+
+      // 2. DELEGATION PROCESSING
+      const empDelegations = delegations.filter(t => t.doerId && t.doerId.toString() === emp._id.toString());
+      empDelegations.forEach(t => {
+        stats.delegation.total++;
+        const doneRecord = t.history.find(h => h.action === 'Completed' || h.action === 'Verified');
+        
+        if (doneRecord) {
+          stats.delegation.done++;
+          // If the work was finished but AFTER the deadline, it's Late
+          if (new Date(doneRecord.timestamp) > new Date(t.deadline)) {
+            stats.delegation.late++;
+          }
+        } else {
+          stats.delegation.notDone++;
+          // If it's not done and today is past the deadline, it's Overdue
+          if (new Date(t.deadline) < now) {
+            stats.delegation.overdue++;
+          }
+        }
+      });
+
+      // 3. CHECKLIST PROCESSING (Daily/Weekly frequency logic)
+      const empChecklists = checklists.filter(t => t.doerId && t.doerId.toString() === emp._id.toString());
+      empChecklists.forEach(t => {
+        let expected = 0;
+        if (t.frequency === 'Daily') expected = view === 'Weekly' ? 7 : (view === 'Daily' ? 1 : 30);
+        else if (t.frequency === 'Weekly') expected = view === 'Monthly' ? 4 : 1;
+        else expected = 1;
+
+        const rangeCompletions = t.history.filter(h => 
+          (h.action === 'Completed' || h.action === 'Administrative Completion') &&
+          new Date(h.timestamp) >= startDate && new Date(h.timestamp) <= endDate
+        );
+
+        stats.checklist.total += expected;
+        stats.checklist.done += rangeCompletions.length;
+        
+        // Calculate work not done
+        let missedCount = Math.max(0, expected - rangeCompletions.length);
+        stats.checklist.notDone += missedCount;
+
+        // CHECKLIST OVERDUE & LATE LOGIC
+        rangeCompletions.forEach(h => {
+           const instanceDueDate = new Date(h.instanceDate || h.timestamp);
+           // If the submission happened on a day later than the instance's intended date
+           if (new Date(h.timestamp).toDateString() !== instanceDueDate.toDateString() && new Date(h.timestamp) > instanceDueDate) {
+              stats.checklist.late++;
+           }
+        });
+
+        // Current instances missed that are already in the past
+        const effectiveEndDate = endDate < now ? endDate : now;
+        if (missedCount > 0 && effectiveEndDate >= startDate) {
+           stats.checklist.overdue += missedCount;
+        }
+      });
+
+      return stats;
+    });
+
+    res.status(200).json({ view, startDate, endDate, report });
+  } catch (error) {
+    console.error("Analytics Calculation Error:", error);
+    res.status(500).json({ message: "Analytics calculation failed" });
+  }
+};
+

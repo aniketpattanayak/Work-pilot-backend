@@ -163,7 +163,15 @@ exports.getCompanyOverview = async (req, res) => {
 exports.updateSettings = async (req, res) => {
   try {
     // 1. Destructure all fields from the request body to ensure they are captured
-    const { tenantId, pointSettings, officeHours, holidays, badgeLibrary } = req.body;
+    // UPDATED: Added 'weekends' to capture the Sun-Sat array
+    const { 
+      tenantId, 
+      pointSettings, 
+      officeHours, 
+      holidays, 
+      badgeLibrary,
+      weekends 
+    } = req.body;
     
     // 2. Update the Tenant document in MongoDB
     // The { new: true } option is CRITICAL so it returns the SAVED data
@@ -174,7 +182,8 @@ exports.updateSettings = async (req, res) => {
           badgeLibrary,   // Saved from Phase 6.2
           pointSettings,  // Saved from Phase 2
           officeHours,    // Foundation Setup
-          holidays        // Foundation Setup
+          holidays,       // Foundation Setup
+          weekends        // NEW: Persisting the custom weekend array
         } 
       },
       { new: true, runValidators: true }
@@ -188,7 +197,7 @@ exports.updateSettings = async (req, res) => {
     // 4. Return the updated document wrapped in a response object
     // This allows the frontend to access response.data.updatedTenant
     res.status(200).json({ 
-      message: "Settings saved successfully", 
+      message: "Global parameters synchronized successfully", 
       updatedTenant 
     });
     

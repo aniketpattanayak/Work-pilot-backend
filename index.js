@@ -5,13 +5,13 @@ require('dotenv').config();
 
 // 1. Import Route Files
 const ticketRoutes = require('./routes/ticketRoutes');
-const tenantRoutes = require('./routes/tenantRoutes');
+// UPDATED: Points to taskRoutes.js where your review analytics route is defined
+const taskRoutes = require('./routes/taskRoutes'); 
 
 // 2. Initialize Express App FIRST
-// This fixes the "ReferenceError: Cannot access 'app' before initialization"
 const app = express();
 
-// --- UPDATED CORS CONFIGURATION (Preserved) ---
+// --- CORS CONFIGURATION (Preserved) ---
 app.use(cors({
   origin: [
     "http://localhost:5173", 
@@ -36,9 +36,13 @@ app.use(express.json());
 app.use('/api/tickets', ticketRoutes); // Support Ticketing System
 
 // Multi-tenant and Task Routes
-// Matches VITE_API_URL=https://api.lrbcloud.ai/api
-app.use('/api/superadmin', tenantRoutes);
-app.use('/api/tasks', tenantRoutes); 
+/**
+ * ROUTE CORRECTION:
+ * Both /superadmin and /tasks prefixes are now directed to taskRoutes.js.
+ * This ensures the '/review-analytics' endpoint is correctly found.
+ */
+app.use('/api/superadmin', taskRoutes);
+app.use('/api/tasks', taskRoutes); 
 
 // Debugging Middleware: Catch 404s (Preserved)
 app.use((req, res) => {

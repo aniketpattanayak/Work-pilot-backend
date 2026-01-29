@@ -1,27 +1,34 @@
 const moment = require('moment');
 
 /**
- * SCHEDULER v3.2
+ * SCHEDULER v3.3
  * Purpose: Industrial-grade task scheduling with multi-day support.
- * FIXED: Look-ahead scan for Weekly/Monthly start dates.
+ * UPDATED: Replaced hardcoded Sunday with dynamic admin-defined weekends.
  * * Logic Highlights:
  * 1. Initial Scan: If isInitial is true, it checks if the baseDate matches your selection.
  * 2. Iterative Discovery: Walks forward day-by-day until a match is found in authorized arrays.
- * 3. Factory Guard: Skips Sundays/Holidays and re-verifies day selection after the skip.
+ * 3. Factory Guard: Skips Holidays and Admin-defined Weekends, re-verifying day selection after the skip.
+ * * @param {String} frequency - Daily, Weekly, Monthly, Quarterly, Half-Yearly, Yearly, Interval
+ * @param {Object} config - { daysOfWeek: [], daysOfMonth: [], intervalDays: Number }
+ * @param {Array} holidays - [{date: Date}]
+ * @param {Date} baseDate - The user-selected Start Date or Last Completed Date
+ * @param {Boolean} isInitial - Identifies if this is the very first time calculating
+ * @param {Array} weekends - Array of day indexes [0, 6] defined in Tenant Settings (Default [0] for Sunday)
  */
-exports.calculateNextDate = (frequency, config = {}, holidays = [], baseDate = new Date(), isInitial = false) => {
+exports.calculateNextDate = (frequency, config = {}, holidays = [], baseDate = new Date(), isInitial = false, weekends = [0]) => {
   // Normalize date to start of day to prevent timing drift
   let nextDate = moment(baseDate).startOf('day'); 
   
   /**
-   * FACTORY GUARD CHECK
-   * Returns true if the day is a Sunday or in the holiday registry.
+   * FACTORY GUARD CHECK (v3.3)
+   * Returns true if the day is a Weekend (defined by Admin) or in the Holiday registry.
    */
-  const isHolidayOrSunday = (date) => {
+  const isNonWorkingDay = (date) => {
     const dateStr = date.format('YYYY-MM-DD');
     const isRegisteredHoliday = holidays.some(h => moment(h.date).format('YYYY-MM-DD') === dateStr);
-    const isSunday = date.day() === 0; 
-    return isRegisteredHoliday || isSunday;
+    // Dynamic weekend check: Checks if current day index (0-6) exists in the admin weekends array
+    const isWeekend = weekends.includes(date.day()); 
+    return isRegisteredHoliday || isWeekend;
   };
 
   // 1. PRIMARY FREQUENCY ENGINE
@@ -29,7 +36,7 @@ exports.calculateNextDate = (frequency, config = {}, holidays = [], baseDate = n
     case 'Daily':
       /**
        * DAILY ANCHOR: 
-       * If initial setup, use Start Date. Otherwise, add 1 day.
+       * If initial setup, use Start Date as base. Otherwise, add 1 day.
        */
       if (!isInitial) {
         nextDate.add(1, 'days');
@@ -38,7 +45,7 @@ exports.calculateNextDate = (frequency, config = {}, holidays = [], baseDate = n
 
     case 'Weekly':
       /**
-       * SMART WEEKLY SCAN (v3.2)
+       * SMART WEEKLY SCAN
        * Logic: If not initial, move to next day first. 
        * Then, while current day is NOT in authorized list (Mon, Tue, etc.), move to next day.
        */
@@ -58,7 +65,7 @@ exports.calculateNextDate = (frequency, config = {}, holidays = [], baseDate = n
 
     case 'Monthly':
       /**
-       * SMART MONTHLY SCAN (v3.2)
+       * SMART MONTHLY SCAN
        * Logic: Scans for the next valid date (e.g., 1st, 15th) on or after baseDate.
        */
       const allowedMonthDates = Array.isArray(config.daysOfMonth) && config.daysOfMonth.length > 0 
@@ -104,16 +111,16 @@ exports.calculateNextDate = (frequency, config = {}, holidays = [], baseDate = n
       if (!isInitial) nextDate.add(1, 'days');
   }
 
-  // 2. HOLIDAY & SUNDAY SKIP LOOP (RE-VALIDATED)
+  // 2. HOLIDAY & WEEKEND SKIP LOOP (RE-VALIDATED)
   /**
-   * Final validation: If the landing date is a Sunday or Holiday, we move forward.
-   * If it's a Weekly/Monthly task, we must continue "walking" until we hit 
-   * BOTH an authorized day AND a valid factory working day.
+   * Final validation: If the landing date is a Weekend or Holiday, we move forward.
+   * We continue "walking" until we hit BOTH an authorized day (for Weekly/Monthly)
+   * AND a valid factory working day (Not a holiday/weekend).
    */
-  while (isHolidayOrSunday(nextDate)) {
+  while (isNonWorkingDay(nextDate)) {
     nextDate.add(1, 'days');
 
-    // For Weekly/Monthly, ensure we don't land on an unauthorized day after skipping a holiday
+    // For Weekly/Monthly, ensure we don't land on an unauthorized day after skipping a non-working day
     if (frequency === 'Weekly') {
       const allowedWeekDays = Array.isArray(config.daysOfWeek) && config.daysOfWeek.length > 0 
         ? config.daysOfWeek : [1];

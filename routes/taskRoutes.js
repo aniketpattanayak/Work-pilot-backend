@@ -27,6 +27,9 @@ router.post('/create-company', upload.single('logo'), createTenant);
 router.get('/all-companies', getAllCompanies);
 router.delete('/company/:id', deleteCompany);
 router.delete('/checklist/:id', taskController.deleteChecklistTask);
+router.get('/checklist-all/:tenantId', taskController.getAllChecklists);
+
+router.get('/review-analytics/:tenantId', taskController.getReviewAnalytics);
 // --- EMPLOYEE MANAGEMENT ROUTES ---
 router.get('/employees/:tenantId', getEmployeeList);
 router.post('/add-employee', addEmployee);

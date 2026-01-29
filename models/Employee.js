@@ -8,28 +8,44 @@ const EmployeeSchema = new mongoose.Schema({
   email: { type: String, required: true },
   password: { type: String, required: true },
   
-  // UPDATED: Changed from 'role: String' to 'roles: [String]'
+  // Array of roles for multi-permission access
   roles: { 
     type: [String], 
     enum: ['Assigner', 'Doer', 'Coordinator', 'Viewer', 'Admin']
   },
+
+  /**
+   * BUDDY CONFIGURATION (LEAVE SUBSTITUTION)
+   * Purpose: Automatically reroute Checklist tasks when a staff member is away.
+   */
+  leaveStatus: {
+    onLeave: { type: Boolean, default: false },
+    startDate: { type: Date },
+    endDate: { type: Date },
+    buddyId: { type: mongoose.Schema.Types.ObjectId, ref: 'Employee' } 
+  },
+
+  // Gamification: Earned badges denormalized for UI speed
   earnedBadges: [
     {
       badgeId: { type: mongoose.Schema.Types.ObjectId, ref: 'Tenant.badgeLibrary' },
-      name: String,        // Denormalized for faster UI rendering
-      iconName: String,    // Denormalized for faster UI rendering
+      name: String,        
+      iconName: String,    
       color: String,
       unlockedAt: { type: Date, default: Date.now }
     }
   ],
   
+  // Hierarchical Mapping
   managedDoers: [{ type: mongoose.Schema.Types.ObjectId, ref: 'Employee' }],
   managedAssigners: [{ type: mongoose.Schema.Types.ObjectId, ref: 'Employee' }],
-  // Add this field to your EmployeeSchema
+  
+  // Performance Engine
   totalPoints: { 
     type: Number, 
     default: 0 
-},
+  },
+  
   createdAt: { type: Date, default: Date.now }
 });
 
