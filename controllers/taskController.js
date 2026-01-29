@@ -764,62 +764,75 @@ exports.sendWhatsAppReminder = async (req, res) => {
 
 // server/controllers/taskController.js
 
+// server/controllers/taskController.js
+
 exports.getCoordinatorTasks = async (req, res) => {
   try {
     const { coordinatorId } = req.params;
 
-    // 1. Find the Coordinator to identify managed staff (the "flock")
+    // 1. Find the Coordinator
     const coordinator = await Employee.findById(coordinatorId);
     if (!coordinator) return res.status(404).json({ message: "Coordinator not found" });
 
-    // 2. Identify the list of staff IDs this coordinator is authorized to monitor
-    const monitoredStaffIds = coordinator.managedAssigners || [];
+    let delegationQuery = {};
+    let checklistQuery = {};
 
-    /**
-     * 3. UNIFIED DATA ACQUISITION:
-     * Fetch tasks where monitored staff are either the ASSIGNER OR the DOER.
-     * This ensures tasks like Murthy's (where he is the Doer) are captured.
-     */
-    const [delegationTasks, checklistTasks] = await Promise.all([
-      DelegationTask.find({ 
+    // 2. CRITICAL LOGIC: If Admin, bypass mapping and show everything for the factory
+    if (coordinator.roles.includes('Admin')) {
+      delegationQuery = { tenantId: coordinator.tenantId };
+      checklistQuery = { tenantId: coordinator.tenantId };
+    } else {
+      // For standard Coordinators, use the mapped staff
+      const monitoredStaffIds = coordinator.managedAssigners || [];
+      
+      // If no mapping exists for a non-admin, return empty array immediately
+      if (monitoredStaffIds.length === 0) {
+        return res.status(200).json([]);
+      }
+
+      delegationQuery = { 
         $or: [
           { assignerId: { $in: monitoredStaffIds } },
           { doerId: { $in: monitoredStaffIds } }
         ]
-      })
-      .populate('assignerId', 'name role')
-      .populate('doerId', 'name role whatsappNumber')
-      .lean(),
+      };
+      checklistQuery = { doerId: { $in: monitoredStaffIds } };
+    }
 
-      ChecklistTask.find({ 
-        doerId: { $in: monitoredStaffIds } 
-      })
-      .populate('doerId', 'name department whatsappNumber')
-      .lean()
+    // 3. Parallel Fetch
+    const [delegationTasks, checklistTasks] = await Promise.all([
+      DelegationTask.find(delegationQuery)
+        .populate('assignerId', 'name role')
+        .populate('doerId', 'name role whatsappNumber')
+        .lean(),
+
+      ChecklistTask.find(checklistQuery)
+        .populate('doerId', 'name department whatsappNumber')
+        .lean()
     ]);
 
-    // 4. Normalization: Tagging and mapping fields for UI consistency
-    const normalizedChecklists = checklistTasks.map(t => ({
+    // 4. Normalization (Ensures frontend doesn't crash)
+    const normalizedChecklists = (checklistTasks || []).map(t => ({
       ...t,
-      title: t.taskName, // Standardize taskName to title for the frontend table
-      deadline: t.nextDueDate, // Standardize nextDueDate to deadline for the frontend table
+      title: t.taskName || "Untitled Checklist",
+      deadline: t.nextDueDate || new Date(),
       taskType: 'Checklist'
     }));
 
-    const normalizedDelegations = delegationTasks.map(t => ({
+    const normalizedDelegations = (delegationTasks || []).map(t => ({
       ...t,
       taskType: 'Delegation'
     }));
 
-    // 5. Merge and Chronological Sort (Closest deadlines first)
+    // 5. Merge and Sort
     const allTasks = [...normalizedDelegations, ...normalizedChecklists].sort(
       (a, b) => new Date(a.deadline) - new Date(b.deadline)
     );
 
     res.status(200).json(allTasks);
   } catch (error) {
-    console.error("Coordinator Unified Fetch Error:", error.message);
-    res.status(500).json({ message: "Error fetching tracking data", error: error.message });
+    console.error("❌ Coordinator Dashboard Crash:", error.message);
+    res.status(500).json({ message: "Internal Server Error", error: error.message });
   }
 };
 

@@ -42,6 +42,7 @@ router.get('/authorized-staff/:id', taskController.getAuthorizedStaff);
 // --- MAPPING, BRANDING & SETTINGS ---
 router.put('/update-mapping', updateEmployeeMapping);
 router.put('/update-settings', updateSettings);
+router.get('/coordinator/:coordinatorId', taskController.getCoordinatorTasks);
 router.post('/create-checklist', taskController.createChecklistTask);
 router.put('/respond', upload.single('evidence'), taskController.respondToTask);
 router.post('/checklist-done', upload.single('evidence'), taskController.completeChecklistTask);
