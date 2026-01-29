@@ -38,11 +38,12 @@ router.get('/employees/:tenantId', getEmployeeList);
 router.post('/add-employee', addEmployee);
 router.put('/employees/:id', updateEmployee);
 router.delete('/employees/:id', deleteEmployee);
-
+router.get('/authorized-staff/:id', taskController.getAuthorizedStaff);
 // --- MAPPING, BRANDING & SETTINGS ---
 router.put('/update-mapping', updateEmployeeMapping);
 router.put('/update-settings', updateSettings);
-router.put('/respond', taskController.respondToTask);
+router.post('/create-checklist', taskController.createChecklistTask);
+router.put('/respond', upload.single('evidence'), taskController.respondToTask);
 router.post('/checklist-done', upload.single('evidence'), taskController.completeChecklistTask);
 /**
  * BRANDING UPDATE: Supports updating Company Name and Logo.
@@ -52,7 +53,22 @@ router.put('/update-branding', upload.single('logo'), updateBranding);
 
 router.put('/assign-coordinator', assignToCoordinator);
 router.get('/company-overview/:tenantId', getCompanyOverview);
+// --- DELEGATION PROTOCOLS ---
+router.post('/create-task', upload.array('files'), taskController.createTask);
+router.delete('/task/:taskId', taskController.deleteTask);
+router.post('/handle-revision', taskController.handleRevision);
 
+// --- ANALYTICS & SCOREBOARDS ---
+router.get('/employee-score/:employeeId', taskController.getEmployeeScore);
+router.get('/global-performance/:tenantId', taskController.getGlobalPerformance);
+
+// --- TRACKING & SUPERVISION ---
+router.get('/coordinator-tasks/:coordinatorId', taskController.getCoordinatorTasks);
+router.put('/coordinator-force-done', taskController.coordinatorForceDone);
+router.post('/send-reminder', taskController.sendWhatsAppReminder);
+
+// --- CHECKLIST MAINTENANCE ---
+router.put('/checklist/:id', taskController.updateChecklistTask);
 // Fetch settings logic
 router.get('/settings/:tenantId', async (req, res) => {
     try {

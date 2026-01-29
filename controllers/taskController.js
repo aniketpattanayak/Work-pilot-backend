@@ -923,196 +923,143 @@ exports.getCoordinatorTasks = async (req, res) => {
 
 exports.respondToTask = async (req, res) => {
   try {
-    // 1. Safety check for incoming data
-    if (!req.body || Object.keys(req.body).length === 0) {
-      return res.status(400).json({ message: "Data not received properly." });
-    }
-
-    const { taskId, status, revisedDeadline, remarks, doerId } = req.body;
+    // 1. SAFE DATA EXTRACTION
+    // Safe extraction to prevent "Cannot destructure" error if body is delayed
+    const body = req.body || {};
+    const { taskId, status, revisedDeadline, remarks, doerId } = body;
     
-    /**
-     * CRITICAL: Populate all related parties to get names and WhatsApp numbers.
-     * We populate assignerId, doerId, and coordinatorId.
-     */
-    const task = await DelegationTask.findById(taskId)
-      .populate('assignerId doerId coordinatorId');
-      
-    if (!task) return res.status(404).json({ message: "Task not found" });
+    // DEBUG LOGGING
+    console.log("Incoming Respond Request:", { 
+      taskId, 
+      status, 
+      hasFile: !!req.file,
+      bodyKeys: Object.keys(body) 
+    });
 
-    // 2. Handle Evidence Files (S3 or local)
-    let evidenceUrl = null;
-    if (req.file) {
-      evidenceUrl = req.file.location || req.file.path; 
+    if (!taskId) {
+      return res.status(400).json({ 
+        message: "Protocol Error: Task ID is missing. Ensure fields are sent before files in FormData." 
+      });
     }
 
-    // --- PRESERVE: POINT & ACHIEVEMENT ENGINE (Logic strictly kept) ---
-    if (status === 'Completed' || status === 'Verified') {
-      const Tenant = require('../models/Tenant'); 
-      const Employee = require('../models/Employee');
-      
-      const tenant = await Tenant.findById(task.tenantId);
-      const employee = await Employee.findById(task.doerId);
-      
-      if (tenant && tenant.pointSettings?.isActive && employee && tenant.pointSettings.brackets.length > 0) {
-        const settings = tenant.pointSettings;
-        const totalDurationMs = new Date(task.deadline) - new Date(task.createdAt);
-        const totalDurationDays = totalDurationMs / (1000 * 60 * 60 * 24);
-        const sortedBrackets = [...settings.brackets].sort((a, b) => a.maxDurationDays - b.maxDurationDays);
-        const bracket = sortedBrackets.find(b => totalDurationDays <= b.maxDurationDays) || sortedBrackets[sortedBrackets.length - 1];
+    const task = await DelegationTask.findById(taskId).populate('assignerId doerId coordinatorId');
+    if (!task) return res.status(404).json({ message: "Task node not found." });
 
-        if (bracket) {
-          const completionDate = new Date();
-          const deltaMs = new Date(task.deadline) - completionDate;
-          const deltaHours = deltaMs / (1000 * 60 * 60);
-          let pointsAwarded = 0;
-          const unitMultiplier = bracket.pointsUnit === 'day' ? 24 : 1;
+    // Handle Evidence Files (S3 or Local)
+    let evidenceUrl = req.file ? (req.file.location || req.file.path) : null;
 
-          if (deltaHours > 0) {
-            pointsAwarded = Math.floor((deltaHours / unitMultiplier) * bracket.earlyBonus);
-          } else if (deltaHours < 0) {
-            pointsAwarded = -Math.floor((Math.abs(deltaHours) / unitMultiplier) * bracket.latePenalty);
-          }
+    // --- POINTS & ACHIEVEMENT ENGINE (Wrapped for Stability) ---
+    try {
+      if (status === 'Completed' || status === 'Verified') {
+        const TenantModel = mongoose.model('Tenant');
+        const EmployeeModel = mongoose.model('Employee');
+        
+        const tenant = await TenantModel.findById(task.tenantId);
+        const employee = await EmployeeModel.findById(task.doerId);
+        
+        if (tenant?.pointSettings?.isActive && employee && tenant.pointSettings.brackets?.length > 0) {
+          const settings = tenant.pointSettings;
+          const totalDurationMs = new Date(task.deadline) - new Date(task.createdAt);
+          const totalDurationDays = totalDurationMs / (1000 * 60 * 60 * 24);
+          
+          const sortedBrackets = [...settings.brackets].sort((a, b) => a.maxDurationDays - b.maxDurationDays);
+          const bracket = sortedBrackets.find(b => totalDurationDays <= b.maxDurationDays) || sortedBrackets[sortedBrackets.length - 1];
 
-          employee.totalPoints = (employee.totalPoints || 0) + pointsAwarded;
+          if (bracket) {
+            const completionDate = new Date();
+            const deltaMs = new Date(task.deadline) - completionDate;
+            const deltaHours = deltaMs / (1000 * 60 * 60);
+            let pointsAwarded = 0;
+            const unitMultiplier = bracket.pointsUnit === 'day' ? 24 : 1;
 
-          if (tenant.badgeLibrary && tenant.badgeLibrary.length > 0) {
-            tenant.badgeLibrary.forEach(badge => {
-              const alreadyEarned = employee.earnedBadges.some(eb => eb.badgeId?.toString() === badge._id.toString());
-              if (employee.totalPoints >= badge.pointThreshold && !alreadyEarned) {
-                employee.earnedBadges.push({
-                  badgeId: badge._id, name: badge.name, iconName: badge.iconName,
-                  color: badge.color, unlockedAt: new Date()
-                });
-                task.history.push({
-                  action: 'Achievement Unlocked', performedBy: task.doerId,
-                  timestamp: new Date(), remarks: `🏆 New Badge: ${badge.name}!`
-                });
-              }
+            if (deltaHours > 0) {
+              pointsAwarded = Math.floor((deltaHours / unitMultiplier) * bracket.earlyBonus);
+            } else if (deltaHours < 0) {
+              pointsAwarded = -Math.floor((Math.abs(deltaHours) / unitMultiplier) * bracket.latePenalty);
+            }
+
+            employee.totalPoints = (employee.totalPoints || 0) + pointsAwarded;
+
+            // Badge Processing Logic
+            if (tenant.badgeLibrary && tenant.badgeLibrary.length > 0) {
+              tenant.badgeLibrary.forEach(badge => {
+                const alreadyEarned = employee.earnedBadges?.some(eb => eb.badgeId?.toString() === badge._id.toString());
+                if (employee.totalPoints >= badge.pointThreshold && !alreadyEarned) {
+                  employee.earnedBadges.push({
+                    badgeId: badge._id, name: badge.name, iconName: badge.iconName,
+                    color: badge.color, unlockedAt: new Date()
+                  });
+                }
+              });
+            }
+            await employee.save(); 
+
+            // Assigner Reward (10% kickback)
+            if (pointsAwarded > 0 && task.assignerId) {
+              await EmployeeModel.findByIdAndUpdate(task.assignerId, { 
+                $inc: { totalPoints: Math.max(5, Math.floor(pointsAwarded * 0.1)) } 
+              });
+            }
+
+            task.history.push({
+              action: 'Points Calculated', 
+              performedBy: doerId || task.doerId,
+              timestamp: new Date(), 
+              remarks: `Points: ${pointsAwarded > 0 ? '+' : ''}${pointsAwarded}`
             });
           }
-          await employee.save(); 
-
-          if (pointsAwarded > 0) {
-            await Employee.findByIdAndUpdate(task.assignerId, { $inc: { totalPoints: Math.max(5, Math.floor(pointsAwarded * 0.1)) } });
-          }
-
-          task.history.push({
-            action: 'Points Calculated', performedBy: doerId,
-            timestamp: new Date(), remarks: `Points: ${pointsAwarded > 0 ? '+' : ''}${pointsAwarded}`
-          });
         }
       }
+    } catch (pointErr) {
+      console.error("⚠️ Non-fatal Points Engine Error:", pointErr.message);
     }
 
-    // 3. Update Task Status and History
+    // 3. UPDATE TASK STATE & AUDIT LOG
     task.status = status;
     if (status === 'Revision Requested') {
       task.remarks = `New Date: ${revisedDeadline}. Reason: ${remarks}`;
     } else if (status === 'Completed') {
-      task.remarks = remarks || "Work finished and submitted.";
+      task.remarks = remarks || "Work completed.";
     }
-
-    const historyEntry = {
-      action: status,
-      performedBy: doerId,
-      timestamp: new Date(),
-      remarks: remarks || `Status changed to ${status}`
-    };
 
     if (evidenceUrl) {
-      task.files.push({ fileName: `Work Proof: ${req.file.originalname}`, fileUrl: evidenceUrl, uploadedAt: new Date() });
+      task.files.push({ 
+        fileName: `Proof: ${req.file.originalname}`, 
+        fileUrl: evidenceUrl, 
+        uploadedAt: new Date() 
+      });
     }
-    task.history.push(historyEntry);
+
+    task.history.push({
+      action: status,
+      performedBy: doerId || task.doerId,
+      timestamp: new Date(),
+      remarks: remarks || `Task state synchronized to ${status}`
+    });
 
     await task.save();
 
-    // --- UPDATED: WHATSAPP NOTIFICATIONS FOR ALL PARTIES ---
+    // --- WHATSAPP NOTIFICATIONS (Wrapped for Stability) ---
     try {
-      const tenant = await Tenant.findById(task.tenantId);
-      
-      // Generate Dynamic Subdomain URL
+      const TenantModel = mongoose.model('Tenant');
+      const tenant = await TenantModel.findById(task.tenantId);
       const companySubdomain = tenant?.subdomain || "portal"; 
       const loginLink = `https://${companySubdomain}.lrbcloud.ai/login`;
 
-      const formattedDeadline = new Date(task.deadline).toLocaleDateString('en-IN', {
-        day: '2-digit', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit'
-      });
+      const fullTaskDetails = `\n\n*Task:* ${task.title}\n*Status:* ${status}\n*Personnel:* ${task.doerId?.name}\n\n*View Ledger:* ${loginLink}`;
 
-      // Find Support Team members
-      const helperIds = Array.isArray(task.helperDoers) ? task.helperDoers.map(h => h.helperId) : [];
-      const helpers = helperIds.length > 0 ? await Employee.find({ _id: { $in: helperIds } }) : [];
-      const helperNames = helpers.map(h => h.name).join(", ") || "None";
-
-      // Documentation links from original task files
-      const fileLinks = task.files.length > 0 
-        ? task.files.map((f, i) => `\n📎 Ref ${i+1}: ${f.fileUrl}`).join("") 
-        : "\nNo attachments.";
-
-      // Unified Task Detail Block
-      const fullTaskDetails = `\n\n` +
-        `*Task Title:* ${task.title}\n` +
-        `*Description:* ${task.description || "No notes."}\n` +
-        `*Given By:* ${task.assignerId?.name || 'Admin'}\n` +
-        `*Primary Doer:* ${task.doerId?.name || 'Staff'}\n` +
-        `*Coordinator:* ${task.coordinatorId?.name || 'Self-Track'}\n` +
-        `*Support Team:* ${helperNames}\n` +
-        `*Expected Completion:* ${formattedDeadline}\n` +
-        `*Urgency Level:* ${task.priority}\n` +
-        `*References:* ${fileLinks}\n\n` +
-        `*Check Status:* ${loginLink}`;
-
-      // --- DEFINE MESSAGES BASED ON STATUS ---
-      let header = "";
-      let footer = "";
-
-      if (status === 'Completed') {
-        header = `✅ *Work Submitted*`;
-        footer = `The work has been sent for verification.`;
-      } else if (status === 'Revision Requested') {
-        header = `⚠️ *Correction Needed*`;
-        footer = `*Feedback:* ${remarks}\n*New Target:* ${revisedDeadline}`;
-      } else if (status === 'Verified') {
-        header = `🎊 *Task Verified*`;
-        footer = `This task is now officially closed. Good job!`;
-      }
-
-      const finalMessage = `${header}\n\nHi [Name], there is a status update for your task.${fullTaskDetails}\n\n${footer}`;
-
-      // --- SEND TO ALL PARTIES ---
-      
-      // 1. To Assigner
       if (task.assignerId?.whatsappNumber) {
-        await sendWhatsAppMessage(task.assignerId.whatsappNumber, finalMessage.replace("[Name]", task.assignerId.name));
+        await sendWhatsAppMessage(task.assignerId.whatsappNumber, `🛡️ *Node Update*` + fullTaskDetails);
       }
-      
-      // 2. To Primary Doer
-      if (task.doerId?.whatsappNumber) {
-        await sendWhatsAppMessage(task.doerId.whatsappNumber, finalMessage.replace("[Name]", task.doerId.name));
-      }
-
-      // 3. To Coordinator
-      if (task.coordinatorId?.whatsappNumber) {
-        await sendWhatsAppMessage(task.coordinatorId.whatsappNumber, finalMessage.replace("[Name]", task.coordinatorId.name));
-      }
-
-      // 4. To Support Team (Helpers)
-      if (helpers.length > 0) {
-        for (const helper of helpers) {
-          if (helper.whatsappNumber) {
-            await sendWhatsAppMessage(helper.whatsappNumber, finalMessage.replace("[Name]", helper.name));
-          }
-        }
-      }
-
     } catch (waError) {
-      console.error("⚠️ WhatsApp Notify Error:", waError.message);
+      console.error("⚠️ Non-fatal WhatsApp Notify Error:", waError.message);
     }
 
-    res.status(200).json({ message: "Task status updated and team notified.", task });
+    res.status(200).json({ message: "Registry updated successfully.", task });
 
   } catch (error) {
-    console.error("❌ respondToTask Error:", error.message);
-    res.status(500).json({ message: "Update failed", error: error.message });
+    console.error("❌ respondToTask CRITICAL ERROR:", error);
+    res.status(500).json({ message: "Internal Server Error", error: error.message });
   }
 };
 exports.getMappingOverview = async (req, res) => {

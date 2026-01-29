@@ -28,7 +28,7 @@ app.use(cors({
 
 // Middleware
 app.use(express.json());
-
+app.use(express.urlencoded({ extended: true }));
 /**
  * 3. REGISTER ROUTES
  * All routes are mounted after app initialization.
