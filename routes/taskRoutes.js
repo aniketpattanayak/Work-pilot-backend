@@ -28,6 +28,9 @@ router.get('/all-companies', getAllCompanies);
 router.delete('/company/:id', deleteCompany);
 router.delete('/checklist/:id', taskController.deleteChecklistTask);
 router.get('/checklist-all/:tenantId', taskController.getAllChecklists);
+router.get('/doer/:doerId', taskController.getDoerTasks);
+router.get('/checklist/:doerId', taskController.getChecklistTasks);
+router.get('/assigner/:assignerId', taskController.getAssignerTasks);
 
 router.get('/review-analytics/:tenantId', taskController.getReviewAnalytics);
 // --- EMPLOYEE MANAGEMENT ROUTES ---
@@ -39,7 +42,7 @@ router.delete('/employees/:id', deleteEmployee);
 // --- MAPPING, BRANDING & SETTINGS ---
 router.put('/update-mapping', updateEmployeeMapping);
 router.put('/update-settings', updateSettings);
-
+router.put('/respond', taskController.respondToTask);
 /**
  * BRANDING UPDATE: Supports updating Company Name and Logo.
  * Middleware: upload.single('logo') matches the key used in Settings.jsx FormData.
