@@ -58,7 +58,7 @@ router.get('/company-overview/:tenantId', getCompanyOverview);
 router.post('/create-task', upload.array('files'), taskController.createTask);
 router.delete('/task/:taskId', taskController.deleteTask);
 router.post('/handle-revision', taskController.handleRevision);
-
+router.post('/coordinator-force-done', taskController.coordinatorForceDone);
 // --- ANALYTICS & SCOREBOARDS ---
 router.get('/employee-score/:employeeId', taskController.getEmployeeScore);
 router.get('/global-performance/:tenantId', taskController.getGlobalPerformance);
