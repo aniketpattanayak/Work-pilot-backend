@@ -51,7 +51,8 @@ router.post('/checklist-done', upload.single('evidence'), taskController.complet
  * Middleware: upload.single('logo') matches the key used in Settings.jsx FormData.
  */
 router.put('/update-branding', upload.single('logo'), updateBranding);
-
+router.get('/employee-deep-dive/:employeeId', taskController.getEmployeeDeepDive);
+router.put('/update-weekly-target', taskController.updateEmployeeTarget);
 router.put('/assign-coordinator', assignToCoordinator);
 router.get('/company-overview/:tenantId', getCompanyOverview);
 // --- DELEGATION PROTOCOLS ---

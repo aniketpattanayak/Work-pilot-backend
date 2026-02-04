@@ -722,6 +722,87 @@ exports.coordinatorForceDone = async (req, res) => {
   }
 };
 
+
+/**
+ * NEW: DEEP-DIVE LEDGER
+ * Purpose: Row-wise detail of every late/missed task for a specific employee.
+ */
+exports.getEmployeeDeepDive = async (req, res) => {
+  try {
+    const { employeeId } = req.params;
+    const { startDate, endDate } = req.query; // Filter by the meeting week
+    
+    const [delegations, checklists] = await Promise.all([
+      DelegationTask.find({ 
+        doerId: employeeId, 
+        deadline: { $gte: new Date(startDate), $lte: new Date(endDate) } 
+      }),
+      ChecklistTask.find({ 
+        doerId: employeeId, 
+        status: 'Active' 
+      })
+    ]);
+
+    const detailedRows = [];
+
+    // Process Delegation Tasks
+    delegations.forEach(t => {
+      const done = t.history.find(h => h.action === 'Completed');
+      let status = 'ON-TIME';
+      if (!done && new Date(t.deadline) < new Date()) status = 'OVERDUE';
+      else if (done && new Date(done.timestamp) > new Date(t.deadline)) status = 'LATE';
+      else if (!done) status = 'PENDING';
+
+      detailedRows.push({
+        id: t._id,
+        name: t.title,
+        type: 'Delegation',
+        deadline: t.deadline,
+        completedAt: done?.timestamp || null,
+        status: status,
+        remarks: t.remarks || ""
+      });
+    });
+
+    // Process Checklist Backlogs
+    checklists.forEach(t => {
+      const rangeCompletions = t.history.filter(h => 
+        new Date(h.timestamp) >= new Date(startDate) && new Date(h.timestamp) <= new Date(endDate)
+      );
+      
+      // Logic: For every occurrence in the range, check if it was done on time
+      rangeCompletions.forEach(h => {
+        const instanceDate = h.instanceDate || h.timestamp;
+        const isLate = new Date(h.timestamp).toDateString() !== new Date(instanceDate).toDateString();
+        
+        detailedRows.push({
+          id: t._id,
+          name: t.taskName,
+          type: 'Checklist',
+          deadline: instanceDate,
+          completedAt: h.timestamp,
+          status: isLate ? 'LATE' : 'COMPLETED',
+          remarks: h.remarks
+        });
+      });
+    });
+
+    res.status(200).json(detailedRows);
+  } catch (error) {
+    res.status(500).json({ message: "Deep-dive fetch failed", error: error.message });
+  }
+};
+
+// ENDPOINT TO SAVE TARGET
+exports.updateEmployeeTarget = async (req, res) => {
+  try {
+    const { employeeId, target } = req.body;
+    await Employee.findByIdAndUpdate(employeeId, { weeklyLateTarget: target });
+    res.status(200).json({ message: "Target synchronized." });
+  } catch (error) {
+     res.status(500).json({ message: "Update failed" });
+  }
+};
 // 2. Updated: Manual Dashboard Reminder
 exports.sendWhatsAppReminder = async (req, res) => {
   try {
@@ -782,28 +863,42 @@ exports.getCoordinatorTasks = async (req, res) => {
       delegationQuery = { tenantId: coordinator.tenantId };
       checklistQuery = { tenantId: coordinator.tenantId };
     } else {
-      // For standard Coordinators, use the mapped staff
-      const monitoredStaffIds = coordinator.managedAssigners || [];
+      /**
+       * MAPPING SYNC
+       * Combine 'managedAssigners' AND 'managedDoers' to capture everyone 
+       * mapped to this coordinator in the Mapping Tab.
+       */
+      const monitoredStaffIds = [
+        ...(coordinator.managedAssigners || []),
+        ...(coordinator.managedDoers || [])
+      ];
       
       // If no mapping exists for a non-admin, return empty array immediately
       if (monitoredStaffIds.length === 0) {
         return res.status(200).json([]);
       }
 
+      /**
+       * SMART FILTERING
+       * Retrieves tasks where the mapped staff are either giving the work 
+       * (Assigner) or performing the work (Doer).
+       */
       delegationQuery = { 
         $or: [
           { assignerId: { $in: monitoredStaffIds } },
           { doerId: { $in: monitoredStaffIds } }
         ]
       };
+      
+      // Checklists are monitored based on the assigned Doer
       checklistQuery = { doerId: { $in: monitoredStaffIds } };
     }
 
-    // 3. Parallel Fetch
+    // 3. Parallel Fetch from Delegation and Checklist collections
     const [delegationTasks, checklistTasks] = await Promise.all([
       DelegationTask.find(delegationQuery)
         .populate('assignerId', 'name role')
-        .populate('doerId', 'name role whatsappNumber')
+        .populate('doerId', 'name role whatsappNumber department')
         .lean(),
 
       ChecklistTask.find(checklistQuery)
@@ -811,7 +906,7 @@ exports.getCoordinatorTasks = async (req, res) => {
         .lean()
     ]);
 
-    // 4. Normalization (Ensures frontend doesn't crash)
+    // 4. Normalization (Ensures frontend UI components don't crash)
     const normalizedChecklists = (checklistTasks || []).map(t => ({
       ...t,
       title: t.taskName || "Untitled Checklist",
@@ -824,14 +919,14 @@ exports.getCoordinatorTasks = async (req, res) => {
       taskType: 'Delegation'
     }));
 
-    // 5. Merge and Sort
+    // 5. Merge and Sort by chronological deadline
     const allTasks = [...normalizedDelegations, ...normalizedChecklists].sort(
       (a, b) => new Date(a.deadline) - new Date(b.deadline)
     );
 
     res.status(200).json(allTasks);
   } catch (error) {
-    console.error("❌ Coordinator Dashboard Crash:", error.message);
+    console.error("❌ Coordinator Dashboard Sync Crash:", error.message);
     res.status(500).json({ message: "Internal Server Error", error: error.message });
   }
 };
@@ -1515,16 +1610,24 @@ exports.getReviewAnalytics = async (req, res) => {
       endDate.setHours(23, 59, 59, 999);
     }
 
+    // UPDATED: Added 'weeklyLateTarget' to select
     const [employees, delegations, checklists] = await Promise.all([
-      Employee.find({ tenantId }).select('name department'),
+      Employee.find({ tenantId }).select('name department weeklyLateTarget'),
       DelegationTask.find({ tenantId, deadline: { $gte: startDate, $lte: endDate } }),
       ChecklistTask.find({ tenantId, status: 'Active' })
     ]);
 
     const report = employees.map(emp => {
       const stats = {
+        // CRITICAL: Added fields for Frontend Deep-Dive targeting
+        employeeId: emp._id, 
         employeeName: emp.name,
         department: emp.department,
+        weeklyLateTarget: emp.weeklyLateTarget || 20, 
+        periodStart: startDate.toISOString(), 
+        periodEnd: endDate.toISOString(),
+        periodName: view === 'Weekly' ? `Week of ${startDate.toLocaleDateString()}` : view,
+        
         delegation: { total: 0, done: 0, overdue: 0, late: 0, notDone: 0 },
         checklist: { total: 0, done: 0, overdue: 0, late: 0, notDone: 0 }
       };
@@ -1537,20 +1640,18 @@ exports.getReviewAnalytics = async (req, res) => {
         
         if (doneRecord) {
           stats.delegation.done++;
-          // If the work was finished but AFTER the deadline, it's Late
           if (new Date(doneRecord.timestamp) > new Date(t.deadline)) {
             stats.delegation.late++;
           }
         } else {
           stats.delegation.notDone++;
-          // If it's not done and today is past the deadline, it's Overdue
           if (new Date(t.deadline) < now) {
             stats.delegation.overdue++;
           }
         }
       });
 
-      // 3. CHECKLIST PROCESSING (Daily/Weekly frequency logic)
+      // 3. CHECKLIST PROCESSING
       const empChecklists = checklists.filter(t => t.doerId && t.doerId.toString() === emp._id.toString());
       empChecklists.forEach(t => {
         let expected = 0;
@@ -1566,20 +1667,16 @@ exports.getReviewAnalytics = async (req, res) => {
         stats.checklist.total += expected;
         stats.checklist.done += rangeCompletions.length;
         
-        // Calculate work not done
         let missedCount = Math.max(0, expected - rangeCompletions.length);
         stats.checklist.notDone += missedCount;
 
-        // CHECKLIST OVERDUE & LATE LOGIC
         rangeCompletions.forEach(h => {
            const instanceDueDate = new Date(h.instanceDate || h.timestamp);
-           // If the submission happened on a day later than the instance's intended date
            if (new Date(h.timestamp).toDateString() !== instanceDueDate.toDateString() && new Date(h.timestamp) > instanceDueDate) {
               stats.checklist.late++;
            }
         });
 
-        // Current instances missed that are already in the past
         const effectiveEndDate = endDate < now ? endDate : now;
         if (missedCount > 0 && effectiveEndDate >= startDate) {
            stats.checklist.overdue += missedCount;

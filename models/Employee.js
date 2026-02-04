@@ -7,6 +7,10 @@ const EmployeeSchema = new mongoose.Schema({
   whatsappNumber: { type: String, required: true },
   email: { type: String, required: true },
   password: { type: String, required: true },
+  weeklyLateTarget: { 
+    type: Number, 
+    default: 20 // Default target of 20% max lateness
+  },
   
   // Array of roles for multi-permission access
   roles: { 
