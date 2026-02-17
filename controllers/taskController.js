@@ -12,26 +12,30 @@ const { calculateNextDate } = require('../utils/scheduler'); // The Math
 
 exports.getDoerTasks = async (req, res) => {
   try {
-      const { doerId } = req.params;
+    const { doerId } = req.params;
 
-      // 1. Validation: Prevent crash if ID is malformed
-      if (!mongoose.Types.ObjectId.isValid(doerId)) {
-          
-          return res.status(400).json({ message: "Invalid Doer ID format" });
-      }
+    if (!mongoose.Types.ObjectId.isValid(doerId)) {
+      return res.status(400).json({ message: "Invalid ID format" });
+    }
 
-      // 2. Fetch tasks where the user is the 'doerId'
-      // We populate assignerId so the Doer knows who gave the task
-      const tasks = await DelegationTask.find({ doerId: doerId })
-          .populate('assignerId', 'name email')
-          .populate('coordinatorId', 'name')
-          .sort({ createdAt: -1 });
+    /**
+     * UPDATED QUERY:
+     * Find tasks where the user is the Lead Doer OR a Follower (Helper).
+     */
+    const tasks = await DelegationTask.find({
+      $or: [
+        { doerId: doerId },
+        { "helperDoers.helperId": doerId }
+      ]
+    })
+    .populate('assignerId', 'name email')
+    .populate('coordinatorId', 'name')
+    .populate('history.performedBy', 'name') // Populate name for history tracking
+    .sort({ createdAt: -1 });
 
-
-      res.status(200).json(tasks);
+    res.status(200).json(tasks);
   } catch (error) {
-      
-      res.status(500).json({ message: "Internal Server Error", error: error.message });
+    res.status(500).json({ message: "Internal Server Error", error: error.message });
   }
 };
 exports.getAuthorizedStaff = async (req, res) => {
@@ -59,6 +63,7 @@ exports.getAuthorizedStaff = async (req, res) => {
       res.status(500).json({ message: "Error loading team members" });
   }
 };
+
 exports.getAssignerTasks = async (req, res) => {
   try {
       const { assignerId } = req.params;
@@ -68,15 +73,11 @@ exports.getAssignerTasks = async (req, res) => {
           return res.status(400).json({ message: "Invalid Assigner ID format provided." });
       }
 
-      /**
-       * CRITICAL FILTER: We query ONLY the DelegationTask collection.
-       * Routine doer checklists are stored in a separate 'ChecklistTask' collection 
-       * and will be automatically excluded by this query.
-       */
       const tasks = await DelegationTask.find({ assignerId: assignerId })
           .populate('doerId', 'name department roles email') // Populate Doer info
           .populate('coordinatorId', 'name')                 // Populate Coordinator info
           .populate('assignerId', 'name')                    // Populate Assigner info
+          .populate('history.performedBy', 'name')           // FIXED: Converts IDs to names in Audit Log
           .sort({ createdAt: -1 });
 
       // If for some reason the array is empty, return a clean empty array
@@ -1032,7 +1033,6 @@ exports.getCoordinatorTasks = async (req, res) => {
 exports.respondToTask = async (req, res) => {
   try {
     // 1. SAFE DATA EXTRACTION
-    // Safe extraction to prevent "Cannot destructure" error if body is delayed
     const body = req.body || {};
     const { taskId, status, revisedDeadline, remarks, doerId } = body;
     
@@ -1040,8 +1040,8 @@ exports.respondToTask = async (req, res) => {
     console.log("Incoming Respond Request:", { 
       taskId, 
       status, 
-      hasFile: !!req.file,
-      bodyKeys: Object.keys(body) 
+      performerId: doerId,
+      hasFile: !!req.file 
     });
 
     if (!taskId) {
@@ -1050,22 +1050,25 @@ exports.respondToTask = async (req, res) => {
       });
     }
 
+    // Populate performer info for WhatsApp and Response logic
     const task = await DelegationTask.findById(taskId).populate('assignerId doerId coordinatorId');
     if (!task) return res.status(404).json({ message: "Task node not found." });
 
     // Handle Evidence Files (S3 or Local)
     let evidenceUrl = req.file ? (req.file.location || req.file.path) : null;
 
-    // --- POINTS & ACHIEVEMENT ENGINE (Wrapped for Stability) ---
+    // --- POINTS & ACHIEVEMENT ENGINE ---
     try {
       if (status === 'Completed' || status === 'Verified') {
         const TenantModel = mongoose.model('Tenant');
         const EmployeeModel = mongoose.model('Employee');
         
         const tenant = await TenantModel.findById(task.tenantId);
-        const employee = await EmployeeModel.findById(task.doerId);
+        // Points are still anchored to the Primary Lead (task.doerId)
+        const primaryLead = await EmployeeModel.findById(task.doerId);
+        const actualPerformer = await EmployeeModel.findById(doerId);
         
-        if (tenant?.pointSettings?.isActive && employee && tenant.pointSettings.brackets?.length > 0) {
+        if (tenant?.pointSettings?.isActive && primaryLead && tenant.pointSettings.brackets?.length > 0) {
           const settings = tenant.pointSettings;
           const totalDurationMs = new Date(task.deadline) - new Date(task.createdAt);
           const totalDurationDays = totalDurationMs / (1000 * 60 * 60 * 24);
@@ -1086,21 +1089,21 @@ exports.respondToTask = async (req, res) => {
               pointsAwarded = -Math.floor((Math.abs(deltaHours) / unitMultiplier) * bracket.latePenalty);
             }
 
-            employee.totalPoints = (employee.totalPoints || 0) + pointsAwarded;
+            primaryLead.totalPoints = (primaryLead.totalPoints || 0) + pointsAwarded;
 
-            // Badge Processing Logic
+            // Badge Processing Logic for Primary Lead
             if (tenant.badgeLibrary && tenant.badgeLibrary.length > 0) {
               tenant.badgeLibrary.forEach(badge => {
-                const alreadyEarned = employee.earnedBadges?.some(eb => eb.badgeId?.toString() === badge._id.toString());
-                if (employee.totalPoints >= badge.pointThreshold && !alreadyEarned) {
-                  employee.earnedBadges.push({
+                const alreadyEarned = primaryLead.earnedBadges?.some(eb => eb.badgeId?.toString() === badge._id.toString());
+                if (primaryLead.totalPoints >= badge.pointThreshold && !alreadyEarned) {
+                  primaryLead.earnedBadges.push({
                     badgeId: badge._id, name: badge.name, iconName: badge.iconName,
                     color: badge.color, unlockedAt: new Date()
                   });
                 }
               });
             }
-            await employee.save(); 
+            await primaryLead.save(); 
 
             // Assigner Reward (10% kickback)
             if (pointsAwarded > 0 && task.assignerId) {
@@ -1109,11 +1112,12 @@ exports.respondToTask = async (req, res) => {
               });
             }
 
+            // Record who triggered the points (Follower or Lead)
             task.history.push({
               action: 'Points Calculated', 
               performedBy: doerId || task.doerId,
               timestamp: new Date(), 
-              remarks: `Points: ${pointsAwarded > 0 ? '+' : ''}${pointsAwarded}`
+              remarks: `Points awarded to Lead (${primaryLead.name}): ${pointsAwarded > 0 ? '+' : ''}${pointsAwarded}`
             });
           }
         }
@@ -1138,23 +1142,28 @@ exports.respondToTask = async (req, res) => {
       });
     }
 
+    // CRITICAL: Records the exact person who clicked "Done"
     task.history.push({
       action: status,
-      performedBy: doerId || task.doerId,
+      performedBy: doerId || task.doerId, 
       timestamp: new Date(),
-      remarks: remarks || `Task state synchronized to ${status}`
+      remarks: remarks || `Mission telemetry synced to ${status}`
     });
 
     await task.save();
 
-    // --- WHATSAPP NOTIFICATIONS (Wrapped for Stability) ---
+    // --- WHATSAPP NOTIFICATIONS ---
     try {
       const TenantModel = mongoose.model('Tenant');
       const tenant = await TenantModel.findById(task.tenantId);
+      const EmployeeModel = mongoose.model('Employee');
+      const clicker = await EmployeeModel.findById(doerId);
+
       const companySubdomain = tenant?.subdomain || "portal"; 
       const loginLink = `https://${companySubdomain}.lrbcloud.ai/login`;
 
-      const fullTaskDetails = `\n\n*Task:* ${task.title}\n*Status:* ${status}\n*Personnel:* ${task.doerId?.name}\n\n*View Ledger:* ${loginLink}`;
+      // Message includes the name of the person who performed the update
+      const fullTaskDetails = `\n\n*Task:* ${task.title}\n*Status:* ${status}\n*Action By:* ${clicker?.name || task.doerId?.name}\n*Lead Doer:* ${task.doerId?.name}\n\n*View Ledger:* ${loginLink}`;
 
       if (task.assignerId?.whatsappNumber) {
         await sendWhatsAppMessage(task.assignerId.whatsappNumber, `🛡️ *Node Update*` + fullTaskDetails);
@@ -1163,7 +1172,12 @@ exports.respondToTask = async (req, res) => {
       console.error("⚠️ Non-fatal WhatsApp Notify Error:", waError.message);
     }
 
-    res.status(200).json({ message: "Registry updated successfully.", task });
+    // Populate performedBy names for the frontend History View
+    const finalPopulatedTask = await DelegationTask.findById(task._id)
+      .populate('assignerId doerId coordinatorId')
+      .populate('history.performedBy', 'name');
+
+    res.status(200).json({ message: "Registry updated successfully.", task: finalPopulatedTask });
 
   } catch (error) {
     console.error("❌ respondToTask CRITICAL ERROR:", error);
@@ -1420,18 +1434,15 @@ exports.getChecklistTasks = async (req, res) => {
      */
     let authorizedIdList = [];
 
-    // A. Verify if the requester themselves is currently on leave
     const requesterIsOnLeave = 
       requester.leaveStatus?.onLeave && 
       new Date(requester.leaveStatus.startDate) <= now && 
       new Date(requester.leaveStatus.endDate) >= startOfToday;
 
-    // If NOT on leave, they see their own tasks
     if (!requesterIsOnLeave) {
       authorizedIdList.push(doerId);
     }
 
-    // B. Find anyone who has assigned THIS requester as their Buddy and is currently away
     const staffOnLeave = await Employee.find({
       'leaveStatus.buddyId': doerId,
       'leaveStatus.onLeave': true,
@@ -1439,17 +1450,17 @@ exports.getChecklistTasks = async (req, res) => {
       'leaveStatus.endDate': { $gte: startOfToday }
     }).select('_id name');
 
-    // Add those IDs to the list so their tasks flow to the Buddy's dashboard
     const substitutedIds = staffOnLeave.map(s => s._id.toString());
     authorizedIdList = [...authorizedIdList, ...substitutedIds];
 
     /**
      * 3. FETCH TASKS FOR ALL AUTHORIZED IDs
+     * UPDATED: Added 'workOnSunday' to the population
      */
     const tasks = await ChecklistTask.find({ 
       doerId: { $in: authorizedIdList }, 
       status: 'Active' 
-    }).populate('doerId', 'name');
+    }).populate('doerId', 'name workOnSunday'); // FIXED: Includes Sunday worker flag
 
     let allVisibleInstances = [];
 
@@ -1457,6 +1468,16 @@ exports.getChecklistTasks = async (req, res) => {
       let instancePointer = new Date(task.nextDueDate);
       instancePointer.setHours(0, 0, 0, 0);
       
+      /**
+       * NEW: DYNAMIC WEEKEND CALCULATION
+       * If the assigned doer has 'workOnSunday' enabled, we remove Sunday (0) 
+       * from the factory's weekend exclusion list for their tasks.
+       */
+      let effectiveWeekends = [...weekends];
+      if (task.doerId && task.doerId.workOnSunday) {
+        effectiveWeekends = effectiveWeekends.filter(dayIndex => dayIndex !== 0);
+      }
+
       let loopCount = 0;
       const maxLoops = 30;
 
@@ -1464,7 +1485,6 @@ exports.getChecklistTasks = async (req, res) => {
         loopCount++;
         const dateStr = instancePointer.toDateString();
         
-        // Check if this specific date instance was already completed
         const alreadyDone = task.history && task.history.some(h => {
           if (h.action !== "Completed" && h.action !== "Administrative Completion") return false;
           const historyDate = new Date(h.instanceDate || h.timestamp);
@@ -1474,12 +1494,6 @@ exports.getChecklistTasks = async (req, res) => {
 
         if (!alreadyDone) {
           const isBacklog = instancePointer < startOfToday;
-          
-          /**
-           * 4. SUBSTITUTION TAGGING
-           * Flag tasks that belong to the person on leave so the Buddy knows
-           * who they are covering for.
-           */
           const isBuddySubstitution = task.doerId._id.toString() !== doerId;
 
           allVisibleInstances.push({
@@ -1491,17 +1505,13 @@ exports.getChecklistTasks = async (req, res) => {
           });
         }
 
-        /**
-         * 5. SMART POINTER ADVANCEMENT
-         * Respects factory-defined weekends and holidays during generation.
-         */
         const nextVal = calculateNextDate(
           task.frequency, 
           task.frequencyConfig || {}, 
           holidays,
           new Date(instancePointer),
           false, 
-          weekends 
+          effectiveWeekends // Pass the employee-specific array
         );
         
         if (!nextVal || nextVal <= instancePointer) break;
@@ -1511,9 +1521,7 @@ exports.getChecklistTasks = async (req, res) => {
       }
     });
 
-    // Final sorting: Oldest backlog items appear at the top
     const sorted = allVisibleInstances.sort((a, b) => a.instanceDate - b.instanceDate);
-    
     res.status(200).json(sorted);
     
   } catch (error) {
@@ -1530,17 +1538,23 @@ exports.debugChecklistCards = async (req, res) => {
     const startOfToday = new Date();
     startOfToday.setHours(0, 0, 0, 0);
 
-    const tasks = await ChecklistTask.find({ doerId, status: 'Active' });
+    // UPDATED: Populate doerId to check workOnSunday
+    const tasks = await ChecklistTask.find({ doerId, status: 'Active' })
+        .populate('doerId', 'name workOnSunday'); // FIXED population
+    
     const debugInfo = [];
 
     tasks.forEach(task => {
       let instancePointer = new Date(task.nextDueDate);
       instancePointer.setHours(0, 0, 0, 0);
       
+      const worksSunday = task.doerId?.workOnSunday || false; // Debug flag
+
       const taskDebug = {
         taskName: task.taskName,
         nextDueDate: task.nextDueDate,
         frequency: task.frequency,
+        worksSunday: worksSunday, // Log Sunday work state
         cards: []
       };
 

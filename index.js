@@ -4,14 +4,17 @@ const cors = require('cors');
 require('dotenv').config();
 
 // 1. Import Route Files
+const fmsRoutes = require('./routes/fmsRoutes'); //
 const ticketRoutes = require('./routes/ticketRoutes');
-// UPDATED: Points to taskRoutes.js where your review analytics route is defined
 const taskRoutes = require('./routes/taskRoutes'); 
 
-// 2. Initialize Express App FIRST
+// 2. Initialize Express App
 const app = express();
 
-// --- CORS CONFIGURATION (Preserved) ---
+/**
+ * 3. CORS CONFIGURATION (Critical: Must be defined before routes)
+ * This allows your frontend (Vite/localhost:5173) to talk to this backend.
+ */
 app.use(cors({
   origin: [
     "http://localhost:5173", 
@@ -24,23 +27,28 @@ app.use(cors({
   methods: ["GET", "POST", "PUT", "DELETE", "PATCH", "OPTIONS"],
   allowedHeaders: ["Content-Type", "Authorization"]
 }));
-// ----------------------------------
 
-// Middleware
+/**
+ * 4. DATA PARSING MIDDLEWARE (Critical: Must be defined before routes)
+ * This allows the server to read JSON data sent from your FMS Blueprint forms.
+ */
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
+
 /**
- * 3. REGISTER ROUTES
- * All routes are mounted after app initialization.
+ * 5. REGISTER ROUTES
+ * Routes are now mounted after the CORS and Body Parser middleware to ensure
+ * they function correctly.
  */
-app.use('/api/tickets', ticketRoutes); // Support Ticketing System
+
+// FMS Logic
+app.use('/api/fms', fmsRoutes);
+
+// Support Ticketing System
+app.use('/api/tickets', ticketRoutes); 
 
 // Multi-tenant and Task Routes
-/**
- * ROUTE CORRECTION:
- * Both /superadmin and /tasks prefixes are now directed to taskRoutes.js.
- * This ensures the '/review-analytics' endpoint is correctly found.
- */
+// Both /superadmin and /tasks prefixes are directed to taskRoutes.js.
 app.use('/api/superadmin', taskRoutes);
 app.use('/api/tasks', taskRoutes); 
 

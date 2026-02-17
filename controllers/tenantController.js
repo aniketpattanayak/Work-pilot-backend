@@ -237,7 +237,8 @@ exports.updateSettings = async (req, res) => {
         roles, 
         password, 
         managedDoers, 
-        managedAssigners 
+        managedAssigners ,
+        workOnSunday,
       } = req.body;
   
       // --- PRESERVE: PASSWORD HASHING ---
@@ -251,6 +252,7 @@ exports.updateSettings = async (req, res) => {
         email,
         department,
         whatsappNumber,
+        workOnSunday: workOnSunday || false,
         // Default to ['Doer'] if roles array is empty
         roles: (Array.isArray(roles) && roles.length > 0) ? roles : ['Doer'], 
         password: hashedPassword, 
@@ -548,7 +550,7 @@ exports.updateEmployee = async (req, res) => {
   try {
     const { id } = req.params;
     // FIX: Changed 'role' to 'roles' to match your frontend and model
-    const { name, email, department, roles, managedDoers, managedAssigners, password } = req.body;
+    const { name, email, whatsappNumber, department, roles, managedDoers, managedAssigners, password , workOnSunday} = req.body;
 
     // Map the IDs correctly to ensure we only store the ID strings
     const cleanDoers = Array.isArray(managedDoers) ? managedDoers.map(d => d._id || d) : [];
@@ -559,7 +561,9 @@ exports.updateEmployee = async (req, res) => {
       email, 
       department, 
       roles, // FIX: Use the plural 'roles' array
+      whatsappNumber,
       managedDoers: cleanDoers, 
+      workOnSunday: workOnSunday,
       managedAssigners: cleanAssigners 
     };
 
