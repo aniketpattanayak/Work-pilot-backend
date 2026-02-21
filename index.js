@@ -24,10 +24,10 @@ const app = express();
 app.use(cors({
   origin: [
     "http://localhost:5173", 
-    /^http:\/\/.*\.localhost:5173$/,
-    "https://www.lrbcloud.ai",
+    /^http:\/\/.*\.localhost:5173$/, // Allows all local subdomains
     "https://lrbcloud.ai",
-    /\.lrbcloud\.ai$/   
+    "https://www.lrbcloud.ai",
+    /\.lrbcloud\.ai$/                // Allows any factory: lrbc, arv, colorplas, etc.
   ],
   credentials: true,
   methods: ["GET", "POST", "PUT", "DELETE", "PATCH", "OPTIONS"],
