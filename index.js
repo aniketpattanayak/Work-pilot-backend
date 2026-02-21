@@ -2,17 +2,23 @@ const express = require('express');
 const mongoose = require('mongoose');
 const cors = require('cors');
 require('dotenv').config();
+const cron = require('node-cron');
 
-// 1. Import Route Files
-const fmsRoutes = require('./routes/fmsRoutes'); //
+// --- 1. IMPORT ROUTE FILES ---
+const fmsRoutes = require('./routes/fmsRoutes'); 
 const ticketRoutes = require('./routes/ticketRoutes');
 const taskRoutes = require('./routes/taskRoutes'); 
+const reportRoutes = require('./routes/reportRoutes'); 
 
-// 2. Initialize Express App
+// --- 2. IMPORT SERVICES & SCHEDULERS ---
+const initReportScheduler = require('./jobs/cronScheduler'); 
+const { dispatchDailyBriefings } = require('./controllers/taskController'); // NEW: Added Briefing Service
+
+// 3. Initialize Express App
 const app = express();
 
 /**
- * 3. CORS CONFIGURATION (Critical: Must be defined before routes)
+ * 4. CORS CONFIGURATION
  * This allows your frontend (Vite/localhost:5173) to talk to this backend.
  */
 app.use(cors({
@@ -21,7 +27,7 @@ app.use(cors({
     /^http:\/\/.*\.localhost:5173$/,
     "https://www.lrbcloud.ai",
     "https://lrbcloud.ai",
-    /\.lrbcloud\.ai$/   // Allows test.lrbcloud.ai, etc.
+    /\.lrbcloud\.ai$/   
   ],
   credentials: true,
   methods: ["GET", "POST", "PUT", "DELETE", "PATCH", "OPTIONS"],
@@ -29,16 +35,15 @@ app.use(cors({
 }));
 
 /**
- * 4. DATA PARSING MIDDLEWARE (Critical: Must be defined before routes)
- * This allows the server to read JSON data sent from your FMS Blueprint forms.
+ * 5. DATA PARSING MIDDLEWARE
+ * Allows the server to read JSON and form-data sent from FMS forms.
  */
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 
 /**
- * 5. REGISTER ROUTES
- * Routes are now mounted after the CORS and Body Parser middleware to ensure
- * they function correctly.
+ * 6. REGISTER ROUTES
+ * Routes are mounted after CORS and Body Parser for correct operational flow.
  */
 
 // FMS Logic
@@ -47,8 +52,10 @@ app.use('/api/fms', fmsRoutes);
 // Support Ticketing System
 app.use('/api/tickets', ticketRoutes); 
 
+// Report & Analytics Routes
+app.use('/api/reports', reportRoutes);
+
 // Multi-tenant and Task Routes
-// Both /superadmin and /tasks prefixes are directed to taskRoutes.js.
 app.use('/api/superadmin', taskRoutes);
 app.use('/api/tasks', taskRoutes); 
 
@@ -61,9 +68,24 @@ app.use((req, res) => {
     });
 });
 
-// Database Connection
+/**
+ * 7. DATABASE & SCHEDULER INITIALIZATION
+ */
 mongoose.connect(process.env.MONGO_URI)
-  .then(() => console.log("✅ MongoDB Connected..."))
+  .then(() => {
+    console.log("✅ MongoDB Connected...");
+    
+    // --- START AUTOMATED REPORT SCHEDULER ---
+    initReportScheduler();
+    console.log("⏰ LRBC Report Scheduler Initiated.");
+
+    // --- START DAILY MISSION BRIEFING ENGINE ---
+    // Cron runs every minute to check factory-specific lead times (2h before opening).
+    cron.schedule('* * * * *', () => {
+      dispatchDailyBriefings();
+    });
+    console.log("🌅 LRBC Daily Briefing Engine Active.");
+  })
   .catch(err => console.log("❌ DB Connection Error:", err));
 
 // Server Initialization

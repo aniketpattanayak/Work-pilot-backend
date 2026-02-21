@@ -1,5 +1,10 @@
 const mongoose = require('mongoose');
 
+/**
+ * TENANT MODEL v2.0
+ * Purpose: Global configuration for individual factories (ARV, Navtech, etc.).
+ * Updated: Added automated reporting fields for factory admins.
+ */
 const TenantSchema = new mongoose.Schema({
   companyName: { type: String, required: true },
   subdomain: { type: String, required: true, unique: true }, // e.g., 'xyz-factory'
@@ -65,6 +70,23 @@ const TenantSchema = new mongoose.Schema({
       createdAt: { type: Date, default: Date.now }
     }
   ],
+
+  /**
+   * AUTOMATED REPORTING SETTINGS
+   * These fields store the specific preferences for each factory admin.
+   */
+  reportEmail: { 
+    type: String, 
+    default: "" 
+  },
+  weeklyReportDay: { 
+    type: String, 
+    default: "Saturday" 
+  },
+  monthlyReportDate: { 
+    type: Number, 
+    default: 1 
+  },
   
   createdAt: { type: Date, default: Date.now }
 });

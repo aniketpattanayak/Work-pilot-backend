@@ -17,8 +17,8 @@ const moment = require('moment');
  */
 exports.calculateNextDate = (frequency, config = {}, holidays = [], baseDate = new Date(), isInitial = false, weekends = [0]) => {
   // Normalize date to start of day to prevent timing drift
-  let nextDate = moment(baseDate).startOf('day'); 
-  
+  let nextDate = moment(baseDate).startOf('day');
+
   /**
    * FACTORY GUARD CHECK (v3.3)
    * Returns true if the day is a Weekend (defined by Admin) or in the Holiday registry.
@@ -27,7 +27,7 @@ exports.calculateNextDate = (frequency, config = {}, holidays = [], baseDate = n
     const dateStr = date.format('YYYY-MM-DD');
     const isRegisteredHoliday = holidays.some(h => moment(h.date).format('YYYY-MM-DD') === dateStr);
     // Dynamic weekend check: Checks if current day index (0-6) exists in the admin weekends array
-    const isWeekend = weekends.includes(date.day()); 
+    const isWeekend = weekends.includes(date.day());
     return isRegisteredHoliday || isWeekend;
   };
 
@@ -49,8 +49,8 @@ exports.calculateNextDate = (frequency, config = {}, holidays = [], baseDate = n
        * Logic: If not initial, move to next day first. 
        * Then, while current day is NOT in authorized list (Mon, Tue, etc.), move to next day.
        */
-      const allowedWeekDays = Array.isArray(config.daysOfWeek) && config.daysOfWeek.length > 0 
-        ? config.daysOfWeek 
+      const allowedWeekDays = Array.isArray(config.daysOfWeek) && config.daysOfWeek.length > 0
+        ? config.daysOfWeek
         : [config.dayOfWeek !== undefined ? config.dayOfWeek : 1];
 
       if (!isInitial) {
@@ -68,8 +68,8 @@ exports.calculateNextDate = (frequency, config = {}, holidays = [], baseDate = n
        * SMART MONTHLY SCAN
        * Logic: Scans for the next valid date (e.g., 1st, 15th) on or after baseDate.
        */
-      const allowedMonthDates = Array.isArray(config.daysOfMonth) && config.daysOfMonth.length > 0 
-        ? config.daysOfMonth 
+      const allowedMonthDates = Array.isArray(config.daysOfMonth) && config.daysOfMonth.length > 0
+        ? config.daysOfMonth
         : [config.dayOfMonth || 1];
 
       if (!isInitial) {
@@ -118,11 +118,16 @@ exports.calculateNextDate = (frequency, config = {}, holidays = [], baseDate = n
    * AND a valid factory working day (Not a holiday/weekend).
    */
   while (isNonWorkingDay(nextDate)) {
-    nextDate.add(1, 'days');
+    // SPECIAL JUMP: If Sunday is a weekend and we hit it, jump to Monday.
+    if (nextDate.day() === 0 && weekends.includes(0)) {
+      nextDate.add(1, 'days');
+    } else {
+      nextDate.add(1, 'days');
+    }
 
     // For Weekly/Monthly, ensure we don't land on an unauthorized day after skipping a non-working day
     if (frequency === 'Weekly') {
-      const allowedWeekDays = Array.isArray(config.daysOfWeek) && config.daysOfWeek.length > 0 
+      const allowedWeekDays = Array.isArray(config.daysOfWeek) && config.daysOfWeek.length > 0
         ? config.daysOfWeek : [1];
       while (!allowedWeekDays.includes(nextDate.day())) {
         nextDate.add(1, 'days');
@@ -130,7 +135,7 @@ exports.calculateNextDate = (frequency, config = {}, holidays = [], baseDate = n
     }
 
     if (frequency === 'Monthly') {
-      const allowedMonthDates = Array.isArray(config.daysOfMonth) && config.daysOfMonth.length > 0 
+      const allowedMonthDates = Array.isArray(config.daysOfMonth) && config.daysOfMonth.length > 0
         ? config.daysOfMonth : [1];
       while (!allowedMonthDates.includes(nextDate.date())) {
         nextDate.add(1, 'days');
