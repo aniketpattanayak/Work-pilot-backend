@@ -102,58 +102,153 @@ exports.triggerAutomatedReports = async () => {
  * 3. MANUAL DOWNLOAD ENDPOINT (EXCEL/CSV FORMAT)
  * Purpose: Allows a factory admin to download their report as a Spreadsheet.
  */
+
+const ExcelJS = require('exceljs');
+
 exports.manualDownload = async (req, res) => {
     try {
         const { tenantId } = req.params;
-        const { range } = req.query; 
+        const { range } = req.query;
         const days = range === 'monthly' ? 30 : 7;
 
-        // 1. Fetch Data
         const startDate = moment().subtract(days, 'days').startOf('day').toDate();
+
         const [delegations, checklists] = await Promise.all([
             DelegationTask.find({ tenantId, createdAt: { $gte: startDate } }).populate('assignerId doerId'),
             ChecklistTask.find({ tenantId }).populate('doerId')
         ]);
 
-        // 2. Create CSV Header
-        let csvContent = "Task Name,Done By,Date,Status,Assigned By,Category,Time Finished\n";
+        const workbook = new ExcelJS.Workbook();
 
-        // 3. Add Delegation Tasks
+        // =========================
+        // SHEET 1 → DELEGATIONS
+        // =========================
+        const delegationSheet = workbook.addWorksheet('Delegations');
+
+        delegationSheet.columns = [
+            { header: 'Task', key: 'task' },
+            { header: 'Assigned To', key: 'doneBy' },
+            { header: 'Deadline', key: 'date' },
+            { header: 'Status', key: 'status' },
+            { header: 'Assigned By', key: 'assignedBy' },
+        ];
+
         delegations.forEach(task => {
-            const doneRecord = task.history.find(h => h.action === 'Completed' || h.action === 'Verified');
-            const status = doneRecord ? 'Done' : 'Not Done';
-            const time = doneRecord ? moment(doneRecord.timestamp).format('hh:mm A') : 'N/A';
-            const date = moment(task.deadline).format('DD MMM YYYY');
-            
-            // Format: Task, Doer, Date, Status, Assigner, Category, Time
-            csvContent += `"${task.title}","${task.doerId?.name || 'Staff'}","${date}","${status}","${task.assignerId?.name || 'Admin'}","Delegation","${time}"\n`;
-        });
+            const doneRecord = task.history.find(h => 
+                h.action === 'Completed' || h.action === 'Verified'
+            );
 
-        // 4. Add Checklist Tasks (Day-by-Day)
-        for (let i = 0; i < days; i++) {
-            const currentDay = moment().subtract(i, 'days').startOf('day');
-            const dateLabel = currentDay.format('DD MMM YYYY');
-
-            checklists.forEach(task => {
-                const wasDone = task.history.find(h => 
-                    moment(h.instanceDate || h.timestamp).isSame(currentDay, 'day') && 
-                    (h.action === 'Completed' || h.action === 'Administrative Completion')
-                );
-
-                const status = wasDone ? 'Done' : 'Not Done';
-                const time = wasDone ? moment(wasDone.timestamp).format('hh:mm A') : 'N/A';
-                
-                csvContent += `"${task.taskName}","${task.doerId?.name || 'Staff'}","${dateLabel}","${status}","Admin","Checklist","${time}"\n`;
+            delegationSheet.addRow({
+                task: task.title,
+                doneBy: task.doerId?.name || 'Staff',
+                date: moment(task.deadline).format('DD MMM YYYY'),
+                status: doneRecord ? 'Done' : 'Not Done',
+                assignedBy: task.assignerId?.name || 'Admin',
             });
+        });
+        const checklistSheet = workbook.addWorksheet('Checklist');
+
+        checklistSheet.columns = [
+            { header: 'Task', key: 'task' },
+            { header: 'Assigned To', key: 'doneBy' },
+            { header: 'Date', key: 'date' },
+            {  header: 'Frequency' ,key:'frequency'},
+            { header: 'Status', key: 'status' },
+            { header: 'Assigned By', key: 'assignedBy' },
+        ];
+
+
+
+         checklists.forEach(task => {
+
+    const freq = (task.frequency || '').toLowerCase();
+    const config = task.frequencyConfig || {};
+
+    const taskStart = moment.max(
+        moment(task.createdAt).startOf('day'),
+        moment().subtract(days - 1, 'days').startOf('day')
+    );
+
+    let total = 0;
+    let doneCount = 0;
+
+    for (let i = 0; i < days; i++) {
+
+        const currentDay = moment().subtract(i, 'days').startOf('day');
+
+        if (currentDay.isBefore(taskStart)) continue;
+
+        let isScheduled = false;
+
+        // ✅ DAILY
+        if (freq === 'daily') {
+            isScheduled = true;
         }
 
-        // 5. Send as CSV Download
-        res.setHeader('Content-Type', 'text/csv');
-        res.setHeader('Content-Disposition', `attachment; filename=WorkPilot_Report_${range}.csv`);
-        res.status(200).send(csvContent);
+        // ✅ WEEKLY
+        else if (freq === 'weekly') {
+            const daysOfWeek = config.daysOfWeek || [];
+            if (daysOfWeek.includes(currentDay.day())) {
+                isScheduled = true;
+            }
+        }
+
+        // ✅ MONTHLY
+        else if (freq === 'monthly') {
+            const daysOfMonth = config.daysOfMonth || [];
+            if (daysOfMonth.includes(currentDay.date())) {
+                isScheduled = true;
+            }
+        }
+
+        // ✅ INTERVAL (every X days)
+        else if (config.intervalDays > 0) {
+            const diff = currentDay.diff(moment(task.createdAt), 'days');
+            if (diff % config.intervalDays === 0) {
+                isScheduled = true;
+            }
+        }
+
+        // ❗ ONLY count if scheduled
+        if (!isScheduled) continue;
+
+        total++;
+
+        const wasDone = task.history.find(h =>
+            moment(h.instanceDate || h.timestamp).isSame(currentDay, 'day') &&
+            (h.action === 'Completed' || h.action === 'Administrative Completion')
+        );
+
+        if (wasDone) doneCount++;
+    }
+
+    checklistSheet.addRow({
+        task: task.taskName,
+        doneBy: task.doerId?.name || 'Staff',
+        date: `${taskStart.format('DD MMM')} → ${moment().format('DD MMM YYYY')}`,
+        frequency : task.frequency,
+        status: `${doneCount}/${total} Done`,
+        assignedBy: 'Admin'
+    });
+});
+        
+        res.setHeader(
+            'Content-Type',
+            'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
+        );
+
+        res.setHeader(
+            'Content-Disposition',
+            `attachment; filename=WorkPilot_Report_${range}.xlsx`
+        );
+
+        await workbook.xlsx.write(res);
+        res.end();
 
     } catch (error) {
-        console.error("CSV Export Error:", error.message);
-        res.status(500).json({ message: "Failed to generate spreadsheet", error: error.message });
+        console.error("Excel Export Error:", error.message);
+        res.status(500).json({ message: "Failed to generate spreadsheet" });
     }
 };
+
+

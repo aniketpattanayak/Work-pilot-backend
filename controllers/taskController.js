@@ -427,7 +427,8 @@ exports.completeChecklistTask = async (req, res) => {
     try {
       if (tenant?.whatsappConfig?.isActive) {
         const companySubdomain = tenant?.subdomain || "portal";
-        const loginLink = `https://${companySubdomain}.lrbcloud.ai/login`;
+        //const loginLink = `https://${companySubdomain}.lrbcloud.ai/login`;
+        const loginLink = `https://${companySubdomain}.lrbcloud.ai/dashboard/checklist-monitor`;
 
         /**
          * TEMPLATE MAPPING (Based on Screenshot):
@@ -522,7 +523,7 @@ exports.updateChecklistTask = async (req, res) => {
      * Added 'description' to the destructuring to ensure it is captured 
      * from the high-density grid's edit mode.
      */
-    const { taskName, description, doerId, status, frequency, frequencyConfig } = req.body;
+    const { taskName, description, doerId, status, frequency, frequencyConfig , createdAt } = req.body;
 
     /**
      * 2. SMART RE-CALCULATION GUARD
@@ -553,8 +554,17 @@ exports.updateChecklistTask = async (req, res) => {
 
       // Use the scheduler's calculateNextDate to find the very next valid mission
       // Anchor from today to ensure the new schedule starts fresh
-      const anchor = new Date();
-      anchor.setHours(0, 0, 0, 0);
+      
+      
+      
+      //const anchor = new Date();
+
+
+      const anchor = createdAt ? new Date(createdAt) : new Date(existingTask.createdAt);
+anchor.setHours(0, 0, 0, 0);  
+
+
+      //anchor.setHours(0, 0, 0, 0);
 
       finalNextDueDate = calculateNextDate(
         frequency || existingTask.frequency,
@@ -579,7 +589,8 @@ exports.updateChecklistTask = async (req, res) => {
           status,
           frequency,
           frequencyConfig,
-          nextDueDate: finalNextDueDate
+          nextDueDate: finalNextDueDate ,
+          createdAt: createdAt || existingTask.createdAt,
         }
       },
       { new: true }
@@ -634,6 +645,25 @@ exports.createChecklistTask = async (req, res) => {
      * or scan forward from this date for Weekly/Monthly.
      */
     const baseAnchorDate = startDate ? new Date(startDate) : new Date();
+
+
+
+    // Example for weekly
+if (frequency === "Weekly") {
+  const selectedDays = frequencyConfig.daysOfWeek || [];
+  const weekends = tenant.weekends || [0];
+
+  const conflictDays = selectedDays.filter(day => weekends.includes(day));
+
+  if (conflictDays.length > 0) {
+    return res.status(400).json({
+      message: "Invalid configuration: Selected working day falls on employee off day",
+      conflictDays
+    });
+  }
+}
+
+
 
     const firstDueDate = calculateNextDate(
       frequency,
@@ -859,7 +889,10 @@ exports.getEmployeeDeepDive = async (req, res) => {
     });
 
     // 4. Process Checklist instances that fall within the range
-    checklists.forEach(t => {
+   
+   
+  
+  /*  checklists.forEach(t => {
       const rangeHistory = t.history?.filter(h =>
         new Date(h.timestamp) >= new Date(startDate) && new Date(h.timestamp) <= new Date(endDate)
       ) || [];
@@ -890,6 +923,77 @@ exports.getEmployeeDeepDive = async (req, res) => {
         });
       });
     });
+    
+    
+    
+    */
+
+
+    // 4. Process Checklist instances (INCLUDING PENDING)
+checklists.forEach(t => {
+  const start = new Date(startDate);
+  const end = new Date(endDate);
+
+  let pointer = new Date(t.nextDueDate);
+  pointer.setHours(0,0,0,0);
+
+  let loop = 0;
+
+  while (pointer <= end && loop < 50) {
+    loop++;
+
+    const instanceDate = new Date(pointer);
+
+    // Check if completed
+    const done = t.history?.find(h => {
+      const hDate = new Date(h.instanceDate || h.timestamp);
+      return h.action === 'Completed' &&
+             hDate.toDateString() === instanceDate.toDateString();
+    });
+
+    // LEAVE FILTERING
+    if (hasLeave) {
+      const leaveStart = new Date(employee.leaveStatus.startDate);
+      const leaveEnd = new Date(employee.leaveStatus.endDate);
+
+      const iDate = instanceDate.setHours(0,0,0,0);
+      const sDate = new Date(leaveStart).setHours(0,0,0,0);
+      const eDate = new Date(leaveEnd).setHours(23,59,59,999);
+
+      if (iDate >= sDate && iDate <= eDate) {
+        pointer.setDate(pointer.getDate() + 1);
+        continue;
+      }
+    }
+
+    let status = "PENDING";
+
+    if (done) {
+      const isLate = new Date(done.timestamp).toDateString() !== instanceDate.toDateString();
+      status = isLate ? "LATE" : "COMPLETED";
+    } else if (instanceDate < new Date()) {
+      status = "OVERDUE";
+    }
+
+    detailedRows.push({
+      id: t._id,
+      name: t.taskName,
+      type: 'Checklist',
+      deadline: instanceDate,
+      completedAt: done?.timestamp || null,
+      status,
+      remarks: done?.remarks || "",
+      isChecklistInstance: true   // ⭐ IMPORTANT FLAG
+    });
+
+    // Move pointer
+    if (t.frequency === 'Daily') pointer.setDate(pointer.getDate() + 1);
+    else if (t.frequency === 'Weekly') pointer.setDate(pointer.getDate() + 7);
+    else break;
+  }
+});
+
+
 
     res.status(200).json(detailedRows);
   } catch (error) {
@@ -924,8 +1028,8 @@ exports.sendWhatsAppReminder = async (req, res) => {
 
     const tenant = await Tenant.findById(task.tenantId);
     const companySubdomain = tenant?.subdomain || "portal";
-    const loginLink = `https://${companySubdomain}.lrbcloud.ai/login`;
-
+    //const loginLink = `https://${companySubdomain}.lrbcloud.ai/login`;
+    const loginLink = `https://${companySubdomain}.lrbcloud.ai/dashboard/my-tasks`
     /**
      * TEMPLATE: coordinator_manual_reminder
      * {{1}} - Employee Name (Doer)
@@ -1002,7 +1106,8 @@ exports.dispatchDailyBriefings = async () => {
               String(todaysTasks),                    // {{3}}
               String(backlogTasks),                   // {{4}}
               String(totalActionItems),               // {{5}}
-              `https://${tenant.subdomain}.lrbcloud.ai/login` // {{6}}
+              //`https://${tenant.subdomain}.lrbcloud.ai/login` // {{6}}
+              `https://${tenant.subdomain}.lrbcloud.ai/dashboard/my-tasks`
             ]
           };
 
@@ -1100,10 +1205,11 @@ exports.getCoordinatorTasks = async (req, res) => {
     res.status(500).json({ message: "Internal Server Error", error: error.message });
   }
 };
-
+/*
 exports.handleRevision = async (req, res) => {
   try {
     const { taskId, action, newDeadline, newDoerId, remarks, assignerId } = req.body;
+    const { proposedDeadline } = req.body;
 
     // 1. Fetch Task and populate all related parties
     const task = await DelegationTask.findById(taskId)
@@ -1130,11 +1236,34 @@ exports.handleRevision = async (req, res) => {
       ? task.files.map((f, i) => `\n📎 Ref ${i + 1}: ${f.fileUrl}`).join("")
       : "\nNo attachments provided.";
 
-    /**
-     * NEW: TRIGGER REVISION REQUEST NOTIFICATION
-     * If the status is 'Revision Requested', notify the Assigner using the template.
-     */
-    if (task.status === 'Revision Requested' && action !== 'Approve' && action !== 'Reassign') {
+
+    // --- REQUEST REVISION ---
+if (action === 'Request') {
+  task.status = 'Revision Requested';
+  task.remarks = remarks || '';
+
+  task.history.push({
+    action: "Revision Requested",
+    performedBy: task.doerId,
+    remarks,
+    timestamp: new Date()
+  });
+
+  await task.save();
+}
+
+
+
+
+    
+    // * NEW: TRIGGER REVISION REQUEST NOTIFICATION
+     //* If the status is 'Revision Requested', notify the Assigner using the template.
+     
+    //if (task.status === 'Revision Requested' && action !== 'Approve' && action !== 'Reassign') {
+   
+   
+   
+    if (action === 'Request'){
       try {
         if (task.assignerId?.whatsappNumber) {
           /**
@@ -1144,7 +1273,9 @@ exports.handleRevision = async (req, res) => {
            * {{3}} - Requested Deadline
            * {{4}} - Reason/Remarks
            * {{5}} - Approval/Login Link
-           */
+           .................................
+
+           
           const revisionPayload = {
             templateName: "task_revision_request",
             variables: [
@@ -1225,6 +1356,180 @@ exports.handleRevision = async (req, res) => {
   } catch (error) {
     console.error("Revision Error:", error.message);
     res.status(500).json({ message: "Update failed", error: error.message });
+  }
+};
+*/
+
+
+
+exports.handleRevision = async (req, res) => {
+  try {
+    const { taskId, action, newDeadline, newDoerId, remarks, assignerId, proposedDeadline } = req.body;
+
+    // 1. Fetch Task
+    const task = await DelegationTask.findById(taskId)
+      .populate('assignerId doerId coordinatorId');
+
+    if (!task) return res.status(404).json({ message: "Task not found" });
+
+    const Tenant = require('../models/Tenant');
+    const tenant = await Tenant.findById(task.tenantId);
+
+    const companySubdomain = tenant?.subdomain || "portal";
+    const loginLink = `https://${companySubdomain}.lrbcloud.ai/login`;
+
+    const moment = require('moment');
+
+    const helperIds = Array.isArray(task.helperDoers) ? task.helperDoers.map(h => h.helperId) : [];
+    const helpers = helperIds.length > 0 ? await Employee.find({ _id: { $in: helperIds } }) : [];
+    const helperNames = helpers.map(h => h.name).join(", ") || "None";
+
+    const fileLinks = task.files && task.files.length > 0
+      ? task.files.map((f, i) => `\n📎 Ref ${i + 1}: ${f.fileUrl}`).join("")
+      : "\nNo attachments provided.";
+    
+    if (action === 'Request') {
+      task.status = 'Revision Requested';
+      task.remarks = remarks || '';
+
+      
+      if (proposedDeadline) {
+        task.proposedDeadline = new Date(proposedDeadline);
+      }
+
+      task.history.push({
+        action: "Revision Requested",
+        performedBy: task.doerId,
+        remarks,
+        timestamp: new Date()
+      });
+
+      await task.save();
+
+      // WhatsApp
+      try {
+        if (task.assignerId?.whatsappNumber) {
+          const formattedDeadline = moment(task.proposedDeadline || task.deadline)
+            .format('DD MMM YYYY, hh:mm A');
+
+          const revisionPayload = {
+            templateName: "task_revision_request",
+            variables: [
+              task.doerId?.name || "Staff",
+              task.title,
+              formattedDeadline,
+              task.remarks || "Not specified",
+              loginLink
+            ]
+          };
+
+          await sendWhatsAppMessage(task.assignerId.whatsappNumber, revisionPayload);
+        }
+      } catch (waErr) {
+        console.error("⚠️ Revision Request Notify Error:", waErr.message);
+      }
+    }
+
+    
+    if (action === 'Approve') {
+
+      
+      const finalDeadline = newDeadline || task.proposedDeadline || task.deadline;
+
+      task.deadline = new Date(finalDeadline);
+      task.status = 'Accepted';
+      task.remarks = "";
+      task.proposedDeadline = null; // cleanup
+
+      task.history.push({
+        action: "Deadline Approved",
+        performedBy: assignerId,
+        remarks: `New target date: ${new Date(task.deadline).toLocaleDateString()}`,
+        timestamp: new Date()
+      });
+
+      const formattedDeadline = moment(task.deadline).format('DD MMM YYYY, hh:mm A');
+
+      try {
+        const fullDetails = `\n\n*Task:* ${task.title}\n*Description:* ${task.description || "No notes."}\n*Given By:* ${task.assignerId?.name}\n*Primary Doer:* ${task.doerId?.name}\n*Coordinator:* ${task.coordinatorId?.name || 'Admin'}\n*Support Team:* ${helperNames}\n*New Deadline:* ${formattedDeadline}\n*Urgency:* ${task.priority}\n*Files:* ${fileLinks}\n\n*Login Link:* ${loginLink}`;
+
+        const message = `📅 *Extra Time Approved*\n\nHi [Name], the deadline for this task has been updated.` + fullDetails;
+
+        if (task.doerId?.whatsappNumber) await sendWhatsAppMessage(task.doerId.whatsappNumber, message.replace("[Name]", task.doerId.name));
+        if (task.assignerId?.whatsappNumber) await sendWhatsAppMessage(task.assignerId.whatsappNumber, message.replace("[Name]", task.assignerId.name));
+        if (task.coordinatorId?.whatsappNumber) await sendWhatsAppMessage(task.coordinatorId.whatsappNumber, message.replace("[Name]", task.coordinatorId.name));
+
+        for (const helper of helpers) {
+          if (helper.whatsappNumber) {
+            await sendWhatsAppMessage(helper.whatsappNumber, message.replace("[Name]", helper.name));
+          }
+        }
+
+      } catch (waErr) {
+        console.error("WA Error:", waErr.message);
+      }
+    }
+
+    else if (action === 'Reassign') {
+
+      const oldDoerName = task.doerId?.name || "Previous Staff";
+      task.doerId = newDoerId;
+      task.status = 'Pending';
+
+
+      if (newDeadline) {
+        task.deadline = new Date(newDeadline);
+      }
+
+      task.history.push({
+        action: "Task Reassigned",
+        performedBy: assignerId,
+        remarks: `Work moved from ${oldDoerName} to new person. Reason: ${remarks}`,
+        timestamp: new Date()
+      });
+
+      await task.save();
+
+      const updatedTask = await DelegationTask.findById(taskId)
+        .populate('doerId coordinatorId assignerId');
+
+      const newDoer = updatedTask.doerId;
+
+      const formattedDeadline = moment(updatedTask.deadline).format('DD MMM YYYY, hh:mm A');
+
+      try {
+        const fullTaskDetails = `\n\n*Task:* ${updatedTask.title}\n*Description:* ${updatedTask.description || "No notes."}\n*Given By:* ${updatedTask.assignerId?.name}\n*Primary Doer:* ${newDoer?.name}\n*Coordinator:* ${updatedTask.coordinatorId?.name || 'Admin'}\n*Support Team:* ${helperNames}\n*Deadline:* ${formattedDeadline}\n*Urgency:* ${updatedTask.priority}\n*Files:* ${fileLinks}\n\n*Login Link:* ${loginLink}`;
+
+        const message = `🔄 *Work Reassigned*\n\nHi [Name], this task has been moved to ${newDoer?.name}.` + fullTaskDetails;
+
+        if (newDoer?.whatsappNumber) await sendWhatsAppMessage(newDoer.whatsappNumber, message.replace("[Name]", newDoer.name));
+        if (updatedTask.assignerId?.whatsappNumber) await sendWhatsAppMessage(updatedTask.assignerId.whatsappNumber, message.replace("[Name]", updatedTask.assignerId.name));
+        if (updatedTask.coordinatorId?.whatsappNumber) await sendWhatsAppMessage(updatedTask.coordinatorId.whatsappNumber, message.replace("[Name]", updatedTask.coordinatorId.name));
+
+        for (const helper of helpers) {
+          if (helper.whatsappNumber) {
+            await sendWhatsAppMessage(helper.whatsappNumber, message.replace("[Name]", helper.name));
+          }
+        }
+
+      } catch (waErr) {
+        console.error("WA Error:", waErr.message);
+      }
+    }
+
+    await task.save();
+
+    res.status(200).json({
+      message: `Task ${action} successfully`,
+      task
+    });
+
+  } catch (error) {
+    console.error("Revision Error:", error.message);
+    res.status(500).json({
+      message: "Update failed",
+      error: error.message
+    });
   }
 };
 
@@ -1584,7 +1889,8 @@ exports.createTask = async (req, res) => {
 
       const companySubdomain = tenant?.subdomain || "portal";
 
-      const briefingLink = `https://${companySubdomain}.lrbcloud.ai/login`;
+      //const briefingLink = `https://${companySubdomain}.lrbcloud.ai/login`;
+      const briefingLink = `https://${companySubdomain}.lrbcloud.ai/dashboard/my-tasks`
 
       const formattedDeadline = moment(newTask.deadline).format('DD MMM YYYY, hh:mm A');
 

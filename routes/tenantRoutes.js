@@ -23,6 +23,10 @@ const {
     updateEmployee,
     updateBranding,
     verifyTenant,
+
+    getProfile,
+
+
 } = require('../controllers/tenantController');
 
 // ==========================================
@@ -105,5 +109,15 @@ router.get('/global-performance/:tenantId', taskController.getGlobalPerformance)
 // 6. LOGIN & VERIFICATION
 // ==========================================
 router.post('/login-employee', loginEmployee);
+
+
+
+
+
+router.get('/auth/me',getProfile);
+
+
+
+
 
 module.exports = router;

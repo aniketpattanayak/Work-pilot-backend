@@ -1,0 +1,258 @@
+
+
+/*
+exports.manualDownload = async (req, res) => {
+    try {
+        const { tenantId } = req.params;
+        const { range } = req.query; 
+        const days = range === 'monthly' ? 30 : 7;
+
+        // 1. Fetch Data
+        const startDate = moment().subtract(days, 'days').startOf('day').toDate();
+        const [delegations, checklists] = await Promise.all([
+            DelegationTask.find({ tenantId, createdAt: { $gte: startDate } }).populate('assignerId doerId'),
+            ChecklistTask.find({ tenantId }).populate('doerId')
+        ]);
+
+        // 2. Create CSV Header
+        let csvContent = "Task Name,Done By,Date,Status,Assigned By,Category,Time Finished\n";
+
+        // 3. Add Delegation Tasks
+        delegations.forEach(task => {
+            const doneRecord = task.history.find(h => h.action === 'Completed' || h.action === 'Verified');
+            const status = doneRecord ? 'Done' : 'Not Done';
+            const time = doneRecord ? moment(doneRecord.timestamp).format('hh:mm A') : 'N/A';
+            const date = moment(task.deadline).format('DD MMM YYYY');
+            
+            // Format: Task, Doer, Date, Status, Assigner, Category, Time
+            csvContent += `"${task.title}","${task.doerId?.name || 'Staff'}","${date}","${status}","${task.assignerId?.name || 'Admin'}","Delegation","${time}"\n`;
+        });
+
+        // 4. Add Checklist Tasks (Day-by-Day)
+        for (let i = 0; i < days; i++) {
+            const currentDay = moment().subtract(i, 'days').startOf('day');
+            const dateLabel = currentDay.format('DD MMM YYYY');
+
+            checklists.forEach(task => {
+                const wasDone = task.history.find(h => 
+                    moment(h.instanceDate || h.timestamp).isSame(currentDay, 'day') && 
+                    (h.action === 'Completed' || h.action === 'Administrative Completion')
+                );
+
+                const status = wasDone ? 'Done' : 'Not Done';
+                const time = wasDone ? moment(wasDone.timestamp).format('hh:mm A') : 'N/A';
+                
+                csvContent += `"${task.taskName}","${task.doerId?.name || 'Staff'}","${dateLabel}","${status}","Admin","Checklist","${time}"\n`;
+            });
+        }
+
+        // 5. Send as CSV Download
+        res.setHeader('Content-Type', 'text/csv');
+        res.setHeader('Content-Disposition', `attachment; filename=WorkPilot_Report_${range}.csv`);
+        res.status(200).send(csvContent);
+
+    } catch (error) {
+        console.error("CSV Export Error:", error.message);
+        res.status(500).json({ message: "Failed to generate spreadsheet", error: error.message });
+    }
+};
+*/
+
+
+
+
+
+
+/*
+
+exports.manualDownload = async (req, res) => {
+    try {
+        const { tenantId } = req.params;
+        const { range } = req.query; 
+        const days = range === 'monthly' ? 30 : 7;
+
+        // 1. Fetch Data
+        const startDate = moment().subtract(days, 'days').startOf('day').toDate();
+        const [delegations, checklists] = await Promise.all([
+            DelegationTask.find({ tenantId, createdAt: { $gte: startDate } }).populate('assignerId doerId'),
+            ChecklistTask.find({ tenantId }).populate('doerId')
+        ]);
+
+        // 2. Headers (Side by Side)
+let csvContent = 
+"Delegation Task,Done By,Date,Status,Assigned By,Category,Time Finished,,,,Checklist Task,Done By,Date,Status,Assigned By,Category,Time Finished\n";
+
+// 3. Prepare Delegation Rows
+let delegationRows = delegations.map(task => {
+    const doneRecord = task.history.find(h => h.action === 'Completed' || h.action === 'Verified');
+    const status = doneRecord ? 'Done' : 'Not Done';
+    const time = doneRecord ? moment(doneRecord.timestamp).format('hh:mm A') : 'N/A';
+    const date = moment(task.deadline).format('DD MMM YYYY');
+
+    return [
+        task.title,
+        task.doerId?.name || 'Staff',
+        date,
+        status,
+        task.assignerId?.name || 'Admin',
+        'Delegation',
+        time
+    ];
+});
+
+// 4. Prepare Checklist Rows
+let checklistRows = [];
+
+for (let i = 0; i < days; i++) {
+    const currentDay = moment().subtract(i, 'days').startOf('day');
+    const dateLabel = currentDay.format('DD MMM YYYY');
+
+    checklists.forEach(task => {
+        const wasDone = task.history.find(h => 
+            moment(h.instanceDate || h.timestamp).isSame(currentDay, 'day') &&
+            (h.action === 'Completed' || h.action === 'Administrative Completion')
+        );
+
+        const status = wasDone ? 'Done' : 'Not Done';
+        const time = wasDone ? moment(wasDone.timestamp).format('hh:mm A') : 'N/A';
+
+        checklistRows.push([
+            task.taskName,
+            task.doerId?.name || 'Staff',
+            dateLabel,
+            status,
+            'Admin',
+            'Checklist',
+            time
+        ]);
+    });
+}
+
+// 5. Merge Side-by-Side
+const maxRows = Math.max(delegationRows.length, checklistRows.length);
+
+for (let i = 0; i < maxRows; i++) {
+    const dlg = delegationRows[i] || ["", "", "", "", "", "", ""];
+    const chk = checklistRows[i] || ["", "", "", "", "", "", ""];
+
+    csvContent += `"${dlg.join('","')}",,,,"${chk.join('","')}"\n`;
+}
+
+
+
+        // 5. Send as CSV Download
+        res.setHeader('Content-Type', 'text/csv');
+        res.setHeader('Content-Disposition', `attachment; filename=WorkPilot_Report_${range}.csv`);
+        res.status(200).send(csvContent);
+
+    } catch (error) {
+        console.error("CSV Export Error:", error.message);
+        res.status(500).json({ message: "Failed to generate spreadsheet", error: error.message });
+    }
+};
+
+
+
+
+*/
+
+
+
+
+
+
+const ExcelJS = require('exceljs');
+
+
+
+/*
+exports.manualDownload = async (req, res) => {
+    try {
+        const { tenantId } = req.params;
+        const { range } = req.query;
+        const days = range === 'monthly' ? 30 : 7;
+
+        const startDate = moment().subtract(days, 'days').startOf('day').toDate();
+
+        const [delegations, checklists] = await Promise.all([
+            DelegationTask.find({ tenantId, createdAt: { $gte: startDate } }).populate('assignerId doerId'),
+            ChecklistTask.find({ tenantId }).populate('doerId')
+        ]);
+
+        const workbook = new ExcelJS.Workbook();
+
+        // =========================
+        // SHEET 1 → DELEGATIONS
+        // =========================
+        const delegationSheet = workbook.addWorksheet('Delegations');
+
+        delegationSheet.columns = [
+            { header: 'Task', key: 'task' },
+            { header: 'Assigned To', key: 'doneBy' },
+            { header: 'Deadline', key: 'date' },
+            { header: 'Status', key: 'status' },
+            { header: 'Assigned By', key: 'assignedBy' },
+        ];
+
+        delegations.forEach(task => {
+            const doneRecord = task.history.find(h => 
+                h.action === 'Completed' || h.action === 'Verified'
+            );
+
+            delegationSheet.addRow({
+                task: task.title,
+                doneBy: task.doerId?.name || 'Staff',
+                date: moment(task.deadline).format('DD MMM YYYY'),
+                status: doneRecord ? 'Done' : 'Not Done',
+                assignedBy: task.assignerId?.name || 'Admin',
+            });
+        });
+        const checklistSheet = workbook.addWorksheet('Checklist');
+
+        checklistSheet.columns = [
+            { header: 'Task', key: 'task' },
+            { header: 'Assigned To', key: 'doneBy' },
+            { header: 'Date', key: 'date' },
+            { header: 'Status', key: 'status' },
+            { header: 'Assigned By', key: 'assignedBy' },
+        ];
+
+        for (let i = 0; i < days; i++) {
+            const currentDay = moment().subtract(i, 'days').startOf('day');
+
+            checklists.forEach(task => {
+                const wasDone = task.history.find(h =>
+                    moment(h.instanceDate || h.timestamp).isSame(currentDay, 'day') &&
+                    (h.action === 'Completed' || h.action === 'Administrative Completion')
+                );
+
+                checklistSheet.addRow({
+                    task: task.taskName,
+                    doneBy: task.doerId?.name || 'Staff',
+                    date: currentDay.format('DD MMM YYYY'),
+                    status: wasDone ? 'Done' : 'Not Done',
+                    assignedBy: 'Admin'
+                });
+            });
+        }
+        res.setHeader(
+            'Content-Type',
+            'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
+        );
+
+        res.setHeader(
+            'Content-Disposition',
+            `attachment; filename=WorkPilot_Report_${range}.xlsx`
+        );
+
+        await workbook.xlsx.write(res);
+        res.end();
+
+    } catch (error) {
+        console.error("Excel Export Error:", error.message);
+        res.status(500).json({ message: "Failed to generate spreadsheet" });
+    }
+};
+
+*/
+

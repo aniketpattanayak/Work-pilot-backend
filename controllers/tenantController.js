@@ -411,6 +411,47 @@ exports.loginEmployee = async (req, res) => {
     res.status(500).json({ message: "Login Error", error: error.message });
   }
 };
+
+
+
+exports.getProfile = async (req, res) => {
+  try {
+    // user info comes from JWT middleware
+    const userId = req.user?.id;
+
+    if (!userId) {
+      return res.status(401).json({ message: "Unauthorized" });
+    }
+
+    // fetch latest employee data from DB
+    const employee = await Employee.findById(userId)
+      .select('-password'); // NEVER send password
+
+    if (!employee) {
+      return res.status(404).json({ message: "User not found" });
+    }
+
+    res.status(200).json({
+      user: {
+        id: employee._id,
+        name: employee.name,
+        roles: employee.roles,
+        department: employee.department,
+        email: employee.email
+      }
+    });
+
+  } catch (error) {
+    console.error("Profile Fetch Error:", error.message);
+    res.status(500).json({
+      message: "Failed to fetch profile",
+      error: error.message
+    });
+  }
+};
+
+
+
 // server/controllers/tenantController.js
 exports.updateBranding = async (req, res) => {
   try {

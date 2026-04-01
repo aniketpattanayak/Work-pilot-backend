@@ -16,6 +16,9 @@ const {
     updateEmployeeMapping,
     updateEmployee,
     updateBranding, 
+
+    getProfile,
+
 } = require('../controllers/tenantController');
 const Tenant = require('../models/Tenant');
 const upload = require('../utils/s3Uploader'); 
@@ -85,6 +88,12 @@ router.get('/settings/:tenantId', async (req, res) => {
 
 // --- LOGIN & VERIFICATION ---
 router.post('/login-employee', loginEmployee);
+
+
+
+router.get('/auth/me',getProfile);
+
+
 router.get('/verify/:subdomain', async (req, res) => {
     try {
       const tenant = await Tenant.findOne({ subdomain: req.params.subdomain.toLowerCase() });
