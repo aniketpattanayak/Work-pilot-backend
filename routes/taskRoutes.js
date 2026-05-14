@@ -109,21 +109,7 @@ router.get('/settings/:tenantId', authMiddleware, subscriptionGuard, sameTenantO
 
 // Tasks
 router.post('/create-task', authMiddleware, subscriptionGuard,
-  ...useUpload(_upload.fields([
-    { name: 'files',     maxCount: 10 },
-    { name: 'taskFiles', maxCount: 10 },
-  ])),
-  // Normalize: merge taskFiles into files so controller always reads req.files.files
-  (req, res, next) => {
-    if (req.files) {
-      const all = [
-        ...(req.files['files']     || []),
-        ...(req.files['taskFiles'] || []),
-      ];
-      req.files = all; // flatten to array like upload.array() does
-    }
-    next();
-  },
+  ...useUpload(_upload.array('taskFiles', 10)),
   taskController.createTask
 );
 router.delete('/:taskId', authMiddleware, subscriptionGuard, taskController.deleteTask);
