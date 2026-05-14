@@ -108,10 +108,25 @@ router.get('/settings/:tenantId', authMiddleware, subscriptionGuard, sameTenantO
 });
 
 // Tasks
-router.post('/create-task', authMiddleware, subscriptionGuard,
-  ...useUpload(_upload.array('taskFiles', 10)),
-  taskController.createTask
-);
+const uploadTaskFiles = _upload.array('taskFiles', 10);
+
+// Tasks - Bulletproof Upload Route
+router.post('/create-task', authMiddleware, subscriptionGuard, (req, res, next) => {
+  // Use .any() to bypass strict field-name rejection in Multer-S3
+  const uploadHandler = _upload.any(); 
+  
+  uploadHandler(req, res, function (err) {
+    if (err) {
+      console.error("🚨 LIVE SERVER UPLOAD CRASH:", err.message || err);
+      // This will send the EXACT error to your frontend instead of a blank 500 error
+      return res.status(400).json({ 
+        message: "File Upload Rejected by Server", 
+        error: err.message || "Unknown Upload Error" 
+      });
+    }
+    next();
+  });
+}, taskController.createTask);
 router.delete('/:taskId', authMiddleware, subscriptionGuard, taskController.deleteTask);
 router.post('/handle-revision', authMiddleware, subscriptionGuard, taskController.handleRevision);
 router.post('/coordinator-force-done', authMiddleware, subscriptionGuard, taskController.coordinatorForceDone);

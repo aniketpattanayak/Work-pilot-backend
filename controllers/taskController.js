@@ -1766,210 +1766,92 @@ exports.getCoordinatorMapping = async (req, res) => {
 
 
 exports.createTask = async (req, res) => {
-
-  // Ensure moment is available for deadline formatting
-
   const moment = require('moment');
 
-
-
   try {
-
     const taskData = { ...req.body };
 
-
-
-    // --- PRESERVE: PARSE HELPER DOERS ---
-
+    // --- PARSE HELPER DOERS ---
     if (taskData.helperDoers && typeof taskData.helperDoers === 'string') {
-
       try {
-
         taskData.helperDoers = JSON.parse(taskData.helperDoers);
-
       } catch (e) {
-
-        console.error("❌ Helper Doers Parse Error:", e.message);
-
         taskData.helperDoers = [];
-
       }
-
     }
 
-
-
-    // --- PRESERVE: PROCESS FILES ---
-
+    // --- BULLETPROOF FILE PROCESSING ---
     let uploadedFiles = [];
-
-    if (req.files && req.files.length > 0) {
-
+    if (req.files && Array.isArray(req.files) && req.files.length > 0) {
       uploadedFiles = req.files.map(file => ({
-
         fileName: file.originalname,
-
         fileUrl: file.location || file.path,
-
         uploadedAt: new Date()
-
       }));
-
     }
-
     taskData.files = uploadedFiles;
 
-
-
-    // --- PRESERVE: DATA CLEANING ---
-
-    if (!taskData.coordinatorId || taskData.coordinatorId === "" || taskData.coordinatorId === "null") {
-
+    // --- DATA CLEANING ---
+    if (!taskData.coordinatorId || taskData.coordinatorId === "" || taskData.coordinatorId === "null" || taskData.coordinatorId === "undefined") {
       delete taskData.coordinatorId;
-
     }
-
-
 
     if (taskData.coworkers && typeof taskData.coworkers === 'string') {
-
-      try {
-
-        taskData.coworkers = JSON.parse(taskData.coworkers);
-
-      } catch (e) {
-
-        taskData.coworkers = [];
-
-      }
-
+      try { taskData.coworkers = JSON.parse(taskData.coworkers); } catch (e) { taskData.coworkers = []; }
     }
 
-
-
-    // 2. Save to Database
-
+    // --- SAVE TO DATABASE ---
+    const DelegationTask = require('../models/DelegationTask');
     const newTask = new DelegationTask(taskData);
-
+    
     newTask.history = [{
-
       action: "Task Created",
-
       performedBy: taskData.assignerId,
-
       timestamp: new Date(),
-
       remarks: `Work assigned with ${uploadedFiles.length} file(s).`
-
     }];
-
-
 
     await newTask.save();
 
-    console.log(`✅ Task "${newTask.title}" saved.`);
-
-
-
-    // --- UPDATED: WHATSAPP NOTIFICATIONS (ONLY TO DOER) ---
-
+    // --- WHATSAPP NOTIFICATIONS ---
     try {
+      const Employee = require('../models/Employee');
+      const Tenant = require('../models/Tenant');
 
-      const [assigner, doer, tenant] = await Promise.all([
-
-        Employee.findById(newTask.assignerId),
-
-        Employee.findById(newTask.doerId),
-
-        Tenant.findById(newTask.tenantId)
-
-      ]);
-
-
+      const assigner = taskData.assignerId ? await Employee.findById(taskData.assignerId).catch(()=>null) : null;
+      const doer = taskData.doerId ? await Employee.findById(taskData.doerId).catch(()=>null) : null;
+      const tenant = taskData.tenantId ? await Tenant.findById(taskData.tenantId).catch(()=>null) : null;
 
       const companySubdomain = tenant?.subdomain || "portal";
-
-      //const briefingLink = `https://${companySubdomain}.lrbcloud.ai/login`;
-      const briefingLink = `https://${companySubdomain}.lrbcloud.ai/dashboard/my-tasks`
-
+      const briefingLink = `https://${companySubdomain}.lrbcloud.ai/dashboard/my-tasks`;
       const formattedDeadline = moment(newTask.deadline).format('DD MMM YYYY, hh:mm A');
 
-
-
-      /**
-
-       * TEMPLATE MAPPING (Based on your new_task_delegation_v2 screenshot):
-
-       * {{1}} - Employee Name
-
-       * {{2}} - Task Title
-
-       * {{3}} - Given By (Assigner Name)
-
-       * {{4}} - Deadline
-
-       * {{5}} - Priority
-
-       * {{6}} - View Briefing Link
-
-       */
-
       if (doer?.whatsappNumber) {
-
         const payload = {
-
-          templateName: "new_task_delegation_v2", // Updated based on screenshot
-
+          templateName: "new_task_delegation_v2",
           variables: [
-
-            doer.name,                  // {{1}} Employee Name
-
-            newTask.title,              // {{2}} Task Title
-
-            assigner?.name || "Admin",  // {{3}} Given By
-
-            formattedDeadline,          // {{4}} Deadline
-
-            newTask.priority || "Normal",// {{5}} Priority
-
-            briefingLink                // {{6}} Briefing Link
-
+            doer.name,                  
+            newTask.title,              
+            assigner?.name || "Admin",  
+            formattedDeadline,          
+            newTask.priority || "Normal",
+            briefingLink                
           ]
-
         };
 
-
-
-        // Send to Primary Doer only
-
+        const sendWhatsAppMessage = require('../utils/whatsappNotify');
         await sendWhatsAppMessage(doer.whatsappNumber, payload);
-
-        console.log(`🚀 Primary Doer Notified: ${doer.name}`);
-
       }
-
-
-
     } catch (waError) {
-
-      console.error("⚠️ WhatsApp Notify Error:", waError.message);
-
+      console.error("⚠️ WhatsApp Error:", waError.message);
     }
 
-
-
-    res.status(201).json({ message: "Task Assigned & Doer Notified", task: newTask });
-
-
+    res.status(201).json({ message: "Task Assigned Successfully", task: newTask });
 
   } catch (error) {
-
-    console.error("❌ Task Error:", error.message);
-
-    res.status(500).json({ message: "Failed to create task", error: error.message });
-
+    console.error("❌ Controller Error:", error.message);
+    res.status(500).json({ message: "Database Error", error: error.message });
   }
-
 };
 
 
