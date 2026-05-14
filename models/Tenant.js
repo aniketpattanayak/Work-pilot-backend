@@ -67,7 +67,15 @@ const TenantSchema = new mongoose.Schema({
       pointThreshold: { type: Number, required: true }, // Points needed to unlock
       iconName: { type: String, default: 'Star' },    // Key for Lucide icon or S3 URL
       color: { type: String, default: '#fbbf24' },    // Custom HEX for the badge glow
-      createdAt: { type: Date, default: Date.now }
+      // Subscription control
+  subscription: {
+    status:   { type: String, enum: ['active', 'paused'], default: 'active' },
+    pausedAt: { type: Date, default: null },
+    pausedBy: { type: String, default: null }, // superadmin username
+    reason:   { type: String, default: '' },
+  },
+
+  createdAt: { type: Date, default: Date.now }
     }
   ],
 

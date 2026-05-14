@@ -7,6 +7,9 @@ const mongoose = require('mongoose');
 const StepTrackingSchema = new mongoose.Schema({
   nodeName: String,
   stepIndex: Number,
+
+   assignedTo: String, // ✅ ADD THIS
+   
   
   // The calculated "Target Time" (Current Time + Offset)
   plannedDeadline: Date,
@@ -19,6 +22,34 @@ const StepTrackingSchema = new mongoose.Schema({
     enum: ['Pending', 'Completed', 'Delayed'], 
     default: 'Pending' 
   },
+
+
+
+
+
+
+  inputType: String, // copied from template
+
+decision: {
+  type: String,
+  enum: ['Yes', 'No', null],
+  default: null
+},
+
+isPaused: {
+  type: Boolean,
+  default: false
+},
+
+pausedAt: Date,
+
+
+remarks: { type: String, default: "" },
+
+
+
+
+
   
   // Calculated automatically: (actualCompletedAt - plannedDeadline)
   delayInMinutes: { type: Number, default: 0 }
@@ -45,6 +76,15 @@ const FmsInstanceSchema = new mongoose.Schema({
     type: String, 
     required: true 
   }, 
+
+  sheetRowId: String, // ✅ ADD THIS4
+
+
+  sheetDataId: {
+  type: mongoose.Schema.Types.ObjectId,
+  ref: 'FmsSheetData'
+},
+
   
   // Deep copy of nodes from the Template to track this specific order's journey
   steps: [StepTrackingSchema],

@@ -37,6 +37,16 @@ const FmsNodeSchema = new mongoose.Schema({
     nextStepIndex: Number 
   }],
 
+
+  inputType: {
+  type: String,
+  enum: ['complete', 'yesno'],
+  default: 'complete'
+  },
+
+
+  
+
   // Legacy/Monitoring fields
   assignedRole: String, // Backup role
   slaHours: { type: Number, default: 24 } 
@@ -59,6 +69,19 @@ const FmsTemplateSchema = new mongoose.Schema({
 
   // The sequence of timed nodes
   nodes: [FmsNodeSchema], 
+
+
+
+
+
+  workingHours: {
+  start: { type: Number, default: 9 },  // 9 AM
+  end: { type: Number, default: 17 }    // 5 PM
+  },
+
+
+
+  
   
   isActive: { type: Boolean, default: true },
   createdAt: { type: Date, default: Date.now }

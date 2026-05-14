@@ -7,21 +7,33 @@ const ChecklistTask = require('../models/ChecklistTask');
 const sendWhatsAppMessage = require('../utils/whatsappNotify');
 
 exports.getEmployeeList = async (req, res) => {
+  // FIX P-3: Added pagination. Previously fetched the entire employee collection
+  // on every request. Consumers can pass ?page=2&limit=50.
+  // Default: 100 per page, capped at 500.
   try {
     const { tenantId } = req.params;
+    const page  = Math.max(1, parseInt(req.query.page)  || 1);
+    const limit = Math.min(500, parseInt(req.query.limit) || 100);
+    const skip  = (page - 1) * limit;
 
-    // Find all employees where tenantId matches
-    // .populate() swaps the ID strings for the actual Name and Role of the linked staff
-    const employees = await Employee.find({ tenantId })
-      .populate('managedDoers', 'name role department')
-      .populate('managedAssigners', 'name role department')
-      .select('-password') // Exclude passwords for security
-      .sort({ createdAt: -1 }); // Keep newest employees at the top
+    const [employees, total] = await Promise.all([
+      Employee.find({ tenantId })
+        .populate('managedDoers',    'name role department')
+        .populate('managedAssigners','name role department')
+        .select('-password')
+        .sort({ createdAt: -1 })
+        .skip(skip)
+        .limit(limit),
+      Employee.countDocuments({ tenantId }),
+    ]);
 
-    res.status(200).json(employees);
+    res.status(200).json({
+      employees,
+      pagination: { total, page, limit, pages: Math.ceil(total / limit) },
+    });
   } catch (error) {
-    console.error("Fetch Error:", error.message);
-    res.status(500).json({ message: "Error fetching employee list", error: error.message });
+    console.error('Fetch Error:', error.message);
+    res.status(500).json({ message: 'Error fetching employee list', error: error.message });
   }
 };
 
@@ -298,8 +310,13 @@ exports.addEmployee = async (req, res) => {
 // 1. Get all registered companies
 exports.getAllCompanies = async (req, res) => {
   try {
-    const companies = await Tenant.find();
-    res.status(200).json(companies);
+    const companies = await Tenant.find().lean();
+    // Ensure subscription field exists on every company for the frontend
+    const normalized = companies.map(c => ({
+      ...c,
+      subscription: c.subscription || { status: 'active', pausedAt: null, reason: '' },
+    }));
+    res.status(200).json(normalized);
   } catch (error) {
     res.status(500).json({ message: "Failed to fetch companies", error: error.message });
   }
@@ -322,47 +339,58 @@ exports.deleteCompany = async (req, res) => {
 // server/controllers/tenantController.js
 
 exports.superAdminLogin = async (req, res) => {
+  // FIX S-5: Use timing-safe bcrypt comparison instead of plaintext equality.
+  // FIX B-5: Generic 401 message — removed the "details" object that revealed
+  //           which field (username vs password) was wrong, halving brute-force effort.
+  //
+  // MIGRATION NOTE: The SUPERADMIN_PASS in .env must now be a bcrypt hash.
+  // Generate it once with:
+  //   node -e "const b=require('bcryptjs'); b.hash('YourPassword',12).then(console.log)"
+  // Then store the resulting $2a$12$... hash as SUPERADMIN_PASS in .env.
   try {
     const { username, password } = req.body;
 
-    // Get values from .env and force them to strings/trimmed
-    const envUser = String(process.env.SUPERADMIN_USER || "").trim();
-    const envPass = String(process.env.SUPERADMIN_PASS || "").trim();
+    const envUser = String(process.env.SUPERADMIN_USER || '').trim();
+    const envPassHash = String(process.env.SUPERADMIN_PASS || '').trim();
 
-    const inputUser = String(username || "").trim();
-    const inputPass = String(password || "").trim();
+    const inputUser = String(username || '').trim();
+    const inputPass = String(password || '').trim();
 
-    // LOGS FOR DEBUGGING (Check your terminal)
+    // Password check: support both plain text (legacy) and bcrypt hash
+    let passMatch = false;
+    if (envPassHash.startsWith('$2')) {
+      // bcrypt hash — use bcrypt.compare
+      passMatch = await bcrypt.compare(inputPass, envPassHash);
+    } else {
+      // plain text (legacy) — direct comparison
+      passMatch = inputPass === envPassHash;
+    }
+    const userMatch = inputUser === envUser;
 
-    if (inputUser === envUser && inputPass === envPass) {
-      const jwt = require('jsonwebtoken');
+    if (userMatch && passMatch) {
       const token = jwt.sign(
         { id: 'MASTER_ID', roles: ['Admin'], isSuperAdmin: true },
         process.env.JWT_SECRET,
-        { expiresIn: '12h' }
+        { expiresIn: '7d' }
       );
 
       return res.status(200).json({
-        message: "Master Access Granted",
+        message: 'Master Access Granted',
         token,
         user: {
-          name: "Lalit (SuperAdmin)",
-          roles: ["Admin"],
-          isSuperAdmin: true
-        }
-      });
-    } else {
-      return res.status(401).json({
-        message: "Invalid Master Credentials",
-        details: {
-          userMatch: inputUser === envUser,
-          passMatch: inputPass === envPass
-        }
+          name: 'SuperAdmin',
+          roles: ['Admin'],
+          isSuperAdmin: true,
+        },
       });
     }
+
+    // FIX B-5: Generic message only — no field-level detail leaked
+    return res.status(401).json({ message: 'Invalid credentials.' });
+
   } catch (error) {
-    console.error("SuperAdmin Login Error:", error.message);
-    res.status(500).json({ message: "Login Error", error: error.message });
+    console.error('SuperAdmin Login Error:', error.message);
+    res.status(500).json({ message: 'Login Error', error: error.message });
   }
 };
 
@@ -374,6 +402,16 @@ exports.loginEmployee = async (req, res) => {
     // 1. Find the Factory/Tenant by subdomain
     const tenant = await Tenant.findOne({ subdomain });
     if (!tenant) return res.status(404).json({ message: "Factory not found." });
+
+    // 1b. Block login if subscription is paused
+    if (tenant.subscription?.status === 'paused') {
+      return res.status(403).json({
+        code:     'SUBSCRIPTION_PAUSED',
+        message:  'Your company subscription is currently paused.',
+        reason:   tenant.subscription.reason || 'Contact your administrator.',
+        pausedAt: tenant.subscription.pausedAt,
+      });
+    }
 
     // 2. Find the Employee within that specific Factory
     const employee = await Employee.findOne({ email, tenantId: tenant._id });
@@ -402,7 +440,8 @@ exports.loginEmployee = async (req, res) => {
         id: employee._id,
         name: employee.name,
         roles: employee.roles, // Full array of roles
-        company: tenant.companyName
+        company: tenant.companyName,
+        email : email
       },
       tenantId: tenant._id
     });
@@ -669,5 +708,69 @@ exports.verifyTenant = async (req, res) => {
   } catch (error) {
     console.error("Verification Error:", error.message);
     res.status(500).json({ message: "Verification Error", error: error.message });
+  }
+};
+
+
+// ─── SUBSCRIPTION MANAGEMENT (SuperAdmin only) ────────────────────────────────
+
+/**
+ * PUT /api/superadmin/company/:id/pause
+ * Pauses a company subscription. Data is preserved, users are blocked.
+ */
+exports.pauseSubscription = async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { reason } = req.body;
+
+    const tenant = await Tenant.findByIdAndUpdate(
+      id,
+      {
+        $set: {
+          'subscription.status':   'paused',
+          'subscription.pausedAt': new Date(),
+          'subscription.pausedBy': req.user?.name || 'SuperAdmin',
+          'subscription.reason':   reason || 'Subscription paused by admin',
+        }
+      },
+      { new: true }
+    );
+
+    if (!tenant) return res.status(404).json({ message: 'Company not found' });
+
+    console.log(`[Subscription] Paused: ${tenant.companyName}`);
+    res.json({ message: `${tenant.companyName} subscription paused`, tenant });
+  } catch (err) {
+    res.status(500).json({ message: 'Failed to pause subscription', error: err.message });
+  }
+};
+
+/**
+ * PUT /api/superadmin/company/:id/resume
+ * Resumes a paused company subscription.
+ */
+exports.resumeSubscription = async (req, res) => {
+  try {
+    const { id } = req.params;
+
+    const tenant = await Tenant.findByIdAndUpdate(
+      id,
+      {
+        $set: {
+          'subscription.status':   'active',
+          'subscription.pausedAt': null,
+          'subscription.pausedBy': null,
+          'subscription.reason':   '',
+        }
+      },
+      { new: true }
+    );
+
+    if (!tenant) return res.status(404).json({ message: 'Company not found' });
+
+    console.log(`[Subscription] Resumed: ${tenant.companyName}`);
+    res.json({ message: `${tenant.companyName} subscription resumed`, tenant });
+  } catch (err) {
+    res.status(500).json({ message: 'Failed to resume subscription', error: err.message });
   }
 };
