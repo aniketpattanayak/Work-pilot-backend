@@ -10,7 +10,8 @@ require('dotenv').config();
 
 // --- 1. IMPORT ROUTE FILES ---
 const fmsRoutes    = require('./routes/fmsRoutes');
-const newFmsRoutes = require('./routes/newFmsRoutes');
+const newFmsRoutes    = require('./routes/newFmsRoutes');
+const orderFormRoutes = require('./routes/orderFormRoutes');
 const ticketRoutes = require('./routes/ticketRoutes');
 const taskRoutes = require('./routes/taskRoutes');
 const reportRoutes = require('./routes/reportRoutes');
@@ -65,7 +66,8 @@ app.use('/uploads', require('express').static(path.join(__dirname, 'uploads')));
 
 // 6. REGISTER ROUTES
 app.use('/api/fms',  fmsRoutes);     // old FMS (kept for compatibility)
-app.use('/api/fms2', newFmsRoutes);  // new FMS engine
+app.use('/api/fms2', newFmsRoutes);        // new FMS engine
+app.use('/api/fms2', orderFormRoutes);     // form-based order entry
 app.use('/api/tickets', ticketRoutes);
 app.use('/api/reports', reportRoutes);
 app.use('/api/superadmin', taskRoutes);

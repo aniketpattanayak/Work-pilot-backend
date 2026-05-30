@@ -82,8 +82,8 @@ const FlowTemplateSchema = new mongoose.Schema({
   isActive:  { type: Boolean, default: true },
 
   // Google Sheet connection (read-only — WorkPilot never writes to the sheet)
-  googleSheetId:   { type: String, required: true },
-  scriptUrl:       { type: String, required: true },
+  googleSheetId:   { type: String, default: '' },   // only required for sheet source
+  scriptUrl:       { type: String, default: '' },   // only required for sheet source
   tabName:         { type: String, default: 'Sheet1' },
   uniqueIdColumn:  { type: String, default: 'Order ID' }, // column that holds the order identifier
 
@@ -95,6 +95,9 @@ const FlowTemplateSchema = new mongoose.Schema({
   },
 
   // The flow graph
+  // 'sheet' = Google Sheet, 'form' = built-in WorkPilot form
+  dataSource:  { type: String, enum: ['sheet', 'form'], default: 'sheet' },
+
   startNodeId: { type: String, required: true },          // id of the first node to activate
   nodes:       { type: [NodeSchema], required: true },
 

@@ -185,28 +185,98 @@ function calculateDeadline(node, prevCompletedAt, rawSheetData, wh) {
   }
 }
 
+
+// ─── EMPLOYEE CACHE ───────────────────────────────────────────────────────────
+// Caches employees by ID so repeated DB lookups don't fail due to
+// connection timing issues or Mongoose model registration order.
+const _empCache = {};
+
+async function preCacheEmployees(template) {
+  const ids = (template.nodes || [])
+    .map(n => n.assignedTo?.value)
+    .filter(v => v && v.trim() && v.length === 24);
+
+  const unique = [...new Set(ids)];
+  if (unique.length === 0) return;
+
+  try {
+    const emps = await Employee.find({ _id: { $in: unique } }).select('_id name').lean();
+    emps.forEach(e => {
+      _empCache[e._id.toString()] = e.name;
+    });
+    console.log(`[EmpCache] Cached ${emps.length} employees:`, emps.map(e => e.name).join(', '));
+  } catch(err) {
+    console.error('[EmpCache] Failed to pre-cache employees:', err.message);
+  }
+}
+
 // ─── RESOLVE ASSIGNEE ─────────────────────────────────────────────────────────
 
 async function resolveAssignee(node, rawSheetData) {
-  const { type, value } = node.assignedTo;
+  // Safety check — if assignedTo is missing entirely
+  if (!node.assignedTo) {
+    console.warn('[resolveAssignee] node.assignedTo is undefined for node:', node.name);
+    return { id: null, name: 'Unassigned' };
+  }
+
+  const type  = node.assignedTo.type  || 'employee';
+  const value = node.assignedTo.value || '';
+
+  console.log(`[resolveAssignee] Resolving for node "${node.name}": type=${type} value=${value}`);
 
   if (type === 'sheetColumn') {
-    // The sheet column contains the employee's email or name
-    const raw = rawSheetData[value];
-    if (!raw) return { id: null, name: value + ' (from sheet)' };
-
-    // Try to find a matching employee by email
-    const emp = await Employee.findOne({ email: raw }).select('_id name');
+    const raw = rawSheetData?.[value];
+    if (!raw) return { id: null, name: 'Unassigned' };
+    const emp = await Employee.findOne({ $or: [{ email: raw }, { name: raw }] }).select('_id name').lean();
     if (emp) return { id: emp._id.toString(), name: emp.name };
-
-    // Fall back to the raw value as name
     return { id: null, name: String(raw) };
   }
 
-  // type === 'employee' — direct assignment
-  if (value) {
-    const emp = await Employee.findById(value).select('_id name');
-    if (emp) return { id: emp._id.toString(), name: emp.name };
+  // type === 'employee' — value is a MongoDB ObjectId string
+  if (value && value.trim()) {
+    const trimmed = value.trim();
+
+    // Method 0: check pre-cache first (fastest, most reliable)
+    if (_empCache[trimmed]) {
+      console.log(`[resolveAssignee] ✅ Found in cache: "${_empCache[trimmed]}"`);
+      return { id: trimmed, name: _empCache[trimmed] };
+    }
+
+    // Method 1: findById
+    try {
+      const mongoose = require('mongoose');
+      if (mongoose.Types.ObjectId.isValid(trimmed)) {
+        const emp = await Employee.findById(trimmed).select('_id name').lean();
+        if (emp) {
+          _empCache[trimmed] = emp.name; // store in cache
+          console.log(`[resolveAssignee] ✅ Found by ID: "${emp.name}" (${emp._id})`);
+          return { id: emp._id.toString(), name: emp.name };
+        }
+        console.warn(`[resolveAssignee] ⚠️ findById returned null for: ${trimmed}`);
+      }
+    } catch(e) {
+      console.error('[resolveAssignee] findById error:', e.message);
+    }
+
+    // Method 2: findOne with _id as string comparison
+    try {
+      const emp = await Employee.findOne({ _id: value }).select('_id name').lean();
+      if (emp) {
+        console.log(`[resolveAssignee] ✅ Found by findOne _id: "${emp.name}"`);
+        return { id: emp._id.toString(), name: emp.name };
+      }
+    } catch(e) {}
+
+    // Method 3: by name if value looks like a name
+    try {
+      const emp = await Employee.findOne({ name: new RegExp(trimmed, 'i') }).select('_id name').lean();
+      if (emp) {
+        console.log(`[resolveAssignee] ✅ Found by name: "${emp.name}"`);
+        return { id: emp._id.toString(), name: emp.name };
+      }
+    } catch(e) {}
+
+    console.error(`[resolveAssignee] ❌ All methods failed for value: "${value}"`);
   }
 
   return { id: null, name: 'Unassigned' };
@@ -269,6 +339,9 @@ async function activateNextNode(instance, template, decision, completedNode, com
     instance.rawSheetData,
     template.workingHours
   );
+
+  // Ensure employee cache is warm before resolving
+  await preCacheEmployees(template);
 
   // Resolve who is assigned
   const assignee = await resolveAssignee(nextNode, instance.rawSheetData);
@@ -362,6 +435,9 @@ async function completeStep(instanceId, employeeId, employeeName, decision, inpu
 async function startInstance(instance, template) {
   const startNode = template.nodes.find(n => n.id === template.startNodeId);
   if (!startNode) throw new Error('Start node not found in template');
+
+  // Pre-cache all employee IDs from the template nodes so resolveAssignee never fails
+  await preCacheEmployees(template);
 
   // Start node itself has no deadline or assignee — immediately activate its next node
   const firstNodeId = startNode.nextNodeId;

@@ -15,12 +15,20 @@ exports.createTemplate = async (req, res) => {
     const {
       name, googleSheetId, scriptUrl, tabName, uniqueIdColumn,
       workingHours, startNodeId, nodes,
+      dataSource, linkedFormId, deadlineColumn, assignColumn,
     } = req.body;
 
     const tenantId = req.user?.tenantId || req.body.tenantId;
 
-    if (!name || !googleSheetId || !scriptUrl || !startNodeId || !nodes?.length) {
-      return res.status(400).json({ message: 'Missing required fields: name, googleSheetId, scriptUrl, startNodeId, nodes' });
+    const src = dataSource || 'sheet';
+    if (!name) {
+      return res.status(400).json({ message: 'Flow name is required' });
+    }
+    if (!startNodeId || !nodes?.length) {
+      return res.status(400).json({ message: 'Please add nodes and connect them before deploying' });
+    }
+    if (src === 'sheet' && (!googleSheetId || !scriptUrl)) {
+      return res.status(400).json({ message: 'Google Sheet ID and Script URL are required for Sheet source' });
     }
 
     // Validate all node ids are unique
@@ -37,8 +45,12 @@ exports.createTemplate = async (req, res) => {
     const template = await FlowTemplate.create({
       tenantId,
       name,
-      googleSheetId: googleSheetId.trim(),
-      scriptUrl: scriptUrl.trim(),
+      dataSource:    src,
+      linkedFormId:  linkedFormId || null,
+      deadlineColumn: deadlineColumn || '',
+      assignColumn:   assignColumn || '',
+      googleSheetId: (googleSheetId || '').trim(),
+      scriptUrl:     (scriptUrl || '').trim(),
       tabName: tabName?.trim() || 'Sheet1',
       uniqueIdColumn: uniqueIdColumn?.trim() || 'Order ID',
       workingHours: workingHours || { open: 9, close: 18, workDays: [1,2,3,4,5] },
@@ -438,9 +450,19 @@ exports.getMyTasksWithNodes = async (req, res) => {
     const { employeeId } = req.params;
     const now = new Date();
 
+    // Also get the employee's name for name-based fallback matching
+    const Employee = require('../models/Employee');
+    const empDoc = await Employee.findById(employeeId).select('name').lean();
+    const empName = empDoc?.name || '';
+
+    // Match by ID or by name (fallback for old instances where ID wasn't resolved)
     const tasks = await FlowInstance.find({
       status: 'active',
-      'activeStep.assignedToId': employeeId,
+      $or: [
+        { 'activeStep.assignedToId': employeeId },
+        { 'activeStep.assignedToId': employeeId.toString() },
+        ...(empName ? [{ 'activeStep.assignedToName': empName }] : []),
+      ],
     })
     .sort({ 'activeStep.plannedDeadline': 1 })
     .lean();
@@ -463,8 +485,9 @@ exports.getMyTasksWithNodes = async (req, res) => {
         nodeConfig:       node ? {
           type:              node.type,
           question:          node.question,
-          inputFields:       node.inputFields,
-          sheetColumnsToShow:node.sheetColumnsToShow,
+          howToComplete:     node.howToComplete || '',
+          inputFields:       node.inputFields   || [],
+          sheetColumnsToShow:node.sheetColumnsToShow || [],
         } : null,
         isOverdue:  inst.activeStep?.plannedDeadline
                       ? new Date(inst.activeStep.plannedDeadline) < now : false,
@@ -495,5 +518,124 @@ exports.cancelInstance = async (req, res) => {
     res.json({ message: 'Instance cancelled' });
   } catch (err) {
     res.status(500).json({ message: 'Failed to cancel instance', error: err.message });
+  }
+};
+
+/**
+ * POST /api/fms2/repair-assignees/:tenantId
+ * One-time fix: resolves null assignedToId by matching employee names in DB
+ */
+exports.fixInstanceAssignee = async (req, res) => {
+  try {
+    const { tenantId } = req.params;
+    const { employeeId, employeeName } = req.body;
+
+    // Find all active instances with Unassigned and fix them using the first node's assignee
+    const templates = await FlowTemplate.find({ tenantId }).lean();
+    const instances = await FlowInstance.find({ tenantId, status: 'active', 'activeStep.assignedToId': null }).lean();
+
+    let fixed = 0;
+    for (const inst of instances) {
+      const template = templates.find(t => t._id.toString() === inst.templateId?.toString());
+      if (!template) continue;
+
+      // Find the node that matches the current active step
+      const activeNode = template.nodes?.find(n => n.id === inst.activeStep?.nodeId);
+      if (!activeNode) continue;
+
+      const empId = activeNode.assignedTo?.value;
+      if (!empId) continue;
+
+      // Look up employee
+      const emp = await Employee.findById(empId).select('_id name').lean();
+      if (!emp) continue;
+
+      await FlowInstance.updateOne(
+        { _id: inst._id },
+        { $set: { 'activeStep.assignedToId': emp._id.toString(), 'activeStep.assignedToName': emp.name } }
+      );
+      console.log(`[Fix] ${inst.orderIdentifier} → ${emp.name} (${emp._id})`);
+      fixed++;
+    }
+
+    res.json({ message: `Fixed ${fixed} instances`, fixed });
+  } catch (err) {
+    res.status(500).json({ message: err.message });
+  }
+};
+
+exports.repairAssignees = async (req, res) => {
+  try {
+    const { tenantId } = req.params;
+
+    // Find ALL active instances — not just null assignedToId
+    const instances = await FlowInstance.find({
+      tenantId,
+      status: 'active',
+    }).lean();
+
+    console.log(`[Repair] Found ${instances.length} active instances for tenant ${tenantId}`);
+
+    // Log what we find for debugging
+    instances.forEach(i => {
+      console.log(`[Repair] Instance ${i.orderIdentifier}: assignedToName="${i.activeStep?.assignedToName}" assignedToId="${i.activeStep?.assignedToId}"`);
+    });
+
+    // Get all employees for this tenant
+    const allEmployees = await Employee.find({ tenantId }).select('_id name').lean();
+    console.log(`[Repair] Employees in DB:`, allEmployees.map(e => `${e.name} (${e._id})`));
+
+    let fixed = 0;
+    for (const inst of instances) {
+      const name = inst.activeStep?.assignedToName;
+      const currentId = inst.activeStep?.assignedToId;
+      if (!name || name === 'Unassigned') continue;
+
+      // Find employee by name (case insensitive, partial match)
+      const emp = allEmployees.find(e =>
+        e.name.toLowerCase().includes(name.toLowerCase()) ||
+        name.toLowerCase().includes(e.name.toLowerCase())
+      );
+
+      if (emp && emp._id.toString() !== currentId) {
+        await FlowInstance.updateOne(
+          { _id: inst._id },
+          { $set: { 'activeStep.assignedToId': emp._id.toString() } }
+        );
+        console.log(`[Repair] Fixed ${inst.orderIdentifier}: "${name}" → ${emp._id}`);
+        fixed++;
+      }
+    }
+
+    const toFix = instances.filter(i => i.activeStep?.assignedToName && i.activeStep.assignedToName !== 'Unassigned').length;
+    res.json({
+      message: `Fixed ${fixed} of ${toFix} instances`,
+      fixed, total: instances.length,
+      employees: allEmployees.map(e => ({ id: e._id, name: e.name })),
+      instances: instances.map(i => ({ order: i.orderIdentifier, name: i.activeStep?.assignedToName, id: i.activeStep?.assignedToId }))
+    });
+  } catch (err) {
+    console.error('[Repair] Error:', err.message);
+    res.status(500).json({ message: 'Repair failed', error: err.message });
+  }
+};
+
+/**
+ * POST /api/fms2/instance/:instanceId/reassign
+ * Directly set assignedToId/Name on an active instance's current step
+ */
+exports.reassignInstance = async (req, res) => {
+  try {
+    const { instanceId } = req.params;
+    const { assignedToId, assignedToName } = req.body;
+    if (!assignedToId) return res.status(400).json({ message: 'assignedToId required' });
+
+    const result = await FlowInstance.updateOne(
+      { _id: instanceId },
+      { $set: { 'activeStep.assignedToId': assignedToId, 'activeStep.assignedToName': assignedToName || '' } }
+    );
+    res.json({ message: 'Reassigned', modified: result.modifiedCount });
+  } catch (err) {
+    res.status(500).json({ message: err.message });
   }
 };

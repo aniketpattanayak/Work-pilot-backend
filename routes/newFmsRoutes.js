@@ -32,6 +32,9 @@ router.delete('/instance/:instanceId',    authMiddleware, subscriptionGuard, c.c
 
 // ─── EMPLOYEE TASK VIEW ───────────────────────────────────────────────────────
 router.get('/my-tasks/:employeeId',            authMiddleware, subscriptionGuard, c.getMyTasks);
+router.post('/repair-assignees/:tenantId',  authMiddleware, c.repairAssignees);
+router.post('/fix-assignees/:tenantId',     authMiddleware, c.fixInstanceAssignee);
+router.post('/instance/:instanceId/reassign', authMiddleware, c.reassignInstance);
 router.get('/my-tasks-full/:employeeId',       authMiddleware, subscriptionGuard, c.getMyTasksWithNodes);
 
 module.exports = router;
