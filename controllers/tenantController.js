@@ -431,7 +431,7 @@ exports.loginEmployee = async (req, res) => {
         tenantId: tenant._id
       },
       process.env.JWT_SECRET || 'your_secret_key',
-      { expiresIn: '1d' }
+      { expiresIn: '7d' }
     );
 
     // Log login activity
