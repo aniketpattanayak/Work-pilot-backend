@@ -96,7 +96,43 @@ const TenantSchema = new mongoose.Schema({
     default: 1 
   },
   
-  createdAt: { type: Date, default: Date.now }
+  createdAt: { type: Date, default: Date.now },
+
+  // ── SuperAdmin controls ──────────────────────────────────────
+  superAdmin: {
+    // Subscription status
+    status:        { type: String, enum: ['active', 'paused', 'suspended'], default: 'active' },
+    pausedAt:      { type: Date,   default: null },
+    pausedBy:      { type: String, default: '' },
+    pauseReason:   { type: String, default: '' },
+    scheduledPauseFrom: { type: Date, default: null },
+    scheduledPauseTo:   { type: Date, default: null },
+
+    // Limits
+    employeeLimit:   { type: Number, default: 50 },   // max employees allowed
+    whatsappLimit:   { type: Number, default: 1000 },  // max WA msgs per month
+
+    // Feature flags — toggle modules on/off per tenant
+    features: {
+      tasks:        { type: Boolean, default: true },
+      fms:          { type: Boolean, default: true },
+      chat:         { type: Boolean, default: true },
+      reports:      { type: Boolean, default: true },
+      orderForms:   { type: Boolean, default: true },
+      whatsapp:     { type: Boolean, default: true },
+      rewards:      { type: Boolean, default: true },
+      checklist:    { type: Boolean, default: true },
+    },
+
+    // Billing
+    plan:        { type: String, enum: ['free', 'starter', 'pro', 'enterprise', 'custom'], default: 'free' },
+    amount:      { type: Number, default: 0 },
+    renewalDate: { type: Date,   default: null },
+    billingNote: { type: String, default: '' },
+
+    // Notes from superadmin
+    internalNote: { type: String, default: '' },
+  },
 });
 
 module.exports = mongoose.model('Tenant', TenantSchema);

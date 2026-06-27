@@ -4,12 +4,16 @@
 //   B-2: runFmsSync() moved inside .then() callback so it runs after DB connects
 
 const express = require('express');
+const http    = require('http');
 const mongoose = require('mongoose');
 const cors = require('cors');
 require('dotenv').config();
 
 // --- 1. IMPORT ROUTE FILES ---
-const fmsRoutes    = require('./routes/fmsRoutes');
+const fmsRoutes      = require('./routes/fmsRoutes');
+const tenantRoutes   = require('./routes/tenantRoutes');
+const chatRoutes        = require('./routes/chatRoutes');
+const superAdminRoutes  = require('./routes/superAdminRoutes');
 const newFmsRoutes    = require('./routes/newFmsRoutes');
 const orderFormRoutes = require('./routes/orderFormRoutes');
 const ticketRoutes = require('./routes/ticketRoutes');
@@ -18,6 +22,7 @@ const reportRoutes = require('./routes/reportRoutes');
 
 // --- 2. IMPORT SERVICES & SCHEDULERS ---
 const initReportScheduler = require('./jobs/cronScheduler');
+const { initSocket }       = require('./utils/socketHandler');
 // FIX P-1: briefingEngine replaces the every-minute dispatchDailyBriefings polling.
 //          Each tenant now gets its own cron job at exactly the right time.
 const { scheduleBriefings } = require('./utils/briefingEngine');
@@ -65,12 +70,14 @@ const path = require('path');
 app.use('/uploads', require('express').static(path.join(__dirname, 'uploads')));
 
 // 6. REGISTER ROUTES
-app.use('/api/fms',  fmsRoutes);     // old FMS (kept for compatibility)
+app.use('/api/tenants', tenantRoutes);     // tenant auth + management
+app.use('/api/fms',  fmsRoutes);          // old FMS (kept for compatibility)
 app.use('/api/fms2', newFmsRoutes);        // new FMS engine
+app.use('/api/chat', chatRoutes);          // real-time chat
+app.use('/api/superadmin', superAdminRoutes); // superadmin panel
 app.use('/api/fms2', orderFormRoutes);     // form-based order entry
 app.use('/api/tickets', ticketRoutes);
 app.use('/api/reports', reportRoutes);
-app.use('/api/superadmin', taskRoutes);
 app.use('/api/tasks', taskRoutes);
 
 // Catch-all 404
@@ -114,7 +121,13 @@ mongoose.connect(process.env.MONGO_URI)
   })
   .catch(err => console.log('❌ DB Connection Error:', err));
 
-const PORT = process.env.PORT || 5000;
-app.listen(PORT, () => {
+const PORT       = process.env.PORT || 5000;
+const httpServer = http.createServer(app);
+
+// Store io on app for use in controllers
+const io = initSocket(httpServer, ALLOWED_ORIGINS, SUBDOMAIN_RE);
+app.set('io', io);
+
+httpServer.listen(PORT, () => {
   console.log(`🚀 Server running on port ${PORT}`);
 });

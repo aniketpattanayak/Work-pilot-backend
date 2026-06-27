@@ -1,6 +1,7 @@
 const Tenant = require('../models/Tenant');
 const Employee = require('../models/Employee');
 const bcrypt = require('bcryptjs');
+const { log: logActivity } = require('../utils/activityLogger');
 const jwt = require('jsonwebtoken');
 const DelegationTask = require('../models/DelegationTask');
 const ChecklistTask = require('../models/ChecklistTask');
@@ -433,6 +434,16 @@ exports.loginEmployee = async (req, res) => {
       { expiresIn: '1d' }
     );
 
+    // Log login activity
+    logActivity({
+      tenantId: tenant._id,
+      employeeId: employee._id,
+      employeeName: employee.name || employee.email,
+      employeeRole: employee.roles?.[0] || employee.role || '',
+      action: 'login',
+      description: `${employee.name || employee.email} logged in`,
+    });
+
     // 5. Send User Object with Roles to Frontend
     res.json({
       token,
@@ -699,11 +710,21 @@ exports.verifyTenant = async (req, res) => {
       return res.status(404).json({ message: "Factory infrastructure not found." });
     }
 
-    // This is the CRITICAL part: we must return the logo and companyName
+    // Return subscription/pause status so App.jsx can redirect to /suspended
+    const isPaused =
+      tenant.superAdmin?.status === 'paused' ||
+      tenant.superAdmin?.status === 'suspended' ||
+      tenant.subscription?.status === 'paused';
+
     res.status(200).json({
-      id: tenant._id,
+      id:          tenant._id,
       companyName: tenant.companyName,
-      logo: tenant.logo // The login page is currently receiving 'undefined' for this
+      logo:        tenant.logo,
+      subscription: {
+        status:   isPaused ? 'paused' : 'active',
+        reason:   tenant.superAdmin?.pauseReason || tenant.subscription?.reason || '',
+        pausedAt: tenant.superAdmin?.pausedAt || tenant.subscription?.pausedAt || null,
+      },
     });
   } catch (error) {
     console.error("Verification Error:", error.message);
