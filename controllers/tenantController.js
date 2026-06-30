@@ -305,6 +305,161 @@ exports.addEmployee = async (req, res) => {
     res.status(500).json({ message: "Creation failed", error: error.message });
   }
 };
+
+// ─── BULK UPLOAD EMPLOYEES ────────────────────────────────────────────────────
+exports.bulkAddEmployees = async (req, res) => {
+  try {
+    const { tenantId, employees } = req.body;
+    if (!tenantId || !Array.isArray(employees) || employees.length === 0) {
+      return res.status(400).json({ message: 'tenantId and employees array required' });
+    }
+
+    const tenant = await Tenant.findById(tenantId);
+    if (!tenant) return res.status(404).json({ message: 'Tenant not found' });
+
+    const results = { success: [], failed: [], skipped: [] };
+
+    for (const emp of employees) {
+      try {
+        // Check if email already exists
+        const existing = await Employee.findOne({ tenantId, email: emp.email });
+        if (existing) {
+          results.skipped.push({ name: emp.name, reason: 'Email already exists' });
+          continue;
+        }
+
+        // Build roles from sheet columns
+        const roles = [];
+        if (emp.Admin === 'TRUE' || emp.Admin === true)       roles.push('Admin');
+        if (emp.Assigner === 'TRUE' || emp.Assigner === true) roles.push('Assigner');
+        if (emp.Coordinator === 'TRUE' || emp.Coordinator === true) roles.push('Coordinator');
+        if (emp.Viewer === 'TRUE' || emp.Viewer === true)     roles.push('Viewer');
+        if (emp.Doer === 'TRUE' || emp.Doer === true || roles.length === 0) roles.push('Doer');
+
+        const salt     = await bcrypt.genSalt(10);
+        // Default password: first name + @123
+        const defPass  = (emp.name || 'employee').split(' ')[0].toLowerCase() + '@123';
+        const hashed   = await bcrypt.hash(emp.password || defPass, salt);
+
+        const newEmp = new Employee({
+          tenantId,
+          name:           emp['Full Name'] || emp.name,
+          email:          emp['Email Address'] || emp.email,
+          department:     emp['Sector / Department'] || emp.department || 'General',
+          whatsappNumber: String(emp['WhatsApp Number'] || emp.whatsappNumber || '0000000000'),
+          workOnSunday:   emp['Sunday Working'] === 'TRUE' || emp['Sunday Working'] === true,
+          roles,
+          password: hashed,
+        });
+
+        await newEmp.save();
+        results.success.push({ name: newEmp.name, email: newEmp.email });
+      } catch (err) {
+        results.failed.push({ name: emp['Full Name'] || emp.name, reason: err.message });
+      }
+    }
+
+    res.status(201).json({
+      message: `Bulk upload done. ${results.success.length} added, ${results.skipped.length} skipped, ${results.failed.length} failed.`,
+      results,
+    });
+  } catch (err) {
+    res.status(500).json({ message: 'Bulk upload failed', error: err.message });
+  }
+};
+
+// ─── BULK UPLOAD DELEGATION TASKS ────────────────────────────────────────────
+exports.bulkAddTasks = async (req, res) => {
+  try {
+    const { tenantId, tasks } = req.body;
+    if (!tenantId || !Array.isArray(tasks) || tasks.length === 0) {
+      return res.status(400).json({ message: 'tenantId and tasks array required' });
+    }
+
+    const employees = await Employee.find({ tenantId }).lean();
+    const findEmp = (name) => employees.find(e =>
+      e.name.toLowerCase().trim() === (name || '').toLowerCase().trim()
+    );
+
+    const results = { success: 0, failed: [] };
+
+    for (const task of tasks) {
+      try {
+        const doer     = findEmp(task['Assigned To'] || task.assignedTo);
+        const assigner = findEmp(task['Created By']  || task.createdBy);
+
+        const DelegationTask = require('./models/DelegationTask') || 
+          require('../models/DelegationTask');
+
+        await DelegationTask.create({
+          tenantId,
+          title:       task['Task Title'] || task.title,
+          description: task['Description'] || task.description || '',
+          doerId:      doer?._id,
+          doerName:    doer?.name || task['Assigned To'],
+          assignerId:  assigner?._id,
+          assignerName:assigner?.name || task['Created By'],
+          deadline:    task['Deadline'] ? new Date(task['Deadline']) : null,
+          priority:    task['Priority'] || 'medium',
+          status:      'pending',
+        });
+        results.success++;
+      } catch (err) {
+        results.failed.push({ title: task['Task Title'], reason: err.message });
+      }
+    }
+
+    res.json({ message: `${results.success} tasks created, ${results.failed.length} failed`, results });
+  } catch (err) {
+    res.status(500).json({ message: 'Bulk task upload failed', error: err.message });
+  }
+};
+
+
+// ─── BULK UPLOAD CHECKLIST TASKS ─────────────────────────────────────────────
+exports.bulkAddChecklists = async (req, res) => {
+  try {
+    const { tenantId, checklists } = req.body;
+    if (!tenantId || !Array.isArray(checklists) || checklists.length === 0) {
+      return res.status(400).json({ message: 'tenantId and checklists array required' });
+    }
+
+    const employees = await Employee.find({ tenantId }).lean();
+    const findEmp = (name) => employees.find(e =>
+      e.name.toLowerCase().trim() === (name || '').toLowerCase().trim()
+    );
+
+    const ChecklistTask = require('../models/ChecklistTask');
+    const results = { success: 0, failed: [] };
+
+    for (const cl of checklists) {
+      try {
+        const assignee = findEmp(cl['Assigned To'] || cl.assignedTo);
+        const itemsRaw = cl['Items (semicolon separated)'] || cl.items || '';
+        const items    = itemsRaw.split(';').map(s => s.trim()).filter(Boolean).map(label => ({ label, done: false }));
+
+        await ChecklistTask.create({
+          tenantId,
+          title:       cl['Checklist Title'] || cl.title,
+          description: cl['Description']     || cl.description || '',
+          assigneeId:  assignee?._id,
+          assigneeName:assignee?.name || cl['Assigned To'],
+          deadline:    cl['Deadline'] ? new Date(cl['Deadline']) : null,
+          items,
+          status: 'pending',
+        });
+        results.success++;
+      } catch (err) {
+        results.failed.push({ title: cl['Checklist Title'], reason: err.message });
+      }
+    }
+
+    res.json({ message: `${results.success} checklists created, ${results.failed.length} failed`, results });
+  } catch (err) {
+    res.status(500).json({ message: 'Bulk checklist upload failed', error: err.message });
+  }
+};
+
 // Create a new Company/Tenant (Superadmin only)
 
 
@@ -431,7 +586,7 @@ exports.loginEmployee = async (req, res) => {
         tenantId: tenant._id
       },
       process.env.JWT_SECRET || 'your_secret_key',
-      { expiresIn: '7d' }
+      { expiresIn: '1d' }
     );
 
     // Log login activity

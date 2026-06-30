@@ -5,7 +5,8 @@
 const express = require('express');
 const router = express.Router();
 const Tenant = require('../models/Tenant');
-const upload = require('../utils/s3Uploader');
+const _upload = require('../utils/s3Uploader');
+const useUpload = (method) => Array.isArray(method) ? method : [method];
 const taskController = require('../controllers/taskController');
 const {
   createTenant,
@@ -17,6 +18,9 @@ const {
   getEmployeeList,
   deleteEmployee,
   superAdminLogin,
+  bulkAddEmployees,
+  bulkAddTasks,
+  bulkAddChecklists,
   getAllCompanies,
   deleteCompany,
   updateEmployeeMapping,
@@ -34,7 +38,7 @@ router.post('/login-employee', loginEmployee);
 router.get('/verify/:subdomain', verifyTenant);
 
 // ─── SUPERADMIN ONLY ──────────────────────────────────────────────────────────
-router.post('/create-company', authMiddleware, superAdminOnly, upload.single('logo'), createTenant);
+router.post('/create-company', authMiddleware, superAdminOnly, ...useUpload(_upload.single('logo')), createTenant);
 router.get('/all-companies', authMiddleware, superAdminOnly, getAllCompanies);
 router.delete('/company/:id', authMiddleware, superAdminOnly, deleteCompany);
 
@@ -42,7 +46,7 @@ router.delete('/company/:id', authMiddleware, superAdminOnly, deleteCompany);
 router.get('/auth/me', authMiddleware, subscriptionGuard, getProfile);
 
 // Branding & settings
-router.put('/update-branding', authMiddleware, subscriptionGuard, upload.single('logo'), updateBranding);
+router.put('/update-branding', authMiddleware, subscriptionGuard, ...useUpload(_upload.single('logo')), updateBranding);
 router.put('/update-settings', authMiddleware, subscriptionGuard, updateSettings);
 router.get('/settings/:tenantId', authMiddleware, subscriptionGuard, sameTenantOnly, async (req, res) => {
   try {
@@ -56,17 +60,17 @@ router.get('/settings/:tenantId', authMiddleware, subscriptionGuard, sameTenantO
 
 // Task delegation
 router.get('/authorized-staff/:id', authMiddleware, subscriptionGuard, taskController.getAuthorizedStaff);
-router.post('/create', authMiddleware, subscriptionGuard, upload.array('taskFiles', 5), taskController.createTask);
+router.post('/create', authMiddleware, subscriptionGuard, ...useUpload(_upload.array('taskFiles', 5)), taskController.createTask);
 router.get('/assigner/:assignerId', authMiddleware, subscriptionGuard, taskController.getAssignerTasks);
 router.get('/doer/:doerId', authMiddleware, subscriptionGuard, taskController.getDoerTasks);
-router.put('/respond', authMiddleware, subscriptionGuard, upload.single('evidence'), taskController.respondToTask);
+router.put('/respond', authMiddleware, subscriptionGuard, ...useUpload(_upload.single('evidence')), taskController.respondToTask);
 router.delete('/:taskId', authMiddleware, subscriptionGuard, taskController.deleteTask);
 router.put('/handle-revision', authMiddleware, subscriptionGuard, taskController.handleRevision);
 router.get('/coordinator/:coordinatorId', authMiddleware, subscriptionGuard, taskController.getCoordinatorTasks);
 
 // Checklists
 router.post('/create-checklist', authMiddleware, subscriptionGuard, taskController.createChecklistTask);
-router.post('/checklist-done', authMiddleware, subscriptionGuard, upload.single('evidence'), taskController.completeChecklistTask);
+router.post('/checklist-done', authMiddleware, subscriptionGuard, ...useUpload(_upload.single('evidence')), taskController.completeChecklistTask);
 router.get('/checklist-all/:tenantId', authMiddleware, subscriptionGuard, sameTenantOnly, taskController.getAllChecklists);
 router.put('/checklist-update/:id', authMiddleware, subscriptionGuard, taskController.updateChecklistTask);
 router.get('/checklist/:doerId', authMiddleware, subscriptionGuard, taskController.getChecklistTasks);
@@ -74,7 +78,10 @@ router.delete('/checklist/:id', authMiddleware, subscriptionGuard, taskControlle
 
 // Employee management
 router.get('/employees/:tenantId', authMiddleware, subscriptionGuard, sameTenantOnly, getEmployeeList);
-router.post('/add-employee', authMiddleware, subscriptionGuard, addEmployee);
+router.post('/add-employee',      authMiddleware, subscriptionGuard, addEmployee);
+router.post('/bulk-employees',    authMiddleware, subscriptionGuard, bulkAddEmployees);
+router.post('/bulk-tasks',        authMiddleware, subscriptionGuard, bulkAddTasks);
+router.post('/bulk-checklist',    authMiddleware, subscriptionGuard, bulkAddChecklists);
 router.put('/employees/:id', authMiddleware, subscriptionGuard, updateEmployee);
 router.delete('/employees/:id', authMiddleware, subscriptionGuard, deleteEmployee);
 router.put('/update-mapping', authMiddleware, subscriptionGuard, updateEmployeeMapping);
