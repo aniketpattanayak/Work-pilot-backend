@@ -9,6 +9,9 @@ const {
   createTenant,
   loginEmployee,
   addEmployee,
+  bulkAddEmployees,
+  bulkAddTasks,
+  bulkAddChecklists,
   updateSettings,
   getCompanyOverview,
   assignToCoordinator,
@@ -85,7 +88,10 @@ router.get('/employees', authMiddleware, subscriptionGuard, async (req, res) => 
     res.status(500).json({ message: 'Failed to fetch employees', error: err.message });
   }
 });
-router.post('/add-employee', authMiddleware, subscriptionGuard, addEmployee);
+router.post('/add-employee',   authMiddleware, subscriptionGuard, addEmployee);
+router.post('/bulk-employees', authMiddleware, subscriptionGuard, bulkAddEmployees);
+router.post('/bulk-tasks',     authMiddleware, subscriptionGuard, bulkAddTasks);
+router.post('/bulk-checklist', authMiddleware, subscriptionGuard, bulkAddChecklists);
 router.put('/employees/:id', authMiddleware, subscriptionGuard, updateEmployee);
 router.delete('/employees/:id', authMiddleware, subscriptionGuard, deleteEmployee);
 router.get('/authorized-staff/:id', authMiddleware, subscriptionGuard, taskController.getAuthorizedStaff);
@@ -108,25 +114,24 @@ router.get('/settings/:tenantId', authMiddleware, subscriptionGuard, sameTenantO
 });
 
 // Tasks
-const uploadTaskFiles = _upload.array('taskFiles', 10);
-
-// Tasks - Bulletproof Upload Route
-router.post('/create-task', authMiddleware, subscriptionGuard, (req, res, next) => {
-  // Use .any() to bypass strict field-name rejection in Multer-S3
-  const uploadHandler = _upload.any(); 
-  
-  uploadHandler(req, res, function (err) {
-    if (err) {
-      console.error("🚨 LIVE SERVER UPLOAD CRASH:", err.message || err);
-      // This will send the EXACT error to your frontend instead of a blank 500 error
-      return res.status(400).json({ 
-        message: "File Upload Rejected by Server", 
-        error: err.message || "Unknown Upload Error" 
-      });
+router.post('/create-task', authMiddleware, subscriptionGuard,
+  ...useUpload(_upload.fields([
+    { name: 'files',     maxCount: 10 },
+    { name: 'taskFiles', maxCount: 10 },
+  ])),
+  // Normalize: merge taskFiles into files so controller always reads req.files.files
+  (req, res, next) => {
+    if (req.files) {
+      const all = [
+        ...(req.files['files']     || []),
+        ...(req.files['taskFiles'] || []),
+      ];
+      req.files = all; // flatten to array like upload.array() does
     }
     next();
-  });
-}, taskController.createTask);
+  },
+  taskController.createTask
+);
 router.delete('/:taskId', authMiddleware, subscriptionGuard, taskController.deleteTask);
 router.post('/handle-revision', authMiddleware, subscriptionGuard, taskController.handleRevision);
 router.post('/coordinator-force-done', authMiddleware, subscriptionGuard, taskController.coordinatorForceDone);

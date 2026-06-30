@@ -18,9 +18,6 @@ const {
   getEmployeeList,
   deleteEmployee,
   superAdminLogin,
-  bulkAddEmployees,
-  bulkAddTasks,
-  bulkAddChecklists,
   getAllCompanies,
   deleteCompany,
   updateEmployeeMapping,
@@ -79,9 +76,6 @@ router.delete('/checklist/:id', authMiddleware, subscriptionGuard, taskControlle
 // Employee management
 router.get('/employees/:tenantId', authMiddleware, subscriptionGuard, sameTenantOnly, getEmployeeList);
 router.post('/add-employee',      authMiddleware, subscriptionGuard, addEmployee);
-router.post('/bulk-employees',    authMiddleware, subscriptionGuard, bulkAddEmployees);
-router.post('/bulk-tasks',        authMiddleware, subscriptionGuard, bulkAddTasks);
-router.post('/bulk-checklist',    authMiddleware, subscriptionGuard, bulkAddChecklists);
 router.put('/employees/:id', authMiddleware, subscriptionGuard, updateEmployee);
 router.delete('/employees/:id', authMiddleware, subscriptionGuard, deleteEmployee);
 router.put('/update-mapping', authMiddleware, subscriptionGuard, updateEmployeeMapping);
