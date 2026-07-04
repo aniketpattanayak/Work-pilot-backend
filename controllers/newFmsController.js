@@ -475,14 +475,38 @@ exports.getMyTasksWithNodes = async (req, res) => {
     const enriched = tasks.map(inst => {
       const template = templateMap[inst.templateId.toString()];
       const node     = template?.nodes.find(n => n.id === inst.activeStep?.nodeId);
+      const currentNodeId = inst.activeStep?.nodeId;
+
+      // Find all collected field values from previous steps that are visible to current step
+      const visibleCollectedData = [];
+      if (template?.nodes && inst.nodeHistory?.length > 0) {
+        for (const histEntry of inst.nodeHistory) {
+          const histNode = template.nodes.find(n => n.id === histEntry.nodeId);
+          if (!histNode?.inputFields?.length) continue;
+          for (const field of histNode.inputFields) {
+            // Check if this field is marked as visible to the current step
+            if ((field.visibleToSteps || []).includes(currentNodeId)) {
+              const value = histEntry.inputs?.[field.id] || histEntry.inputs?.[field.label];
+              if (value !== undefined && value !== '') {
+                visibleCollectedData.push({
+                  fromStep:   histEntry.nodeName,
+                  fieldLabel: field.label,
+                  value,
+                });
+              }
+            }
+          }
+        }
+      }
 
       return {
-        instanceId:       inst._id,
-        templateName:     inst.templateName,
-        orderIdentifier:  inst.orderIdentifier,
-        rawSheetData:     inst.rawSheetData,
-        activeStep:       inst.activeStep,
-        nodeConfig:       node ? {
+        instanceId:          inst._id,
+        templateName:        inst.templateName,
+        orderIdentifier:     inst.orderIdentifier,
+        rawSheetData:        inst.rawSheetData,
+        activeStep:          inst.activeStep,
+        visibleCollectedData,  // ← collected data from previous steps shared with this step
+        nodeConfig:          node ? {
           type:              node.type,
           question:          node.question,
           howToComplete:     node.howToComplete || '',
