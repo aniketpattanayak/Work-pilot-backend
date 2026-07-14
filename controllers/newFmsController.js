@@ -663,3 +663,31 @@ exports.reassignInstance = async (req, res) => {
     res.status(500).json({ message: err.message });
   }
 };
+
+// ─── GET COMPLETED FMS TASKS FOR COORDINATOR ─────────────────────────────────
+exports.getCompletedTasksForCoordinator = async (req, res) => {
+  try {
+    const { employeeId } = req.params;
+    const tenantId = req.user.tenantId;
+
+    // Get all completed flow instances for this tenant
+    const instances = await FlowInstance.find({
+      tenantId,
+      status: { $in: ['completed', 'Completed'] },
+    }).sort({ completedAt: -1 }).limit(100).lean();
+
+    const enriched = instances.map(inst => ({
+      instanceId: inst._id,
+      orderIdentifier: inst.orderIdentifier,
+      templateName: inst.templateName,
+      status: 'Completed',
+      completedAt: inst.completedAt,
+      activeStep: inst.activeStep,
+    }));
+
+    res.json(enriched);
+  } catch (err) {
+    console.error('[FMS] getCompletedTasksForCoordinator error:', err.message);
+    res.status(500).json({ message: 'Failed to fetch completed tasks' });
+  }
+};

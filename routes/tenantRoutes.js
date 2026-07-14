@@ -84,7 +84,23 @@ router.get('/company-overview/:tenantId', authMiddleware, subscriptionGuard, sam
 router.get('/mapping-overview/:tenantId', authMiddleware, subscriptionGuard, sameTenantOnly, taskController.getMappingOverview);
 router.get('/score/:employeeId', authMiddleware, subscriptionGuard, taskController.getEmployeeScore);
 router.post('/coordinator-force-done', authMiddleware, subscriptionGuard, taskController.coordinatorForceDone);
-router.post('/send-whatsapp-reminder', authMiddleware, subscriptionGuard, taskController.sendWhatsAppReminder);
+
 router.get('/global-performance/:tenantId', authMiddleware, subscriptionGuard, sameTenantOnly, taskController.getGlobalPerformance);
+
+// Direct WhatsApp template send — no task lookup needed
+router.post('/send-whatsapp-reminder', authMiddleware, subscriptionGuard, async (req, res) => {
+  try {
+    const { templateName, toPhone, variables } = req.body;
+    if (!toPhone || !templateName) {
+      return res.status(400).json({ message: 'toPhone and templateName required' });
+    }
+    const sendWhatsApp = require('../utils/whatsappNotify');
+    await sendWhatsApp(toPhone, { templateName, variables: variables || [] });
+    res.json({ message: 'WhatsApp reminder sent' });
+  } catch (err) {
+    console.error('[WhatsApp] send-whatsapp-reminder error:', err.message);
+    res.status(500).json({ message: err.message });
+  }
+});
 
 module.exports = router;

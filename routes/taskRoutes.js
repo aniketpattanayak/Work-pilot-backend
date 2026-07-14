@@ -139,6 +139,23 @@ router.put('/coordinator-force-done', authMiddleware, subscriptionGuard, taskCon
 router.put('/respond', authMiddleware, subscriptionGuard, ...useUpload(_upload.single('evidence')), taskController.respondToTask);
 router.post('/send-reminder', authMiddleware, subscriptionGuard, taskController.sendWhatsAppReminder);
 
+// Direct WhatsApp send — used by coordinator dashboard (no task lookup)
+router.post('/send-whatsapp-reminder', authMiddleware, subscriptionGuard, async (req, res) => {
+  try {
+    const { templateName, toPhone, variables } = req.body;
+    if (!toPhone || !templateName) {
+      return res.status(400).json({ message: 'toPhone and templateName required' });
+    }
+    const sendWhatsApp = require('../utils/whatsappNotify');
+    await sendWhatsApp(toPhone, { templateName, variables: variables || [] });
+    console.log('[WhatsApp] Reminder sent to', toPhone, 'template:', templateName);
+    res.json({ message: 'WhatsApp reminder sent successfully' });
+  } catch (err) {
+    console.error('[WhatsApp] send-whatsapp-reminder error:', err.message);
+    res.status(500).json({ message: err.message });
+  }
+});
+
 // Checklists
 router.post('/create-checklist', authMiddleware, subscriptionGuard, taskController.createChecklistTask);
 router.get('/checklist-all/:tenantId', authMiddleware, subscriptionGuard, sameTenantOnly, taskController.getAllChecklists);
