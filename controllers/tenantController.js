@@ -245,6 +245,12 @@ exports.addEmployee = async (req, res) => {
       roles, password, managedDoers, managedAssigners, workOnSunday,
     } = req.body;
 
+    // 0. Check email uniqueness within this tenant
+    const existingEmployee = await Employee.findOne({ email, tenantId });
+    if (existingEmployee) {
+      return res.status(400).json({ message: 'This email is already taken by another employee in your company. Please use a different email.' });
+    }
+
     // 1. Password Hashing (Preserved)
     const salt = await bcrypt.genSalt(10);
     const hashedPassword = await bcrypt.hash(password, salt);
