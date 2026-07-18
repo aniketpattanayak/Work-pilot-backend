@@ -32,6 +32,8 @@ router.delete('/instance/:instanceId',    authMiddleware, subscriptionGuard, c.c
 
 // ─── EMPLOYEE TASK VIEW ───────────────────────────────────────────────────────
 router.get('/completed-tasks/:employeeId', authMiddleware, subscriptionGuard, c.getCompletedTasksForCoordinator);
+router.get('/coordinator-tasks/:coordinatorId', authMiddleware, subscriptionGuard, c.getFmsTasksForCoordinator);
+router.get('/coordinator-completed/:coordinatorId', authMiddleware, subscriptionGuard, c.getCompletedFmsForCoordinator);
 router.get('/my-tasks/:employeeId',            authMiddleware, subscriptionGuard, c.getMyTasks);
 router.post('/repair-assignees/:tenantId',  authMiddleware, c.repairAssignees);
 router.post('/fix-assignees/:tenantId',     authMiddleware, c.fixInstanceAssignee);

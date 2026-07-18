@@ -691,3 +691,83 @@ exports.getCompletedTasksForCoordinator = async (req, res) => {
     res.status(500).json({ message: 'Failed to fetch completed tasks' });
   }
 };
+
+// ─── GET FMS TASKS FOR COORDINATOR (all mapped doers) ────────────────────────
+exports.getFmsTasksForCoordinator = async (req, res) => {
+  try {
+    const { coordinatorId } = req.params;
+    const tenantId = req.user.tenantId;
+
+    // Get coordinator's mapped doers
+    const Employee = require('../models/Employee');
+    const coordinator = await Employee.findById(coordinatorId).lean();
+    if (!coordinator) return res.status(404).json({ message: 'Coordinator not found' });
+
+    // Get all doer IDs mapped to this coordinator
+    const doerIds = coordinator.managedDoers || [];
+    // Include coordinator themselves
+    const allIds = [...doerIds.map(id => id.toString()), coordinatorId.toString()];
+
+    const now = new Date();
+
+    // Get active FMS tasks for all mapped doers
+    const tasks = await FlowInstance.find({
+      tenantId,
+      status: 'active',
+      'activeStep.assignedToId': { $in: allIds },
+    }).sort({ 'activeStep.plannedDeadline': 1 }).lean();
+
+    const enriched = tasks.map(inst => ({
+      instanceId:      inst._id,
+      templateName:    inst.templateName,
+      orderIdentifier: inst.orderIdentifier,
+      rawSheetData:    inst.rawSheetData,
+      activeStep:      inst.activeStep,
+      isOverdue:       inst.activeStep?.plannedDeadline
+                         ? new Date(inst.activeStep.plannedDeadline) < now
+                         : false,
+      delayMinutes:    inst.activeStep?.plannedDeadline
+                         ? Math.round((now - new Date(inst.activeStep.plannedDeadline)) / 60000)
+                         : 0,
+    }));
+
+    res.json(enriched);
+  } catch (err) {
+    console.error('[FMS] getFmsTasksForCoordinator error:', err.message);
+    res.status(500).json({ message: 'Failed to fetch coordinator FMS tasks' });
+  }
+};
+
+// ─── GET COMPLETED FMS TASKS FOR COORDINATOR (all mapped doers) ──────────────
+exports.getCompletedFmsForCoordinator = async (req, res) => {
+  try {
+    const { coordinatorId } = req.params;
+    const tenantId = req.user.tenantId;
+
+    const Employee = require('../models/Employee');
+    const coordinator = await Employee.findById(coordinatorId).lean();
+    if (!coordinator) return res.status(404).json({ message: 'Coordinator not found' });
+
+    const doerIds = (coordinator.managedDoers || []).map(id => id.toString());
+    doerIds.push(coordinatorId.toString());
+
+    const instances = await FlowInstance.find({
+      tenantId,
+      status: { $in: ['completed', 'Completed'] },
+    }).sort({ completedAt: -1 }).limit(100).lean();
+
+    const enriched = instances.map(inst => ({
+      instanceId:      inst._id,
+      orderIdentifier: inst.orderIdentifier,
+      templateName:    inst.templateName,
+      status:          'Completed',
+      completedAt:     inst.completedAt,
+      activeStep:      inst.activeStep,
+    }));
+
+    res.json(enriched);
+  } catch (err) {
+    console.error('[FMS] getCompletedFmsForCoordinator error:', err.message);
+    res.status(500).json({ message: 'Failed to fetch completed FMS tasks' });
+  }
+};
