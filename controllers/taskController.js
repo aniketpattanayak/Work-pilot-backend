@@ -2176,10 +2176,15 @@ exports.getReviewAnalytics = async (req, res) => {
     }
 
     // UPDATED: Added 'weeklyLateTarget' to select
-    const [employees, delegations, checklists] = await Promise.all([
+    const FlowInstance = require('../models/FlowInstance');
+    const [employees, delegations, checklists, fmsInstances] = await Promise.all([
       Employee.find({ tenantId }).select('name department weeklyLateTarget'),
       DelegationTask.find({ tenantId, deadline: { $gte: startDate, $lte: endDate } }),
-      ChecklistTask.find({ tenantId, status: 'Active' })
+      ChecklistTask.find({ tenantId, status: 'Active' }),
+      FlowInstance.find({ tenantId, $or: [
+        { status: 'completed', completedAt: { $gte: startDate, $lte: endDate } },
+        { status: 'active' }
+      ]}).lean()
     ]);
 
     const report = employees.map(emp => {
@@ -2194,7 +2199,8 @@ exports.getReviewAnalytics = async (req, res) => {
         periodName: view === 'Weekly' ? `Week of ${startDate.toLocaleDateString()}` : view,
 
         delegation: { total: 0, done: 0, overdue: 0, late: 0, notDone: 0 },
-        checklist: { total: 0, done: 0, overdue: 0, late: 0, notDone: 0 }
+        checklist: { total: 0, done: 0, overdue: 0, late: 0, notDone: 0 },
+        fms: { total: 0, done: 0, overdue: 0, late: 0, notDone: 0 }
       };
 
       // 2. DELEGATION PROCESSING
@@ -2245,6 +2251,33 @@ exports.getReviewAnalytics = async (req, res) => {
         const effectiveEndDate = endDate < now ? endDate : now;
         if (missedCount > 0 && effectiveEndDate >= startDate) {
           stats.checklist.overdue += missedCount;
+        }
+      });
+
+
+      // 4. FMS PROCESSING
+      const empFmsCompleted = fmsInstances.filter(inst =>
+        inst.status === 'completed' &&
+        inst.nodeHistory && inst.nodeHistory.some(h => h.assignedToId && h.assignedToId.toString() === emp._id.toString())
+      );
+      const empFmsActive = fmsInstances.filter(inst =>
+        inst.status === 'active' &&
+        inst.activeStep && inst.activeStep.assignedToId && inst.activeStep.assignedToId.toString() === emp._id.toString()
+      );
+      empFmsCompleted.forEach(inst => {
+        stats.fms.total++;
+        stats.fms.done++;
+        const lastStep = inst.nodeHistory && inst.nodeHistory.slice(-1)[0];
+        if (lastStep && lastStep.onTime === false) stats.fms.late++;
+      });
+      empFmsActive.forEach(inst => {
+        stats.fms.total++;
+        const deadline = inst.activeStep && inst.activeStep.plannedDeadline;
+        if (deadline && new Date(deadline) < now) {
+          stats.fms.overdue++;
+          stats.fms.notDone++;
+        } else {
+          stats.fms.notDone++;
         }
       });
 
