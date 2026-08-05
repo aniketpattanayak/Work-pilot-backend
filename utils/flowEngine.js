@@ -418,7 +418,18 @@ async function completeStep(instanceId, employeeId, employeeName, decision, inpu
 
   // Find the completed node in the template
   const completedNode = template.nodes.find(n => n.id === active.nodeId);
-  if (!completedNode) throw new Error(`Node "${active.nodeId}" not found in template`);
+  if (!completedNode) {
+    // The flow was edited and the node this instance was sitting on was
+    // removed. Don't crash the request — surface a clear, actionable error
+    // instead of an opaque 500 so the admin knows exactly which order needs
+    // manual attention (reassign to a valid node, or cancel the instance).
+    const err = new Error(
+      `This order's current step ("${active.nodeName}") was removed in a recent flow edit. ` +
+      `Ask an admin to reassign or cancel this instance.`
+    );
+    err.code = 'NODE_ORPHANED';
+    throw err;
+  }
 
   // Route to next node
   const next = await activateNextNode(instance, template, decision, completedNode, completedAt);

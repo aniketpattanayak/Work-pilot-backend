@@ -95,23 +95,51 @@ exports.getTemplateById = async (req, res) => {
 
 /**
  * PUT /api/fms2/templates/:templateId
- * Update a template (only safe if no active instances).
+ * Update a template. Edits now apply live to all active instances of this
+ * flow — we no longer block the save just because instances are in-flight.
+ * completeStep() always re-fetches the template fresh from the DB on every
+ * step completion, so any active instance automatically picks up the new
+ * routing / deadlines / assignees / input fields the next time it moves.
+ *
+ * The one real risk: if the edit DELETES the node an instance is CURRENTLY
+ * sitting on, that instance has nothing to resolve back to when it's
+ * completed. We don't block for this either (per requirement), but we
+ * detect it and report which orders are affected so the admin can act
+ * (e.g. manually reassign/cancel just those), and flowEngine.completeStep
+ * now fails that step gracefully instead of throwing a hard 500.
  */
 exports.updateTemplate = async (req, res) => {
   try {
     const { templateId } = req.params;
 
-    const activeCount = await FlowInstance.countDocuments({ templateId, status: 'active' });
-    if (activeCount > 0) {
-      return res.status(409).json({
-        message: `Cannot edit: ${activeCount} active instance(s) are using this flow. Cancel them first.`
-      });
-    }
+    const newNodeIds = new Set((req.body.nodes || []).map(n => n.id));
+
+    // Instances currently active on this template
+    const activeInstances = await FlowInstance.find(
+      { templateId, status: 'active' },
+      { orderIdentifier: 1, 'activeStep.nodeId': 1, 'activeStep.nodeName': 1 }
+    );
+
+    // Of those, which ones are sitting on a node that this edit is about to remove
+    const orphaned = activeInstances.filter(
+      inst => inst.activeStep?.nodeId && !newNodeIds.has(inst.activeStep.nodeId)
+    );
 
     const updated = await FlowTemplate.findByIdAndUpdate(templateId, req.body, { new: true, runValidators: true });
     if (!updated) return res.status(404).json({ message: 'Template not found' });
 
-    res.json({ message: 'Template updated', template: updated });
+    res.json({
+      message: activeInstances.length > 0
+        ? `Template updated — now live for ${activeInstances.length} active instance(s).`
+        : 'Template updated',
+      template: updated,
+      activeInstanceCount: activeInstances.length,
+      orphanedInstances: orphaned.map(o => ({
+        instanceId: o._id,
+        orderIdentifier: o.orderIdentifier,
+        currentStep: o.activeStep?.nodeName,
+      })),
+    });
   } catch (err) {
     res.status(500).json({ message: 'Failed to update template', error: err.message });
   }
@@ -308,6 +336,9 @@ exports.completeStep = async (req, res) => {
     });
   } catch (err) {
     console.error('[FMS] completeStep error:', err.message);
+    if (err.code === 'NODE_ORPHANED') {
+      return res.status(409).json({ message: err.message, code: err.code });
+    }
     res.status(500).json({ message: 'Failed to complete step', error: err.message });
   }
 };
