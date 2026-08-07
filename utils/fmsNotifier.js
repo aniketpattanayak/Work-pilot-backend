@@ -197,7 +197,7 @@ async function sendOverdueNotifications() {
 
       const step        = inst.activeStep;
       const minutesLate = Math.round((now - new Date(step.plannedDeadline)) / 60000);
-      const loginLink   = buildLoginLink(inst.tenantId);
+      const loginLink   = await buildLoginLink(inst.tenantId);
 
       // Notify the employee
       const emp = await getEmployeePhone(step.assignedToId);
