@@ -43,6 +43,7 @@ const NodeSchema = new mongoose.Schema({
   deadline: {
     mode:       { type: String, enum: ['wwh', 'wwh2', 'days', 'lead', 'specific', null], default: null },
     value:      { type: Number, default: 0 },      // N (hours or days)
+    unit:       { type: String, enum: ['mins', 'hours', 'days', null], default: 'hours' }, // unit for wwh/wwh2
     timeOfDay:  { type: Number, default: null },    // for 'specific': hour e.g. 15 = 3pm
     dateColumn: { type: String, default: null },    // for 'lead': which rawSheetData key holds the target date
   },
