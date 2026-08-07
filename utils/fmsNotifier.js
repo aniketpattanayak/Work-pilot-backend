@@ -55,9 +55,15 @@ async function getTenantAdmins(tenantId) {
   } catch { return []; }
 }
 
-function buildLoginLink(tenantId) {
-  // Replace with your actual subdomain logic if needed
-  return 'https://app.lrbcloud.ai/dashboard/flow-tasks';
+async function buildLoginLink(tenantId) {
+  try {
+    const Tenant = require('../models/Tenant');
+    const tenant = await Tenant.findById(tenantId).select('subdomain').lean();
+    const subdomain = tenant?.subdomain || 'app';
+    return `https://${subdomain}.lrbcloud.ai/dashboard/flow-tasks`;
+  } catch {
+    return 'https://app.lrbcloud.ai/dashboard/flow-tasks';
+  }
 }
 
 // ─── NOTIFICATION 1: ASSIGNMENT ──────────────────────────────────────────────
@@ -86,7 +92,7 @@ async function sendAssignmentNotifications() {
         continue;
       }
 
-      const loginLink = buildLoginLink(inst.tenantId);
+      const loginLink = await buildLoginLink(inst.tenantId);
 
       await sendWhatsAppMessage(emp.whatsappNumber, {
         templateName: TEMPLATES.ASSIGNED,
