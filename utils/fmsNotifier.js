@@ -174,7 +174,6 @@ async function sendReminderNotifications() {
 
 // Track which instances have already had an overdue alert sent this session
 // (prevents repeat alerts every minute)
-const overdueAlerted = new Set();
 
 async function sendOverdueNotifications() {
   try {
@@ -192,8 +191,11 @@ async function sendOverdueNotifications() {
       const key = `${inst._id}_${inst.activeStep.nodeId}`;
 
       // Only alert once per step (not every minute)
-      if (overdueAlerted.has(key)) continue;
-      overdueAlerted.add(key);
+      // Only send once per day per step
+      const todayStr = new Date().toISOString().split('T')[0];
+      const lastAlert = inst.activeStep.lastOverdueDate;
+      if (lastAlert && new Date(lastAlert).toISOString().split('T')[0] === todayStr) continue;
+      await FlowInstance.updateOne({ _id: inst._id }, { $set: { 'activeStep.lastOverdueDate': new Date() } });
 
       const step        = inst.activeStep;
       const minutesLate = Math.round((now - new Date(step.plannedDeadline)) / 60000);
