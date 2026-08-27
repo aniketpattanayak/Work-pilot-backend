@@ -100,6 +100,7 @@ const FlowTemplateSchema = new mongoose.Schema({
   dataSource:  { type: String, enum: ['sheet', 'form'], default: 'sheet' },
 
   startNodeId: { type: String, required: true },          // id of the first node to activate
+  allowedCoordinatorColumns: { type: [String], default: [] }, // columns coordinators can see in tracking
   nodes:       { type: [NodeSchema], required: true },
 
   createdAt: { type: Date, default: Date.now },
