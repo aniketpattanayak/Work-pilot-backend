@@ -1,22 +1,12 @@
-const _Tenant = require('../models/Tenant');
-const _Employee = require('../models/Employee');
+const Tenant = require('../models/Tenant');
+const Employee = require('../models/Employee');
 const bcrypt = require('bcryptjs');
 const { log: logActivity } = require('../utils/activityLogger');
 const jwt = require('jsonwebtoken');
-const _DelegationTask = require('../models/DelegationTask');
-const _ChecklistTask = require('../models/ChecklistTask');
+const DelegationTask = require('../models/DelegationTask');
+const ChecklistTask = require('../models/ChecklistTask');
 const sendWhatsAppMessage = require('../utils/whatsappNotify');
 
-const { getReqModels } = require('../utils/reqModels');
-async function M(req) {
-  const m = await getReqModels(req);
-  return {
-    Tenant:         m.Tenant         || _Tenant,
-    Employee:       m.Employee       || _Employee,
-    DelegationTask: m.DelegationTask || _DelegationTask,
-    ChecklistTask:  m.ChecklistTask  || _ChecklistTask,
-  };
-}
 
 
 exports.getEmployeeList = async (req, res) => {
@@ -52,7 +42,6 @@ exports.getEmployeeList = async (req, res) => {
 
 exports.deleteEmployee = async (req, res) => {
   try {
-    const { Tenant, Employee, DelegationTask, ChecklistTask } = await M(req);
     const { id } = req.params;
 
     // Find and delete the employee by their MongoDB ID
@@ -71,7 +60,6 @@ exports.deleteEmployee = async (req, res) => {
 
 exports.handleRevision = async (req, res) => {
   try {
-    const { Tenant, Employee, DelegationTask, ChecklistTask } = await M(req);
     const { taskId, action, newDeadline, newDoerId, remarks, assignerId } = req.body;
 
     // We populate doerId to ensure we have the current doer's details for the "Approve" notification
@@ -152,7 +140,6 @@ exports.handleRevision = async (req, res) => {
 
 exports.getCompanyOverview = async (req, res) => {
   try {
-    const { Tenant, Employee, DelegationTask, ChecklistTask } = await M(req);
     const { tenantId } = req.params;
 
     // 1. Parallel Fetch: Get all registry data at once
@@ -190,7 +177,6 @@ exports.getCompanyOverview = async (req, res) => {
 };
 exports.updateSettings = async (req, res) => {
   try {
-    const { Tenant, Employee, DelegationTask, ChecklistTask } = await M(req);
     // 1. Destructure all fields from the request body to ensure they are captured
     // UPDATED: Added 'weekends' to capture the Sun-Sat array
     const {
@@ -240,7 +226,6 @@ exports.updateSettings = async (req, res) => {
 };
 exports.assignToCoordinator = async (req, res) => {
   try {
-    const { Tenant, Employee, DelegationTask, ChecklistTask } = await M(req);
     const { coordinatorId, assignerIds } = req.body;
     const coordinator = await Employee.findByIdAndUpdate(
       coordinatorId,
@@ -257,7 +242,6 @@ exports.assignToCoordinator = async (req, res) => {
 
 exports.addEmployee = async (req, res) => {
   try {
-    const { Tenant, Employee, DelegationTask, ChecklistTask } = await M(req);
     const {
       tenantId, name, email, department, whatsappNumber,
       roles, password, managedDoers, managedAssigners, workOnSunday,
@@ -333,7 +317,6 @@ exports.addEmployee = async (req, res) => {
 // ─── BULK UPLOAD EMPLOYEES ────────────────────────────────────────────────────
 exports.bulkAddEmployees = async (req, res) => {
   try {
-    const { Tenant, Employee, DelegationTask, ChecklistTask } = await M(req);
     const { tenantId, employees } = req.body;
     if (!tenantId || !Array.isArray(employees) || employees.length === 0) {
       return res.status(400).json({ message: 'tenantId and employees array required' });
@@ -396,7 +379,6 @@ exports.bulkAddEmployees = async (req, res) => {
 // ─── BULK UPLOAD DELEGATION TASKS ────────────────────────────────────────────
 exports.bulkAddTasks = async (req, res) => {
   try {
-    const { Tenant, Employee, DelegationTask, ChecklistTask } = await M(req);
     const { tenantId, tasks } = req.body;
     if (!tenantId || !Array.isArray(tasks) || tasks.length === 0) {
       return res.status(400).json({ message: 'tenantId and tasks array required' });
@@ -445,7 +427,6 @@ exports.bulkAddTasks = async (req, res) => {
 // ─── BULK UPLOAD CHECKLIST TASKS ─────────────────────────────────────────────
 exports.bulkAddChecklists = async (req, res) => {
   try {
-    const { Tenant, Employee, DelegationTask, ChecklistTask } = await M(req);
     const { tenantId, checklists } = req.body;
     if (!tenantId || !Array.isArray(checklists) || checklists.length === 0) {
       return res.status(400).json({ message: 'tenantId and checklists array required' });
@@ -456,7 +437,7 @@ exports.bulkAddChecklists = async (req, res) => {
       e.name.toLowerCase().trim() === (name || '').toLowerCase().trim()
     );
 
-    const _ChecklistTask = require('../models/ChecklistTask');
+    const ChecklistTask = require('../models/ChecklistTask');
     const results = { success: 0, failed: [] };
 
     for (const cl of checklists) {
@@ -493,7 +474,6 @@ exports.bulkAddChecklists = async (req, res) => {
 // 1. Get all registered companies
 exports.getAllCompanies = async (req, res) => {
   try {
-    const { Tenant, Employee, DelegationTask, ChecklistTask } = await M(req);
     const companies = await Tenant.find().lean();
     // Ensure subscription field exists on every company for the frontend
     const normalized = companies.map(c => ({
@@ -509,7 +489,6 @@ exports.getAllCompanies = async (req, res) => {
 // 2. Delete a company (and its employees)
 exports.deleteCompany = async (req, res) => {
   try {
-    const { Tenant, Employee, DelegationTask, ChecklistTask } = await M(req);
     const { id } = req.params;
     await Tenant.findByIdAndDelete(id);
     await Employee.deleteMany({ tenantId: id }); // Cleanup employees
@@ -582,7 +561,6 @@ exports.superAdminLogin = async (req, res) => {
 
 exports.loginEmployee = async (req, res) => {
   try {
-    const { Tenant, Employee, DelegationTask, ChecklistTask } = await M(req);
     const { email, password, subdomain } = req.body;
 
     // 1. Find the Factory/Tenant by subdomain
@@ -651,7 +629,6 @@ exports.loginEmployee = async (req, res) => {
 
 exports.getProfile = async (req, res) => {
   try {
-    const { Tenant, Employee, DelegationTask, ChecklistTask } = await M(req);
     // user info comes from JWT middleware
     const userId = req.user?.id;
 
@@ -691,7 +668,6 @@ exports.getProfile = async (req, res) => {
 // server/controllers/tenantController.js
 exports.updateBranding = async (req, res) => {
   try {
-    const { Tenant, Employee, DelegationTask, ChecklistTask } = await M(req);
     const { tenantId, companyName } = req.body;
 
     // Check if a new file was uploaded, otherwise keep old logo
@@ -746,7 +722,6 @@ const calculatePerformancePoints = (task, settings) => {
 // Create a new Factory and its first Admin user
 exports.createTenant = async (req, res) => {
   try {
-    const { Tenant, Employee, DelegationTask, ChecklistTask } = await M(req);
     const { companyName, subdomain, ownerEmail, adminPassword } = req.body;
 
     // 1. Process Logo URL
@@ -808,7 +783,6 @@ exports.createTenant = async (req, res) => {
 // This updated logic prevents duplicates by overwriting the array
 exports.updateEmployee = async (req, res) => {
   try {
-    const { Tenant, Employee, DelegationTask, ChecklistTask } = await M(req);
     const { id } = req.params;
     const { name, email, whatsappNumber, department, roles, managedDoers, managedAssigners, password, workOnSunday, leaveStatus } = req.body;
 
@@ -869,7 +843,6 @@ exports.updateEmployee = async (req, res) => {
 
 exports.updateEmployeeMapping = async (req, res) => {
   try {
-    const { Tenant, Employee, DelegationTask, ChecklistTask } = await M(req);
     // Renamed variables to match the Universal intent
     const { employeeId, targetIds, mappingType } = req.body;
 
@@ -891,7 +864,6 @@ exports.updateEmployeeMapping = async (req, res) => {
 // --- ADD THIS TO THE BOTTOM OF YOUR FILE ---
 exports.verifyTenant = async (req, res) => {
   try {
-    const { Tenant, Employee, DelegationTask, ChecklistTask } = await M(req);
     const { subdomain } = req.params;
 
     // Find the factory by its subdomain
@@ -932,7 +904,6 @@ exports.verifyTenant = async (req, res) => {
  */
 exports.pauseSubscription = async (req, res) => {
   try {
-    const { Tenant, Employee, DelegationTask, ChecklistTask } = await M(req);
     const { id } = req.params;
     const { reason } = req.body;
 
@@ -964,7 +935,6 @@ exports.pauseSubscription = async (req, res) => {
  */
 exports.resumeSubscription = async (req, res) => {
   try {
-    const { Tenant, Employee, DelegationTask, ChecklistTask } = await M(req);
     const { id } = req.params;
 
     const tenant = await Tenant.findByIdAndUpdate(

@@ -1,4 +1,4 @@
-const _Conversation = require('../models/Conversation');
+const Conversation = require('../models/Conversation');
 const Message      = require('../models/Message');
 const Employee     = require('../models/Employee');
 
@@ -10,7 +10,6 @@ const Employee     = require('../models/Employee');
  */
 exports.getConversations = async (req, res) => {
   try {
-    const { Conversation } = await M(req);
     const employeeId = req.user.id;
     const tenantId   = req.user.tenantId;
 
@@ -65,7 +64,6 @@ exports.getConversations = async (req, res) => {
  */
 exports.getOrCreateDM = async (req, res) => {
   try {
-    const { Conversation } = await M(req);
     const employeeId      = req.user.id;
     const tenantId        = req.user.tenantId;
     const { otherEmployeeId } = req.body;
@@ -104,7 +102,6 @@ exports.getOrCreateDM = async (req, res) => {
  */
 exports.getOrCreateTaskThread = async (req, res) => {
   try {
-    const { Conversation } = await M(req);
     const tenantId = req.user.tenantId;
     const { taskId, taskType, taskTitle, participants } = req.body;
 
@@ -136,7 +133,6 @@ exports.getOrCreateTaskThread = async (req, res) => {
  */
 exports.createAnnouncement = async (req, res) => {
   try {
-    const { Conversation } = await M(req);
     const tenantId = req.user.tenantId;
     const { title, text } = req.body;
 
@@ -183,7 +179,6 @@ exports.createAnnouncement = async (req, res) => {
  */
 exports.getMessages = async (req, res) => {
   try {
-    const { Conversation } = await M(req);
     const { conversationId } = req.params;
     const page  = parseInt(req.query.page)  || 1;
     const limit = parseInt(req.query.limit) || 50;
@@ -210,7 +205,6 @@ exports.getMessages = async (req, res) => {
  */
 exports.sendMessage = async (req, res) => {
   try {
-    const { Conversation } = await M(req);
     const { conversationId } = req.params;
     const { text, fileUrl, fileName, fileType, mentions } = req.body;
     const tenantId   = req.user.tenantId;
@@ -293,7 +287,6 @@ exports.sendMessage = async (req, res) => {
  */
 exports.markRead = async (req, res) => {
   try {
-    const { Conversation } = await M(req);
     const { conversationId } = req.params;
     const employeeId = req.user.id;
 
@@ -331,7 +324,6 @@ exports.markRead = async (req, res) => {
  */
 exports.getUnreadCount = async (req, res) => {
   try {
-    const { Conversation } = await M(req);
     const employeeId = req.user.id.toString();
     const tenantId   = req.user.tenantId;
 
@@ -358,7 +350,6 @@ exports.getUnreadCount = async (req, res) => {
  */
 exports.getEmployees = async (req, res) => {
   try {
-    const { Conversation } = await M(req);
     const tenantId   = req.user.tenantId;
     const employeeId = req.user.id;
 
@@ -381,18 +372,10 @@ exports.getEmployees = async (req, res) => {
  */
 exports.uploadFile = async (req, res) => {
   try {
-    const { Conversation } = await M(req);
     if (!req.file) return res.status(400).json({ message: 'No file uploaded' });
 
     const s3Uploader = require('../utils/s3Uploader');
     const result = await s3Uploader.uploadFile(req.file);
-const { getReqModels } = require('../utils/reqModels');
-async function M(req) {
-  const m = await getReqModels(req);
-  return {
-    Conversation: m.Conversation || _Conversation,
-  };
-}
 
 
     res.json({

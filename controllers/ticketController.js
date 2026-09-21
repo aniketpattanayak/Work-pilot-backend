@@ -1,20 +1,11 @@
-const _SupportTicket = require('../models/Ticket');
-const _Employee = require('../models/Employee');
+const SupportTicket = require('../models/Ticket');
+const Employee = require('../models/Employee');
 const sendWhatsAppMessage = require('../utils/whatsappNotify');
-const { getReqModels } = require('../utils/reqModels');
-async function M(req) {
-  const m = await getReqModels(req);
-  return {
-    SupportTicket: m.SupportTicket || _SupportTicket,
-    Employee:      m.Employee      || _Employee,
-  };
-}
 
 
 // A. Raise a New Ticket
 exports.createTicket = async (req, res) => {
   try {
-    const { SupportTicket, Employee } = await M(req);
     const { title, description, category, priority, reporterId, tenantId } = req.body;
     
     // 1. Fetch Reporter details to auto-capture Role and Name
@@ -55,7 +46,6 @@ exports.createTicket = async (req, res) => {
 // B. NEW: Get Personal Tickets (For the logged-in User)
 exports.getUserTickets = async (req, res) => {
   try {
-    const { SupportTicket, Employee } = await M(req);
     const { reporterId } = req.params;
     
     // Fetch tickets specifically for this user, sorted by newest first
@@ -72,7 +62,6 @@ exports.getUserTickets = async (req, res) => {
 // C. Get All Tickets (For Super Admin Global Oversight)
 exports.getAllTickets = async (req, res) => {
   try {
-    const { SupportTicket, Employee } = await M(req);
     const tickets = await SupportTicket.find().sort({ createdAt: -1 });
     res.status(200).json(tickets || []);
   } catch (error) {
@@ -83,7 +72,6 @@ exports.getAllTickets = async (req, res) => {
 // D. Resolve Ticket (Admin Action with Proof)
 exports.resolveTicket = async (req, res) => {
   try {
-    const { SupportTicket, Employee } = await M(req);
     const { ticketId, adminRemarks } = req.body;
     const ticket = await SupportTicket.findById(ticketId).populate('reporterId');
     if (!ticket) return res.status(404).json({ message: "Ticket not found" });

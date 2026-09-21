@@ -1,17 +1,10 @@
 // server/controllers/orderFormController.js
 
 const OrderForm       = require('../models/OrderForm');
-const _OrderSubmission = require('../models/OrderSubmission');
+const OrderSubmission = require('../models/OrderSubmission');
 const FlowTemplate    = require('../models/FlowTemplate');
 const FlowInstance    = require('../models/FlowInstance');
 const { startInstance } = require('../utils/flowEngine');
-const { getReqModels } = require('../utils/reqModels');
-async function M(req) {
-  const m = await getReqModels(req);
-  return {
-    OrderSubmission: m.OrderSubmission || _OrderSubmission,
-  };
-}
 
 
 // ─── AUTO ID GENERATOR ────────────────────────────────────────────────────────
@@ -54,7 +47,6 @@ function generateLineItemId(orderId, index, form) {
  */
 exports.upsertForm = async (req, res) => {
   try {
-    const { OrderSubmission } = await M(req);
     const { templateId, name, orderFields, itemFields, orderIdConfig, lineItemConfig, allowedRoles } = req.body;
     const tenantId = req.user?.tenantId || req.body.tenantId;
 
@@ -121,7 +113,6 @@ exports.upsertForm = async (req, res) => {
  */
 exports.getFormByTemplate = async (req, res) => {
   try {
-    const { OrderSubmission } = await M(req);
     const form = await OrderForm.findOne({ templateId: req.params.templateId, isActive: true });
     if (!form) return res.status(404).json({ message: 'No form found for this template' });
     res.json(form);
@@ -136,7 +127,6 @@ exports.getFormByTemplate = async (req, res) => {
  */
 exports.getForms = async (req, res) => {
   try {
-    const { OrderSubmission } = await M(req);
     const tenantId = req.user?.tenantId || req.params.tenantId;
     const forms = await OrderForm.find({ tenantId, isActive: true })
       .populate('templateId', 'name')
@@ -154,7 +144,6 @@ exports.getForms = async (req, res) => {
  */
 exports.deleteForm = async (req, res) => {
   try {
-    const { OrderSubmission } = await M(req);
     const form = await OrderForm.findById(req.params.formId);
     if (!form) return res.status(404).json({ message: 'Form not found' });
 
@@ -178,7 +167,6 @@ exports.deleteForm = async (req, res) => {
  */
 exports.submitOrder = async (req, res) => {
   try {
-    const { OrderSubmission } = await M(req);
     const { formId, orderFieldValues, lineItems } = req.body;
     const employeeId   = req.user?.id;
     const employeeName = req.user?.name || 'Unknown';
@@ -272,7 +260,6 @@ exports.submitOrder = async (req, res) => {
  */
 exports.getSubmissions = async (req, res) => {
   try {
-    const { OrderSubmission } = await M(req);
     const { tenantId } = req.params;
     const { formId, page = 1, limit = 50 } = req.query;
 
@@ -300,7 +287,6 @@ exports.getSubmissions = async (req, res) => {
  */
 exports.getSubmissionDetail = async (req, res) => {
   try {
-    const { OrderSubmission } = await M(req);
     const submission = await OrderSubmission.findById(req.params.submissionId).lean();
     if (!submission) return res.status(404).json({ message: 'Submission not found' });
 
