@@ -36,6 +36,7 @@ const useUpload = (method) => {
   return [method];
 };
 const taskController = require('../controllers/taskController');
+const tenantDbMiddleware = require('../middleware/tenantDb');
 const { authMiddleware, superAdminOnly, sameTenantOnly } = require('../middleware/auth');
 const subscriptionGuard = require('../middleware/subscriptionGuard');
 
@@ -74,12 +75,12 @@ router.put('/company/:id/resume', authMiddleware, resumeSubscription);
 // ─── AUTHENTICATED ROUTES ────────────────────────────────────────────────────
 
 // Profile
-router.get('/auth/me', authMiddleware, subscriptionGuard, getProfile);
+router.get('/auth/me', authMiddleware, subscriptionGuard, tenantDbMiddleware, getProfile);
 
 // Employee management
-router.get('/employees/:tenantId', authMiddleware, subscriptionGuard, sameTenantOnly, getEmployeeList);
+router.get('/employees/:tenantId', authMiddleware, subscriptionGuard, tenantDbMiddleware, sameTenantOnly, getEmployeeList);
 // DoerChecklist calls /api/employees without tenantId — reads from JWT
-router.get('/employees', authMiddleware, subscriptionGuard, async (req, res) => {
+router.get('/employees', authMiddleware, subscriptionGuard, tenantDbMiddleware, async (req, res) => {
   try {
     const Employee = require('../models/Employee');
     const employees = await Employee.find({ tenantId: req.user.tenantId }).select('name email role department');
@@ -88,22 +89,22 @@ router.get('/employees', authMiddleware, subscriptionGuard, async (req, res) => 
     res.status(500).json({ message: 'Failed to fetch employees', error: err.message });
   }
 });
-router.post('/add-employee',   authMiddleware, subscriptionGuard, addEmployee);
-router.post('/bulk-employees', authMiddleware, subscriptionGuard, bulkAddEmployees);
-router.post('/bulk-tasks',     authMiddleware, subscriptionGuard, bulkAddTasks);
-router.post('/bulk-checklist', authMiddleware, subscriptionGuard, bulkAddChecklists);
-router.put('/employees/:id', authMiddleware, subscriptionGuard, updateEmployee);
-router.delete('/employees/:id', authMiddleware, subscriptionGuard, deleteEmployee);
-router.get('/authorized-staff/:id', authMiddleware, subscriptionGuard, taskController.getAuthorizedStaff);
+router.post('/add-employee',   authMiddleware, subscriptionGuard, tenantDbMiddleware, addEmployee);
+router.post('/bulk-employees', authMiddleware, subscriptionGuard, tenantDbMiddleware, bulkAddEmployees);
+router.post('/bulk-tasks',     authMiddleware, subscriptionGuard, tenantDbMiddleware, bulkAddTasks);
+router.post('/bulk-checklist', authMiddleware, subscriptionGuard, tenantDbMiddleware, bulkAddChecklists);
+router.put('/employees/:id', authMiddleware, subscriptionGuard, tenantDbMiddleware, updateEmployee);
+router.delete('/employees/:id', authMiddleware, subscriptionGuard, tenantDbMiddleware, deleteEmployee);
+router.get('/authorized-staff/:id', authMiddleware, subscriptionGuard, tenantDbMiddleware, taskController.getAuthorizedStaff);
 
 // Mapping, branding & settings
-router.put('/update-mapping', authMiddleware, subscriptionGuard, updateEmployeeMapping);
-router.put('/update-settings', authMiddleware, subscriptionGuard, updateSettings);
-router.put('/update-branding', authMiddleware, subscriptionGuard, ...useUpload(_upload.single('logo')), updateBranding);
-router.put('/assign-coordinator', authMiddleware, subscriptionGuard, assignToCoordinator);
+router.put('/update-mapping', authMiddleware, subscriptionGuard, tenantDbMiddleware, updateEmployeeMapping);
+router.put('/update-settings', authMiddleware, subscriptionGuard, tenantDbMiddleware, updateSettings);
+router.put('/update-branding', authMiddleware, subscriptionGuard, tenantDbMiddleware, ...useUpload(_upload.single('logo')), updateBranding);
+router.put('/assign-coordinator', authMiddleware, subscriptionGuard, tenantDbMiddleware, assignToCoordinator);
 
 // Settings fetch
-router.get('/settings/:tenantId', authMiddleware, subscriptionGuard, sameTenantOnly, async (req, res) => {
+router.get('/settings/:tenantId', authMiddleware, subscriptionGuard, tenantDbMiddleware, sameTenantOnly, async (req, res) => {
   try {
     const tenant = await Tenant.findById(req.params.tenantId);
     if (!tenant) return res.status(404).json({ message: 'Tenant not found' });
@@ -114,7 +115,7 @@ router.get('/settings/:tenantId', authMiddleware, subscriptionGuard, sameTenantO
 });
 
 // Tasks
-router.post('/create-task', authMiddleware, subscriptionGuard,
+router.post('/create-task', authMiddleware, subscriptionGuard, tenantDbMiddleware,
   ...useUpload(_upload.fields([
     { name: 'files',     maxCount: 10 },
     { name: 'taskFiles', maxCount: 10 },
@@ -132,15 +133,15 @@ router.post('/create-task', authMiddleware, subscriptionGuard,
   },
   taskController.createTask
 );
-router.delete('/:taskId', authMiddleware, subscriptionGuard, taskController.deleteTask);
-router.post('/handle-revision', authMiddleware, subscriptionGuard, taskController.handleRevision);
-router.post('/coordinator-force-done', authMiddleware, subscriptionGuard, taskController.coordinatorForceDone);
-router.put('/coordinator-force-done', authMiddleware, subscriptionGuard, taskController.coordinatorForceDone);
-router.put('/respond', authMiddleware, subscriptionGuard, ...useUpload(_upload.single('evidence')), taskController.respondToTask);
-router.post('/send-reminder', authMiddleware, subscriptionGuard, taskController.sendWhatsAppReminder);
+router.delete('/:taskId', authMiddleware, subscriptionGuard, tenantDbMiddleware, taskController.deleteTask);
+router.post('/handle-revision', authMiddleware, subscriptionGuard, tenantDbMiddleware, taskController.handleRevision);
+router.post('/coordinator-force-done', authMiddleware, subscriptionGuard, tenantDbMiddleware, taskController.coordinatorForceDone);
+router.put('/coordinator-force-done', authMiddleware, subscriptionGuard, tenantDbMiddleware, taskController.coordinatorForceDone);
+router.put('/respond', authMiddleware, subscriptionGuard, tenantDbMiddleware, ...useUpload(_upload.single('evidence')), taskController.respondToTask);
+router.post('/send-reminder', authMiddleware, subscriptionGuard, tenantDbMiddleware, taskController.sendWhatsAppReminder);
 
 // Direct WhatsApp send — used by coordinator dashboard (no task lookup)
-router.post('/send-whatsapp-reminder', authMiddleware, subscriptionGuard, async (req, res) => {
+router.post('/send-whatsapp-reminder', authMiddleware, subscriptionGuard, tenantDbMiddleware, async (req, res) => {
   try {
     const { templateName, toPhone, variables } = req.body;
     if (!toPhone || !templateName) {
@@ -157,25 +158,25 @@ router.post('/send-whatsapp-reminder', authMiddleware, subscriptionGuard, async 
 });
 
 // Checklists
-router.post('/create-checklist', authMiddleware, subscriptionGuard, taskController.createChecklistTask);
-router.get('/checklist-all/:tenantId', authMiddleware, subscriptionGuard, sameTenantOnly, taskController.getAllChecklists);
-router.get('/checklist/:doerId', authMiddleware, subscriptionGuard, taskController.getChecklistTasks);
-router.put('/checklist/:id', authMiddleware, subscriptionGuard, taskController.updateChecklistTask);
-router.delete('/checklist/:id', authMiddleware, subscriptionGuard, taskController.deleteChecklistTask);
-router.post('/checklist-done', authMiddleware, subscriptionGuard, ...useUpload(_upload.single('evidence')), taskController.completeChecklistTask);
+router.post('/create-checklist', authMiddleware, subscriptionGuard, tenantDbMiddleware, taskController.createChecklistTask);
+router.get('/checklist-all/:tenantId', authMiddleware, subscriptionGuard, tenantDbMiddleware, sameTenantOnly, taskController.getAllChecklists);
+router.get('/checklist/:doerId', authMiddleware, subscriptionGuard, tenantDbMiddleware, taskController.getChecklistTasks);
+router.put('/checklist/:id', authMiddleware, subscriptionGuard, tenantDbMiddleware, taskController.updateChecklistTask);
+router.delete('/checklist/:id', authMiddleware, subscriptionGuard, tenantDbMiddleware, taskController.deleteChecklistTask);
+router.post('/checklist-done', authMiddleware, subscriptionGuard, tenantDbMiddleware, ...useUpload(_upload.single('evidence')), taskController.completeChecklistTask);
 
 // Task views
-router.get('/doer/:doerId', authMiddleware, subscriptionGuard, taskController.getDoerTasks);
-router.get('/assigner/:assignerId', authMiddleware, subscriptionGuard, taskController.getAssignerTasks);
-router.get('/coordinator/:coordinatorId', authMiddleware, subscriptionGuard, taskController.getCoordinatorTasks);
-router.get('/coordinator-tasks/:coordinatorId', authMiddleware, subscriptionGuard, taskController.getCoordinatorTasks);
+router.get('/doer/:doerId', authMiddleware, subscriptionGuard, tenantDbMiddleware, taskController.getDoerTasks);
+router.get('/assigner/:assignerId', authMiddleware, subscriptionGuard, tenantDbMiddleware, taskController.getAssignerTasks);
+router.get('/coordinator/:coordinatorId', authMiddleware, subscriptionGuard, tenantDbMiddleware, taskController.getCoordinatorTasks);
+router.get('/coordinator-tasks/:coordinatorId', authMiddleware, subscriptionGuard, tenantDbMiddleware, taskController.getCoordinatorTasks);
 
 // Analytics & scoreboards
-router.get('/employee-score/:employeeId', authMiddleware, subscriptionGuard, taskController.getEmployeeScore);
-router.get('/global-performance/:tenantId', authMiddleware, subscriptionGuard, sameTenantOnly, taskController.getGlobalPerformance);
-router.get('/company-overview/:tenantId', authMiddleware, subscriptionGuard, sameTenantOnly, getCompanyOverview);
-router.get('/employee-deep-dive/:employeeId', authMiddleware, subscriptionGuard, taskController.getEmployeeDeepDive);
-router.put('/update-weekly-target', authMiddleware, subscriptionGuard, taskController.updateEmployeeTarget);
-router.get('/review-analytics/:tenantId', authMiddleware, subscriptionGuard, sameTenantOnly, taskController.getReviewAnalytics);
+router.get('/employee-score/:employeeId', authMiddleware, subscriptionGuard, tenantDbMiddleware, taskController.getEmployeeScore);
+router.get('/global-performance/:tenantId', authMiddleware, subscriptionGuard, tenantDbMiddleware, sameTenantOnly, taskController.getGlobalPerformance);
+router.get('/company-overview/:tenantId', authMiddleware, subscriptionGuard, tenantDbMiddleware, sameTenantOnly, getCompanyOverview);
+router.get('/employee-deep-dive/:employeeId', authMiddleware, subscriptionGuard, tenantDbMiddleware, taskController.getEmployeeDeepDive);
+router.put('/update-weekly-target', authMiddleware, subscriptionGuard, tenantDbMiddleware, taskController.updateEmployeeTarget);
+router.get('/review-analytics/:tenantId', authMiddleware, subscriptionGuard, tenantDbMiddleware, sameTenantOnly, taskController.getReviewAnalytics);
 
 module.exports = router;
