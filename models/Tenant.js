@@ -112,16 +112,34 @@ const TenantSchema = new mongoose.Schema({
     employeeLimit:   { type: Number, default: 50 },   // max employees allowed
     whatsappLimit:   { type: Number, default: 1000 },  // max WA msgs per month
 
+    // Custom database URI (optional — if set, tenant uses their own MongoDB)
+    customMongoUri:    { type: String, default: '' },
+
+    // Custom WhatsApp API key (optional — if set, overrides global DoubleTick key)
+    customWhatsappKey: { type: String, default: '' },
+
     // Feature flags — toggle modules on/off per tenant
     features: {
-      tasks:        { type: Boolean, default: true },
-      fms:          { type: Boolean, default: true },
-      chat:         { type: Boolean, default: true },
-      reports:      { type: Boolean, default: true },
-      orderForms:   { type: Boolean, default: true },
-      whatsapp:     { type: Boolean, default: true },
-      rewards:      { type: Boolean, default: true },
-      checklist:    { type: Boolean, default: true },
+      // Task modules
+      tasks:        { type: Boolean, default: true },  // Manage Tasks + My Tasks
+      checklist:    { type: Boolean, default: true },  // Manage Checklist
+      fms:          { type: Boolean, default: true },  // Flow Management
+      // Communication
+      chat:         { type: Boolean, default: true },  // Chat
+      whatsapp:     { type: Boolean, default: true },  // WhatsApp notifications
+      // Management
+      tracking:     { type: Boolean, default: true },  // Coordinator Tracking
+      reviewMeeting:{ type: Boolean, default: true },  // Review Meeting
+      employees:    { type: Boolean, default: true },  // Employees tab
+      mapping:      { type: Boolean, default: true },  // Mapping tab
+      // Forms & Orders
+      orderForms:   { type: Boolean, default: true },  // Order Forms
+      newOrder:     { type: Boolean, default: true },  // New Order
+      // Analytics & Rewards
+      reports:      { type: Boolean, default: true },  // Reports Hub
+      rewards:      { type: Boolean, default: true },  // Rewards Log
+      // Settings
+      settings:     { type: Boolean, default: true },  // Settings tab
     },
 
     // Billing

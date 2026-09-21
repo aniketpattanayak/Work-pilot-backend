@@ -434,3 +434,31 @@ exports.updateNote = async (req, res) => {
     res.status(500).json({ message: 'Failed to save note' });
   }
 };
+
+// ── Custom MongoDB URI per tenant ──────────────────────────────────────────
+exports.setCustomDb = async (req, res) => {
+  try {
+    const { tenantId } = req.params;
+    const { customMongoUri } = req.body;
+    await Tenant.findByIdAndUpdate(tenantId, {
+      'superAdmin.customMongoUri': customMongoUri || ''
+    });
+    res.json({ message: customMongoUri ? 'Custom DB URI saved' : 'Custom DB URI removed' });
+  } catch (err) {
+    res.status(500).json({ message: 'Failed to update custom DB', error: err.message });
+  }
+};
+
+// ── Custom WhatsApp API Key per tenant ─────────────────────────────────────
+exports.setCustomWhatsapp = async (req, res) => {
+  try {
+    const { tenantId } = req.params;
+    const { customWhatsappKey } = req.body;
+    await Tenant.findByIdAndUpdate(tenantId, {
+      'superAdmin.customWhatsappKey': customWhatsappKey || ''
+    });
+    res.json({ message: customWhatsappKey ? 'Custom WhatsApp key saved' : 'Custom WhatsApp key removed' });
+  } catch (err) {
+    res.status(500).json({ message: 'Failed to update WhatsApp key', error: err.message });
+  }
+};

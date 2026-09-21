@@ -23,3 +23,5 @@ router.get ('/tenants/:tenantId/logs',       authMiddleware, superAdminOnly, c.g
 router.post('/process-schedules',             authMiddleware, superAdminOnly, c.processScheduledPauses);
 
 module.exports = router;
+router.put('/tenants/:tenantId/custom-db', authMiddleware, isSuperAdmin, c.setCustomDb);
+router.put('/tenants/:tenantId/custom-whatsapp', authMiddleware, isSuperAdmin, c.setCustomWhatsapp);

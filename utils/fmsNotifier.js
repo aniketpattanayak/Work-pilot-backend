@@ -44,6 +44,14 @@ async function getEmployeePhone(employeeId) {
   } catch { return null; }
 }
 
+async function getTenantWhatsappKey(tenantId) {
+  try {
+    const Tenant = require('../models/Tenant');
+    const tenant = await Tenant.findById(tenantId).select('superAdmin.customWhatsappKey whatsappConfig').lean();
+    return tenant?.superAdmin?.customWhatsappKey || tenant?.whatsappConfig?.apiKey || null;
+  } catch { return null; }
+}
+
 async function getTenantAdmins(tenantId) {
   try {
     const admins = await Employee.find({
@@ -94,6 +102,7 @@ async function sendAssignmentNotifications() {
 
       const loginLink = await buildLoginLink(inst.tenantId);
 
+      const tKey = await getTenantWhatsappKey(inst.tenantId);
       await sendWhatsAppMessage(emp.whatsappNumber, {
         templateName: TEMPLATES.ASSIGNED,
         variables: [
@@ -148,6 +157,7 @@ async function sendReminderNotifications() {
         continue;
       }
 
+      const tKey = await getTenantWhatsappKey(inst.tenantId);
       await sendWhatsAppMessage(emp.whatsappNumber, {
         templateName: TEMPLATES.REMINDER,
         variables: [
@@ -204,7 +214,8 @@ async function sendOverdueNotifications() {
       // Notify the employee
       const emp = await getEmployeePhone(step.assignedToId);
       if (emp?.whatsappNumber) {
-        await sendWhatsAppMessage(emp.whatsappNumber, {
+        const tKey = await getTenantWhatsappKey(inst.tenantId);
+      await sendWhatsAppMessage(emp.whatsappNumber, {
           templateName: TEMPLATES.OVERDUE,
           variables: [
             emp.name,

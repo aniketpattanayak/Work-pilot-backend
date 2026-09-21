@@ -13,7 +13,9 @@ const sendWhatsAppMessage = async (toPhone, data) => {
     return;
   }
 
-  const apiKey = 'key_2dXrv0XqQHiTLGt0leBhwfC1UtlDPGlMUpWNNbE8WtbVLPCRcLwIoa3jM9Ouw8Fs0Ng3sfNp6ZKs8brNd11i7kFMOJ7usgywndWHLa3ry4zjK9UptpaUrdGRte5t4f8ntXfZiAcY0JoNueh03GHQZXdBHOCODzfEOxxF1aekmA7SLRmEsP8Hhw3UFpdwAe1j8DSamao3ZDv5LOlwxjrkoQCgnulhxUlTcsE7ucElwdkrhGdfVbCV7A76uJpI';
+  const GLOBAL_API_KEY = 'key_2dXrv0XqQHiTLGt0leBhwfC1UtlDPGlMUpWNNbE8WtbVLPCRcLwIoa3jM9Ouw8Fs0Ng3sfNp6ZKs8brNd11i7kFMOJ7usgywndWHLa3ry4zjK9UptpaUrdGRte5t4f8ntXfZiAcY0JoNueh03GHQZXdBHOCODzfEOxxF1aekmA7SLRmEsP8Hhw3UFpdwAe1j8DSamao3ZDv5LOlwxjrkoQCgnulhxUlTcsE7ucElwdkrhGdfVbCV7A76uJpI';
+  // Use per-tenant key if provided, otherwise use global key
+  const apiKey = (tenantApiKey && tenantApiKey.trim()) ? tenantApiKey.trim() : GLOBAL_API_KEY;
   
   // Clean non-numeric characters and ensure '91' prefix for Indian numbers
   let cleanedPhone = String(toPhone).replace(/\D/g, '');
