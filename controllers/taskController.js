@@ -779,7 +779,6 @@ exports.coordinatorForceDone = async (req, res) => {
     task.history.push(historyEntry);
 
     // 4. Handle Checklist-specific logic
-    const Tenant = require('../models/Tenant');
     const tenant = await Tenant.findById(task.tenantId);
 
     if (isChecklist) {
@@ -1244,7 +1243,6 @@ exports.handleRevision = async (req, res) => {
 
     if (!task) return res.status(404).json({ message: "Task not found" });
 
-    const Tenant = require('../models/Tenant');
     const tenant = await Tenant.findById(task.tenantId);
 
     // 2. GENERATE DYNAMIC LOGIN LINK USING SUBDOMAIN
@@ -1400,7 +1398,6 @@ exports.handleRevision = async (req, res) => {
 
     if (!task) return res.status(404).json({ message: "Task not found" });
 
-    const Tenant = require('../models/Tenant');
     const tenant = await Tenant.findById(task.tenantId);
 
     const companySubdomain = tenant?.subdomain || "portal";
@@ -1832,7 +1829,6 @@ exports.createTask = async (req, res) => {
     }
 
     // --- SAVE TO DATABASE ---
-    const DelegationTask = require('../models/DelegationTask');
     const newTask = new DelegationTask(taskData);
     
     newTask.history = [{
@@ -1846,8 +1842,6 @@ exports.createTask = async (req, res) => {
 
     // --- WHATSAPP NOTIFICATIONS ---
     try {
-      const Employee = require('../models/Employee');
-      const Tenant = require('../models/Tenant');
 
       const assigner = taskData.assignerId ? await Employee.findById(taskData.assignerId).catch(()=>null) : null;
       const doer = taskData.doerId ? await Employee.findById(taskData.doerId).catch(()=>null) : null;
