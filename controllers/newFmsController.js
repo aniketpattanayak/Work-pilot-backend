@@ -507,7 +507,6 @@ exports.getMyTasksWithNodes = async (req, res) => {
     const now = new Date();
 
     // Also get the employee's name for name-based fallback matching
-    const Employee = require('../models/Employee');
     const empDoc = await Employee.findById(employeeId).select('name').lean();
     const empName = empDoc?.name || '';
 
@@ -761,7 +760,6 @@ exports.getFmsTasksForCoordinator = async (req, res) => {
     const tenantId = req.user.tenantId;
 
     // Get coordinator's mapped doers
-    const Employee = require('../models/Employee');
     const coordinator = await Employee.findById(coordinatorId).lean();
     if (!coordinator) return res.status(404).json({ message: 'Coordinator not found' });
 
@@ -807,7 +805,6 @@ exports.getCompletedFmsForCoordinator = async (req, res) => {
     const { coordinatorId } = req.params;
     const tenantId = req.user.tenantId;
 
-    const Employee = require('../models/Employee');
 
 // ─── Per-tenant DB model getter ───────────────────────────────────────────────
 function getModels(req) {

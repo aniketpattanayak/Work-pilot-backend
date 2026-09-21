@@ -404,7 +404,6 @@ exports.bulkAddTasks = async (req, res) => {
         const doer     = findEmp(task['Assigned To'] || task.assignedTo);
         const assigner = findEmp(task['Created By']  || task.createdBy);
 
-        const DelegationTask = require('./models/DelegationTask') || 
           require('../models/DelegationTask');
 
         await DelegationTask.create({
@@ -446,7 +445,6 @@ exports.bulkAddChecklists = async (req, res) => {
       e.name.toLowerCase().trim() === (name || '').toLowerCase().trim()
     );
 
-    const ChecklistTask = require('../models/ChecklistTask');
 
 // ─── Per-tenant DB model getter ───────────────────────────────────────────────
 function getModels(req) {
