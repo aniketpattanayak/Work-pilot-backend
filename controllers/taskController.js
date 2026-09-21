@@ -208,7 +208,6 @@ exports.getEmployeeScore = async (req, res) => {
     const { range = 'Monthly' } = req.query; // Accepts: 'Daily', 'Weekly', 'Monthly'
 
     // --- PERSISTENCE: MODEL IMPORTS ---
-    const Employee = require('../models/Employee');
     const employee = await Employee.findById(employeeId);
 
     const now = new Date();
