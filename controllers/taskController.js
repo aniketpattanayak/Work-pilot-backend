@@ -2205,7 +2205,6 @@ exports.getReviewAnalytics = async (req, res) => {
     }
 
     // UPDATED: Added 'weeklyLateTarget' to select
-    const FlowInstance = require('../models/FlowInstance');
 
 // ─── Per-tenant DB model getter ───────────────────────────────────────────────
 function getModels(req) {
