@@ -36,7 +36,7 @@ const tenantDbMiddleware = async (req, res, next) => {
       }
       req.db = conn;
     } else {
-      req.db = mongoose.connection;
+      req.db = null; // null = use default models via require()
     }
     next();
   } catch (err) {
