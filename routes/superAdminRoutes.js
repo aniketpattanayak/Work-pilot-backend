@@ -22,6 +22,7 @@ router.post('/tenants/:tenantId/reset-password', authMiddleware, superAdminOnly,
 router.get ('/tenants/:tenantId/logs',       authMiddleware, superAdminOnly, c.getActivityLog);
 router.post('/process-schedules',             authMiddleware, superAdminOnly, c.processScheduledPauses);
 
+router.put('/tenants/:tenantId/custom-db', authMiddleware, superAdminOnly, c.setCustomDb);
+router.put('/tenants/:tenantId/custom-whatsapp', authMiddleware, superAdminOnly, c.setCustomWhatsapp);
+
 module.exports = router;
-router.put('/tenants/:tenantId/custom-db', authMiddleware, isSuperAdmin, c.setCustomDb);
-router.put('/tenants/:tenantId/custom-whatsapp', authMiddleware, isSuperAdmin, c.setCustomWhatsapp);
