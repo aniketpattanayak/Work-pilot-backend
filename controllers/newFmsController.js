@@ -21,6 +21,15 @@ async function M(req) {
  * POST /api/fms2/templates
  * Admin creates a new flow blueprint.
  */
+// ─── Per-tenant DB model getter ───────────────────────────────────────────────
+function getModels(req) {
+  return {
+    FlowTemplate: req?.db ? (req.db.models['FlowTemplate'] || req.db.model('FlowTemplate', require('../models/FlowTemplate').schema)) : require('../models/FlowTemplate'),
+    FlowInstance: req?.db ? (req.db.models['FlowInstance'] || req.db.model('FlowInstance', require('../models/FlowInstance').schema)) : require('../models/FlowInstance'),
+    Employee: req?.db ? (req.db.models['Employee'] || req.db.model('Employee', require('../models/Employee').schema)) : require('../models/Employee'),
+  };
+}
+
 exports.createTemplate = async (req, res) => {
   try {
     const { FlowTemplate, FlowInstance, Employee } = getModels(req);
@@ -806,14 +815,7 @@ exports.getCompletedFmsForCoordinator = async (req, res) => {
     const tenantId = req.user.tenantId;
 
 
-// ─── Per-tenant DB model getter ───────────────────────────────────────────────
-function getModels(req) {
-  return {
-    FlowTemplate: req?.db ? (req.db.models['FlowTemplate'] || req.db.model('FlowTemplate', require('../models/FlowTemplate').schema)) : require('../models/FlowTemplate'),
-    FlowInstance: req?.db ? (req.db.models['FlowInstance'] || req.db.model('FlowInstance', require('../models/FlowInstance').schema)) : require('../models/FlowInstance'),
-    Employee: req?.db ? (req.db.models['Employee'] || req.db.model('Employee', require('../models/Employee').schema)) : require('../models/Employee'),
-  };
-}
+
 
     const coordinator = await Employee.findById(coordinatorId).lean();
     if (!coordinator) return res.status(404).json({ message: 'Coordinator not found' });

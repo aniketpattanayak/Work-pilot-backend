@@ -20,6 +20,16 @@ async function M(req) {
 }
 
 
+// ─── Per-tenant DB model getter ───────────────────────────────────────────────
+function getModels(req) {
+  return {
+    DelegationTask: req?.db ? (req.db.models['DelegationTask'] || req.db.model('DelegationTask', require('../models/DelegationTask').schema)) : require('../models/DelegationTask'),
+    Employee: req?.db ? (req.db.models['Employee'] || req.db.model('Employee', require('../models/Employee').schema)) : require('../models/Employee'),
+    Tenant: req?.db ? (req.db.models['Tenant'] || req.db.model('Tenant', require('../models/Tenant').schema)) : require('../models/Tenant'),
+    ChecklistTask: req?.db ? (req.db.models['ChecklistTask'] || req.db.model('ChecklistTask', require('../models/ChecklistTask').schema)) : require('../models/ChecklistTask'),
+  };
+}
+
 exports.getDoerTasks = async (req, res) => {
   try {
     const { DelegationTask, Employee, Tenant, ChecklistTask } = getModels(req);
@@ -2206,15 +2216,7 @@ exports.getReviewAnalytics = async (req, res) => {
 
     // UPDATED: Added 'weeklyLateTarget' to select
 
-// ─── Per-tenant DB model getter ───────────────────────────────────────────────
-function getModels(req) {
-  return {
-    DelegationTask: req?.db ? (req.db.models['DelegationTask'] || req.db.model('DelegationTask', require('../models/DelegationTask').schema)) : require('../models/DelegationTask'),
-    Employee: req?.db ? (req.db.models['Employee'] || req.db.model('Employee', require('../models/Employee').schema)) : require('../models/Employee'),
-    Tenant: req?.db ? (req.db.models['Tenant'] || req.db.model('Tenant', require('../models/Tenant').schema)) : require('../models/Tenant'),
-    ChecklistTask: req?.db ? (req.db.models['ChecklistTask'] || req.db.model('ChecklistTask', require('../models/ChecklistTask').schema)) : require('../models/ChecklistTask'),
-  };
-}
+
 
     const [employees, delegations, checklists, fmsInstances] = await Promise.all([
       Employee.find({ tenantId }).select('name department weeklyLateTarget'),
