@@ -27,6 +27,7 @@ function getModels(req) {
     Employee: req?.db ? (req.db.models['Employee'] || req.db.model('Employee', require('../models/Employee').schema)) : require('../models/Employee'),
     Tenant: req?.db ? (req.db.models['Tenant'] || req.db.model('Tenant', require('../models/Tenant').schema)) : require('../models/Tenant'),
     ChecklistTask: req?.db ? (req.db.models['ChecklistTask'] || req.db.model('ChecklistTask', require('../models/ChecklistTask').schema)) : require('../models/ChecklistTask'),
+    FlowInstance: req?.db ? (req.db.models['FlowInstance'] || req.db.model('FlowInstance', require('../models/FlowInstance').schema)) : require('../models/FlowInstance'),
   };
 }
 
