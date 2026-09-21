@@ -2216,12 +2216,11 @@ exports.getReviewAnalytics = async (req, res) => {
 
 // ─── Per-tenant DB model getter ───────────────────────────────────────────────
 function getModels(req) {
-  const db = req?.db || require('mongoose').connection;
   return {
-    DelegationTask: db.models['DelegationTask'] || require('../models/DelegationTask'),
-    Employee:       db.models['Employee']       || require('../models/Employee'),
-    Tenant:         db.models['Tenant']         || require('../models/Tenant'),
-    ChecklistTask:  db.models['ChecklistTask']  || require('../models/ChecklistTask'),
+    DelegationTask: req?.db ? (req.db.models['DelegationTask'] || req.db.model('DelegationTask', require('../models/DelegationTask').schema)) : require('../models/DelegationTask'),
+    Employee: req?.db ? (req.db.models['Employee'] || req.db.model('Employee', require('../models/Employee').schema)) : require('../models/Employee'),
+    Tenant: req?.db ? (req.db.models['Tenant'] || req.db.model('Tenant', require('../models/Tenant').schema)) : require('../models/Tenant'),
+    ChecklistTask: req?.db ? (req.db.models['ChecklistTask'] || req.db.model('ChecklistTask', require('../models/ChecklistTask').schema)) : require('../models/ChecklistTask'),
   };
 }
 

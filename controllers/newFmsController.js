@@ -811,11 +811,10 @@ exports.getCompletedFmsForCoordinator = async (req, res) => {
 
 // ─── Per-tenant DB model getter ───────────────────────────────────────────────
 function getModels(req) {
-  const db = req?.db || require('mongoose').connection;
   return {
-    FlowTemplate: db.models['FlowTemplate'] || require('../models/FlowTemplate'),
-    FlowInstance: db.models['FlowInstance'] || require('../models/FlowInstance'),
-    Employee:     db.models['Employee']     || require('../models/Employee'),
+    FlowTemplate: req?.db ? (req.db.models['FlowTemplate'] || req.db.model('FlowTemplate', require('../models/FlowTemplate').schema)) : require('../models/FlowTemplate'),
+    FlowInstance: req?.db ? (req.db.models['FlowInstance'] || req.db.model('FlowInstance', require('../models/FlowInstance').schema)) : require('../models/FlowInstance'),
+    Employee: req?.db ? (req.db.models['Employee'] || req.db.model('Employee', require('../models/Employee').schema)) : require('../models/Employee'),
   };
 }
 
