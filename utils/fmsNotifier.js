@@ -213,9 +213,9 @@ async function sendOverdueNotifications() {
 
       // Notify the employee
       const emp = await getEmployeePhone(step.assignedToId);
+      const tKey = await getTenantWhatsappKey(inst.tenantId);
       if (emp?.whatsappNumber) {
-        const tKey = await getTenantWhatsappKey(inst.tenantId);
-      await sendWhatsAppMessage(emp.whatsappNumber, {
+        await sendWhatsAppMessage(emp.whatsappNumber, {
           templateName: TEMPLATES.OVERDUE,
           variables: [
             emp.name,
