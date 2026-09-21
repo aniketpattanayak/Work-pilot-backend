@@ -42,6 +42,7 @@ const ALLOWED_ORIGINS = new Set([
   'http://localhost:5174',
   'https://lrbcloud.ai',
   'https://www.lrbcloud.ai',
+  'https://admin.lrbcloud.ai',
 ]);
 
 // Matches *.lrbcloud.ai subdomains (prod) AND *.localhost:PORT (local dev)
