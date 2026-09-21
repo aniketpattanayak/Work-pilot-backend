@@ -65,4 +65,28 @@ const sameTenantOnly = (req, res, next) => {
   next();
 };
 
-module.exports = { authMiddleware, superAdminOnly, sameTenantOnly };
+// ── Per-tenant DB switcher ────────────────────────────────────────────────────
+// Add after authMiddleware to switch to tenant's custom DB if configured
+const tenantDbMiddleware = async (req, res, next) => {
+  try {
+    if (!req.user?.tenantId) return next();
+    const Tenant = require('../models/Tenant');
+    const tenant = await Tenant.findById(req.user.tenantId)
+      .select('superAdmin.customMongoUri')
+      .lean();
+    const customUri = tenant?.superAdmin?.customMongoUri;
+    if (customUri) {
+      const { getTenantConnection } = require('../utils/tenantDb');
+      req.tenantDb = await getTenantConnection(req.user.tenantId.toString(), customUri);
+    } else {
+      req.tenantDb = null; // use default shared DB
+    }
+    next();
+  } catch (err) {
+    console.error('[TenantDB] Middleware error:', err.message);
+    req.tenantDb = null;
+    next();
+  }
+};
+
+module.exports = { authMiddleware, superAdminOnly, sameTenantOnly, tenantDbMiddleware };

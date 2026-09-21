@@ -1,9 +1,20 @@
-const DelegationTask = require('../models/DelegationTask');
-const ChecklistTask = require('../models/ChecklistTask');
-const Employee = require('../models/Employee');
-const Tenant = require('../models/Tenant');
+const _DelegationTask = require('../models/DelegationTask');
+const _ChecklistTask = require('../models/ChecklistTask');
+const _Employee = require('../models/Employee');
+const _Tenant = require('../models/Tenant');
 const moment = require('moment');
 const sendReportEmail = require('../utils/emailService');
+const { getReqModels } = require('../utils/reqModels');
+async function M(req) {
+  const m = await getReqModels(req);
+  return {
+    DelegationTask: m.DelegationTask || _DelegationTask,
+    ChecklistTask: m.ChecklistTask || _ChecklistTask,
+    Employee: m.Employee || _Employee,
+    Tenant: m.Tenant || _Tenant,
+  };
+}
+
 
 /**
  * 1. DETAILED REPORT GENERATOR
@@ -107,6 +118,7 @@ const ExcelJS = require('exceljs');
 
 exports.manualDownload = async (req, res) => {
     try {
+    const { DelegationTask, ChecklistTask, Employee, Tenant } = await M(req);
         const { tenantId } = req.params;
         const { range } = req.query;
         const days = range === 'monthly' ? 30 : 7;

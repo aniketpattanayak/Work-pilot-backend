@@ -1,8 +1,19 @@
-const FlowTemplate = require('../models/FlowTemplate');
-const FlowInstance = require('../models/FlowInstance');
-const Employee     = require('../models/Employee');
-const axios        = require('axios');
+const _FlowTemplate = require('../models/FlowTemplate');
+const _FlowInstance = require('../models/FlowInstance');
+const _Employee     = require('../models/Employee');
+const axios         = require('axios');
 const { completeStep, startInstance } = require('../utils/flowEngine');
+const { getReqModels } = require('../utils/reqModels');
+
+// Helper — get correct models for this request's tenant DB
+async function M(req) {
+  const m = await getReqModels(req);
+  return {
+    FlowTemplate: m.FlowTemplate || _FlowTemplate,
+    FlowInstance: m.FlowInstance || _FlowInstance,
+    Employee:     m.Employee     || _Employee,
+  };
+}
 
 // ─── TEMPLATE MANAGEMENT ──────────────────────────────────────────────────────
 
@@ -12,6 +23,7 @@ const { completeStep, startInstance } = require('../utils/flowEngine');
  */
 exports.createTemplate = async (req, res) => {
   try {
+    const { FlowTemplate, FlowInstance, Employee } = await M(req);
     const {
       name, googleSheetId, scriptUrl, tabName, uniqueIdColumn,
       workingHours, startNodeId, nodes,
@@ -71,6 +83,7 @@ exports.createTemplate = async (req, res) => {
  */
 exports.getTemplates = async (req, res) => {
   try {
+    const { FlowTemplate, FlowInstance, Employee } = await M(req);
     const { tenantId } = req.params;
     const templates = await FlowTemplate.find({ tenantId, isActive: true }).sort({ createdAt: -1 });
     res.json(templates);
@@ -85,6 +98,7 @@ exports.getTemplates = async (req, res) => {
  */
 exports.getTemplateById = async (req, res) => {
   try {
+    const { FlowTemplate, FlowInstance, Employee } = await M(req);
     const template = await FlowTemplate.findById(req.params.templateId);
     if (!template) return res.status(404).json({ message: 'Template not found' });
     res.json(template);
@@ -110,6 +124,7 @@ exports.getTemplateById = async (req, res) => {
  */
 exports.updateTemplate = async (req, res) => {
   try {
+    const { FlowTemplate, FlowInstance, Employee } = await M(req);
     const { templateId } = req.params;
 
     const newNodeIds = new Set((req.body.nodes || []).map(n => n.id));
@@ -151,6 +166,7 @@ exports.updateTemplate = async (req, res) => {
  */
 exports.deleteTemplate = async (req, res) => {
   try {
+    const { FlowTemplate, FlowInstance, Employee } = await M(req);
     const { templateId } = req.params;
 
     const activeCount = await FlowInstance.countDocuments({ templateId, status: 'active' });
@@ -174,6 +190,7 @@ exports.deleteTemplate = async (req, res) => {
  */
 exports.getSheetColumns = async (req, res) => {
   try {
+    const { FlowTemplate, FlowInstance, Employee } = await M(req);
     const template = await FlowTemplate.findById(req.params.templateId);
     if (!template) return res.status(404).json({ message: 'Template not found' });
 
@@ -201,6 +218,7 @@ exports.getSheetColumns = async (req, res) => {
  */
 exports.pushSync = async (req, res) => {
   try {
+    const { FlowTemplate, FlowInstance, Employee } = await M(req);
     const { templateId, rowData } = req.body;
 
     if (!templateId || !rowData) {
@@ -254,6 +272,7 @@ exports.pushSync = async (req, res) => {
  */
 exports.manualSync = async (req, res) => {
   try {
+    const { FlowTemplate, FlowInstance, Employee } = await M(req);
     const template = await FlowTemplate.findById(req.params.templateId);
     if (!template) return res.status(404).json({ message: 'Template not found' });
 
@@ -301,6 +320,7 @@ exports.manualSync = async (req, res) => {
  */
 exports.completeStep = async (req, res) => {
   try {
+    const { FlowTemplate, FlowInstance, Employee } = await M(req);
     const { instanceId } = req.params;
     const { decision, inputs } = req.body;
     const employeeId   = req.user?.id;
@@ -351,6 +371,7 @@ exports.completeStep = async (req, res) => {
  */
 exports.getInstances = async (req, res) => {
   try {
+    const { FlowTemplate, FlowInstance, Employee } = await M(req);
     const { tenantId } = req.params;
     const { status = 'active', templateId, page = 1, limit = 50 } = req.query;
 
@@ -396,6 +417,7 @@ exports.getInstances = async (req, res) => {
  */
 exports.getMonitorStats = async (req, res) => {
   try {
+    const { FlowTemplate, FlowInstance, Employee } = await M(req);
     const { tenantId } = req.params;
     const now = new Date();
 
@@ -421,6 +443,7 @@ exports.getMonitorStats = async (req, res) => {
  */
 exports.getInstanceDetail = async (req, res) => {
   try {
+    const { FlowTemplate, FlowInstance, Employee } = await M(req);
     const instance = await FlowInstance.findById(req.params.instanceId).lean();
     if (!instance) return res.status(404).json({ message: 'Instance not found' });
 
@@ -438,6 +461,7 @@ exports.getInstanceDetail = async (req, res) => {
  */
 exports.getMyTasks = async (req, res) => {
   try {
+    const { FlowTemplate, FlowInstance, Employee } = await M(req);
     const { employeeId } = req.params;
 
     const tasks = await FlowInstance.find({
@@ -478,6 +502,7 @@ exports.getMyTasks = async (req, res) => {
  */
 exports.getMyTasksWithNodes = async (req, res) => {
   try {
+    const { FlowTemplate, FlowInstance, Employee } = await M(req);
     const { employeeId } = req.params;
     const now = new Date();
 
@@ -563,6 +588,7 @@ exports.getMyTasksWithNodes = async (req, res) => {
  */
 exports.cancelInstance = async (req, res) => {
   try {
+    const { FlowTemplate, FlowInstance, Employee } = await M(req);
     const instance = await FlowInstance.findById(req.params.instanceId);
     if (!instance) return res.status(404).json({ message: 'Instance not found' });
 
@@ -582,6 +608,7 @@ exports.cancelInstance = async (req, res) => {
  */
 exports.fixInstanceAssignee = async (req, res) => {
   try {
+    const { FlowTemplate, FlowInstance, Employee } = await M(req);
     const { tenantId } = req.params;
     const { employeeId, employeeName } = req.body;
 
@@ -621,6 +648,7 @@ exports.fixInstanceAssignee = async (req, res) => {
 
 exports.repairAssignees = async (req, res) => {
   try {
+    const { FlowTemplate, FlowInstance, Employee } = await M(req);
     const { tenantId } = req.params;
 
     // Find ALL active instances — not just null assignedToId
@@ -681,6 +709,7 @@ exports.repairAssignees = async (req, res) => {
  */
 exports.reassignInstance = async (req, res) => {
   try {
+    const { FlowTemplate, FlowInstance, Employee } = await M(req);
     const { instanceId } = req.params;
     const { assignedToId, assignedToName } = req.body;
     if (!assignedToId) return res.status(400).json({ message: 'assignedToId required' });
@@ -698,6 +727,7 @@ exports.reassignInstance = async (req, res) => {
 // ─── GET COMPLETED FMS TASKS FOR COORDINATOR ─────────────────────────────────
 exports.getCompletedTasksForCoordinator = async (req, res) => {
   try {
+    const { FlowTemplate, FlowInstance, Employee } = await M(req);
     const { employeeId } = req.params;
     const tenantId = req.user.tenantId;
 
@@ -726,6 +756,7 @@ exports.getCompletedTasksForCoordinator = async (req, res) => {
 // ─── GET FMS TASKS FOR COORDINATOR (all mapped doers) ────────────────────────
 exports.getFmsTasksForCoordinator = async (req, res) => {
   try {
+    const { FlowTemplate, FlowInstance, Employee } = await M(req);
     const { coordinatorId } = req.params;
     const tenantId = req.user.tenantId;
 
@@ -772,6 +803,7 @@ exports.getFmsTasksForCoordinator = async (req, res) => {
 // ─── GET COMPLETED FMS TASKS FOR COORDINATOR (all mapped doers) ──────────────
 exports.getCompletedFmsForCoordinator = async (req, res) => {
   try {
+    const { FlowTemplate, FlowInstance, Employee } = await M(req);
     const { coordinatorId } = req.params;
     const tenantId = req.user.tenantId;
 
