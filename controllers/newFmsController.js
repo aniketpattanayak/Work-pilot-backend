@@ -813,8 +813,9 @@ exports.getCompletedFmsForCoordinator = async (req, res) => {
 function getModels(req) {
   const db = req?.db || require('mongoose').connection;
   return {
-    
-FlowTemplate: db.models['FlowTemplate'] || require('../models/FlowTemplate')    FlowInstance: db.models['FlowInstance'] || require('../models/FlowInstance')    Employee: db.models['Employee'] || require('../models/Employee')
+    FlowTemplate: db.models['FlowTemplate'] || require('../models/FlowTemplate'),
+    FlowInstance: db.models['FlowInstance'] || require('../models/FlowInstance'),
+    Employee:     db.models['Employee']     || require('../models/Employee'),
   };
 }
 

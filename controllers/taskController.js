@@ -2218,8 +2218,10 @@ exports.getReviewAnalytics = async (req, res) => {
 function getModels(req) {
   const db = req?.db || require('mongoose').connection;
   return {
-    
-DelegationTask: db.models['DelegationTask'] || require('../models/DelegationTask')    Employee: db.models['Employee'] || require('../models/Employee')    Tenant: db.models['Tenant'] || require('../models/Tenant')    ChecklistTask: db.models['ChecklistTask'] || require('../models/ChecklistTask')
+    DelegationTask: db.models['DelegationTask'] || require('../models/DelegationTask'),
+    Employee:       db.models['Employee']       || require('../models/Employee'),
+    Tenant:         db.models['Tenant']         || require('../models/Tenant'),
+    ChecklistTask:  db.models['ChecklistTask']  || require('../models/ChecklistTask'),
   };
 }
 
