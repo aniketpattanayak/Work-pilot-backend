@@ -2,7 +2,7 @@ const express = require('express');
 const router  = express.Router();
 const c       = require('../controllers/newFmsController');
 const tenantDbMiddleware = require('../middleware/tenantDb');
-const { authMiddleware, sameTenantOnly, tenantDbMiddleware, superAdminOnly } = require('../middleware/auth');
+const { authMiddleware, sameTenantOnly, superAdminOnly } = require('../middleware/auth');
 const subscriptionGuard = require('../middleware/subscriptionGuard');
 
 // ─── TEMPLATE MANAGEMENT (admin only) ────────────────────────────────────────
