@@ -406,6 +406,16 @@ exports.bulkAddTasks = async (req, res) => {
 
           require('../models/DelegationTask');
 
+// ─── Per-tenant DB model getter ───────────────────────────────────────────────
+function getModels(req) {
+  return {
+    Tenant: req?.db ? (req.db.models['Tenant'] || req.db.model('Tenant', require('../models/Tenant').schema)) : require('../models/Tenant'),
+    Employee: req?.db ? (req.db.models['Employee'] || req.db.model('Employee', require('../models/Employee').schema)) : require('../models/Employee'),
+    DelegationTask: req?.db ? (req.db.models['DelegationTask'] || req.db.model('DelegationTask', require('../models/DelegationTask').schema)) : require('../models/DelegationTask'),
+    ChecklistTask: req?.db ? (req.db.models['ChecklistTask'] || req.db.model('ChecklistTask', require('../models/ChecklistTask').schema)) : require('../models/ChecklistTask'),
+  };
+}
+
         await DelegationTask.create({
           tenantId,
           title:       task['Task Title'] || task.title,
@@ -446,15 +456,7 @@ exports.bulkAddChecklists = async (req, res) => {
     );
 
 
-// ─── Per-tenant DB model getter ───────────────────────────────────────────────
-function getModels(req) {
-  return {
-    Tenant: req?.db ? (req.db.models['Tenant'] || req.db.model('Tenant', require('../models/Tenant').schema)) : require('../models/Tenant'),
-    Employee: req?.db ? (req.db.models['Employee'] || req.db.model('Employee', require('../models/Employee').schema)) : require('../models/Employee'),
-    DelegationTask: req?.db ? (req.db.models['DelegationTask'] || req.db.model('DelegationTask', require('../models/DelegationTask').schema)) : require('../models/DelegationTask'),
-    ChecklistTask: req?.db ? (req.db.models['ChecklistTask'] || req.db.model('ChecklistTask', require('../models/ChecklistTask').schema)) : require('../models/ChecklistTask'),
-  };
-}
+
 
     const results = { success: 0, failed: [] };
 
