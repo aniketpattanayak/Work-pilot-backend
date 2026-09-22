@@ -26,6 +26,7 @@ const {
   verifyTenant,
   getProfile,
 } = require('../controllers/tenantController');
+const tenantDbMiddleware = require('../middleware/tenantDb');
 const { authMiddleware, superAdminOnly, sameTenantOnly } = require('../middleware/auth');
 const subscriptionGuard = require('../middleware/subscriptionGuard');
 
@@ -74,10 +75,10 @@ router.get('/checklist/:doerId', authMiddleware, subscriptionGuard, taskControll
 router.delete('/checklist/:id', authMiddleware, subscriptionGuard, taskController.deleteChecklistTask);
 
 // Employee management
-router.get('/employees/:tenantId', authMiddleware, subscriptionGuard, sameTenantOnly, getEmployeeList);
-router.post('/add-employee',      authMiddleware, subscriptionGuard, addEmployee);
-router.put('/employees/:id', authMiddleware, subscriptionGuard, updateEmployee);
-router.delete('/employees/:id', authMiddleware, subscriptionGuard, deleteEmployee);
+router.get('/employees/:tenantId', authMiddleware, subscriptionGuard, tenantDbMiddleware, sameTenantOnly, getEmployeeList);
+router.post('/add-employee',      authMiddleware, subscriptionGuard, tenantDbMiddleware, addEmployee);
+router.put('/employees/:id', authMiddleware, subscriptionGuard, tenantDbMiddleware, updateEmployee);
+router.delete('/employees/:id', authMiddleware, subscriptionGuard, tenantDbMiddleware, deleteEmployee);
 router.put('/update-mapping', authMiddleware, subscriptionGuard, updateEmployeeMapping);
 router.put('/assign-coordinator', authMiddleware, subscriptionGuard, assignToCoordinator);
 router.get('/company-overview/:tenantId', authMiddleware, subscriptionGuard, sameTenantOnly, getCompanyOverview);

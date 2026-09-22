@@ -29,15 +29,16 @@ exports.getEmployeeList = async (req, res) => {
     const limit = Math.min(500, parseInt(req.query.limit) || 100);
     const skip  = (page - 1) * limit;
 
+    const { Employee: EmpModel } = getModels(req);
     const [employees, total] = await Promise.all([
-      Employee.find({ tenantId })
+      EmpModel.find({ tenantId })
         .populate('managedDoers',    'name role department')
         .populate('managedAssigners','name role department')
         .select('-password')
         .sort({ createdAt: -1 })
         .skip(skip)
         .limit(limit),
-      Employee.countDocuments({ tenantId }),
+      EmpModel.countDocuments({ tenantId }),
     ]);
 
     res.status(200).json({
