@@ -113,7 +113,7 @@ async function sendAssignmentNotifications() {
           fmtDeadline(step.plannedDeadline),
           loginLink,
         ],
-      });
+      }, tKey);
 
       // Mark as notified
       await FlowInstance.updateOne(
@@ -166,7 +166,7 @@ async function sendReminderNotifications() {
           inst.orderIdentifier,
           fmtDeadline(step.plannedDeadline),
         ],
-      });
+      }, tKey);
 
       await FlowInstance.updateOne(
         { _id: inst._id },
@@ -224,7 +224,7 @@ async function sendOverdueNotifications() {
             String(minutesLate),
             loginLink,
           ],
-        });
+        }, tKey);
       }
 
       // Escalate to admins
@@ -240,7 +240,7 @@ async function sendOverdueNotifications() {
             inst.orderIdentifier,
             String(minutesLate),
           ],
-        });
+        }, tKey);
       }
 
       console.log(`[FMS Notify] Overdue alert: "${step.nodeName}" for ${inst.orderIdentifier} — ${minutesLate}min late`);
