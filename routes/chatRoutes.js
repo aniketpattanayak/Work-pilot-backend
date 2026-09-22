@@ -2,6 +2,7 @@ const express  = require('express');
 const multer   = require('multer');
 const router   = express.Router();
 const { authMiddleware } = require('../middleware/auth');
+const tenantDbMiddleware = require('../middleware/tenantDb');
 const c = require('../controllers/chatController');
 
 const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 25 * 1024 * 1024 } });
@@ -12,7 +13,7 @@ router.post('/dm',                         authMiddleware, c.getOrCreateDM);
 router.post('/task-thread',                authMiddleware, c.getOrCreateTaskThread);
 router.post('/announcement',               authMiddleware, c.createAnnouncement);
 router.get ('/unread-count',               authMiddleware, c.getUnreadCount);
-router.get ('/employees',                  authMiddleware, c.getEmployees);
+router.get ('/employees',                  authMiddleware, tenantDbMiddleware, c.getEmployees);
 
 // Messages
 router.get ('/:conversationId/messages',   authMiddleware, c.getMessages);

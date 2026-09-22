@@ -352,8 +352,9 @@ exports.getEmployees = async (req, res) => {
   try {
     const tenantId   = req.user.tenantId;
     const employeeId = req.user.id;
+    const EmployeeModel = req.db ? req.db.model('Employee') : Employee;
 
-    const employees = await Employee.find({
+    const employees = await EmployeeModel.find({
       tenantId,
       _id: { $ne: employeeId }, // exclude self
       isActive: { $ne: false },

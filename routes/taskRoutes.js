@@ -82,7 +82,7 @@ router.get('/employees/:tenantId', authMiddleware, subscriptionGuard, tenantDbMi
 // DoerChecklist calls /api/employees without tenantId — reads from JWT
 router.get('/employees', authMiddleware, subscriptionGuard, tenantDbMiddleware, async (req, res) => {
   try {
-    const Employee = require('../models/Employee');
+    const Employee = req.db ? req.db.model('Employee') : require('../models/Employee');
     const employees = await Employee.find({ tenantId: req.user.tenantId }).select('name email role department');
     res.json({ employees });
   } catch (err) {

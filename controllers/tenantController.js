@@ -43,7 +43,7 @@ exports.getEmployeeList = async (req, res) => {
         .sort({ createdAt: -1 })
         .skip(skip)
         .limit(limit),
-      EmpModel.countDocuments({ tenantId }),
+      Employee.countDocuments({ tenantId }),
     ]);
 
     res.status(200).json({
