@@ -315,7 +315,10 @@ exports.addEmployee = async (req, res) => {
             roles.join(', '),                  // {{3}}
             department || "Operations",         // {{4}}
             loginLink                          // {{5}}
-          ]
+          ],
+          // Only read by the Maytapi renderer (tenants using their own
+          // configured WhatsApp API) — never sent to DoubleTick/WATI.
+          password,
         };
 
         await notifyTenant(tenant._id, whatsappNumber, welcomeData);
