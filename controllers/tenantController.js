@@ -10,12 +10,17 @@ const sendWhatsAppMessage = require('../utils/whatsappNotify');
 
 
 // ─── Per-tenant DB model getter ───────────────────────────────────────────────
+function safeModel(db, name, fallback) {
+  if (!db) return fallback;
+  try { return db.model(name); } catch(e) { return fallback; }
+}
 function getModels(req) {
+  const db = req?.db || null;
   return {
-    Tenant: req?.db ? req.db.model('Tenant') : require('../models/Tenant'),
-    Employee: req?.db ? req.db.model('Employee') : require('../models/Employee'),
-    DelegationTask: req?.db ? req.db.model('DelegationTask') : require('../models/DelegationTask'),
-    ChecklistTask: req?.db ? req.db.model('ChecklistTask') : require('../models/ChecklistTask'),
+    Tenant:         safeModel(db, 'Tenant',         require('../models/Tenant')),
+    Employee:       safeModel(db, 'Employee',        require('../models/Employee')),
+    DelegationTask: safeModel(db, 'DelegationTask',  require('../models/DelegationTask')),
+    ChecklistTask:  safeModel(db, 'ChecklistTask',   require('../models/ChecklistTask')),
   };
 }
 
@@ -24,14 +29,14 @@ exports.getEmployeeList = async (req, res) => {
   // on every request. Consumers can pass ?page=2&limit=50.
   // Default: 100 per page, capped at 500.
   try {
+    const { Employee } = getModels(req);
     const { tenantId } = req.params;
     const page  = Math.max(1, parseInt(req.query.page)  || 1);
     const limit = Math.min(500, parseInt(req.query.limit) || 100);
     const skip  = (page - 1) * limit;
 
-    const { Employee: EmpModel } = getModels(req);
     const [employees, total] = await Promise.all([
-      EmpModel.find({ tenantId })
+      Employee.find({ tenantId })
         .populate('managedDoers',    'name role department')
         .populate('managedAssigners','name role department')
         .select('-password')
@@ -537,6 +542,7 @@ exports.superAdminLogin = async (req, res) => {
   //   node -e "const b=require('bcryptjs'); b.hash('YourPassword',12).then(console.log)"
   // Then store the resulting $2a$12$... hash as SUPERADMIN_PASS in .env.
   try {
+    const { Employee, Tenant, DelegationTask, ChecklistTask } = getModels(req);
     const { username, password } = req.body;
 
     const envUser = String(process.env.SUPERADMIN_USER || '').trim();
