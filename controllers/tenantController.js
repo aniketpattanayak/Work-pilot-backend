@@ -17,7 +17,7 @@ function safeModel(db, name, fallback) {
 function getModels(req) {
   const db = req?.db || null;
   return {
-    Tenant:         safeModel(db, 'Tenant',         require('../models/Tenant')),
+    Tenant:         require('../models/Tenant'), // Tenant records are platform metadata — always shared, never per-tenant-DB
     Employee:       safeModel(db, 'Employee',        require('../models/Employee')),
     DelegationTask: safeModel(db, 'DelegationTask',  require('../models/DelegationTask')),
     ChecklistTask:  safeModel(db, 'ChecklistTask',   require('../models/ChecklistTask')),
