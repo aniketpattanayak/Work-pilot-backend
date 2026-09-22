@@ -21,19 +21,24 @@ async function M(req) {
 
 
 // ─── Per-tenant DB model getter ───────────────────────────────────────────────
+function safeModel(db, name, fallback) {
+  if (!db) return fallback;
+  try { return db.model(name); } catch(e) { return fallback; }
+}
 function getModels(req) {
+  const db = req?.db || null;
   return {
-    DelegationTask: req?.db ? (req.db.models['DelegationTask'] || req.db.model('DelegationTask', require('../models/DelegationTask').schema)) : require('../models/DelegationTask'),
-    Employee: req?.db ? (req.db.models['Employee'] || req.db.model('Employee', require('../models/Employee').schema)) : require('../models/Employee'),
-    Tenant: req?.db ? (req.db.models['Tenant'] || req.db.model('Tenant', require('../models/Tenant').schema)) : require('../models/Tenant'),
-    ChecklistTask: req?.db ? (req.db.models['ChecklistTask'] || req.db.model('ChecklistTask', require('../models/ChecklistTask').schema)) : require('../models/ChecklistTask'),
-    FlowInstance: req?.db ? (req.db.models['FlowInstance'] || req.db.model('FlowInstance', require('../models/FlowInstance').schema)) : require('../models/FlowInstance'),
+    DelegationTask: safeModel(db, 'DelegationTask', require('../models/DelegationTask')),
+    Employee:       safeModel(db, 'Employee',       require('../models/Employee')),
+    Tenant:         safeModel(db, 'Tenant',         require('../models/Tenant')),
+    ChecklistTask:  safeModel(db, 'ChecklistTask',  require('../models/ChecklistTask')),
+    FlowInstance:   safeModel(db, 'FlowInstance',   require('../models/FlowInstance')),
   };
 }
 
 exports.getDoerTasks = async (req, res) => {
   try {
-    const { DelegationTask, Employee, Tenant, ChecklistTask } = getModels(req);
+    const { DelegationTask, Employee, Tenant, ChecklistTask, FlowInstance } = getModels(req);
     const { doerId } = req.params;
 
     if (!mongoose.Types.ObjectId.isValid(doerId)) {
@@ -114,7 +119,7 @@ exports.getDoerTasks = async (req, res) => {
 };
 exports.getAuthorizedStaff = async (req, res) => {
   try {
-    const { DelegationTask, Employee, Tenant, ChecklistTask } = getModels(req);
+    const { DelegationTask, Employee, Tenant, ChecklistTask, FlowInstance } = getModels(req);
     const { id } = req.params;
 
     const requester = await Employee.findById(id)
@@ -141,7 +146,7 @@ exports.getAuthorizedStaff = async (req, res) => {
 
 exports.getAssignerTasks = async (req, res) => {
   try {
-    const { DelegationTask, Employee, Tenant, ChecklistTask } = getModels(req);
+    const { DelegationTask, Employee, Tenant, ChecklistTask, FlowInstance } = getModels(req);
     const { assignerId } = req.params;
 
     // Validation: Ensure the ID is a valid MongoDB ObjectId
@@ -168,7 +173,7 @@ exports.getAssignerTasks = async (req, res) => {
 };
 exports.getTaskOverview = async (req, res) => {
   try {
-    const { DelegationTask, Employee, Tenant, ChecklistTask } = getModels(req);
+    const { DelegationTask, Employee, Tenant, ChecklistTask, FlowInstance } = getModels(req);
     const { tenantId } = req.params;
 
     // If DelegationTask is not imported at the top, this line crashes
@@ -187,7 +192,7 @@ exports.getTaskOverview = async (req, res) => {
 };
 exports.getCompanyOverview = async (req, res) => {
   try {
-    const { DelegationTask, Employee, Tenant, ChecklistTask } = getModels(req);
+    const { DelegationTask, Employee, Tenant, ChecklistTask, FlowInstance } = getModels(req);
     const { tenantId } = req.params;
 
     if (!mongoose.Types.ObjectId.isValid(tenantId)) {
@@ -214,7 +219,7 @@ exports.getCompanyOverview = async (req, res) => {
 };
 exports.getEmployeeScore = async (req, res) => {
   try {
-    const { DelegationTask, Employee, Tenant, ChecklistTask } = getModels(req);
+    const { DelegationTask, Employee, Tenant, ChecklistTask, FlowInstance } = getModels(req);
     const { employeeId } = req.params;
     const { range = 'Monthly' } = req.query; // Accepts: 'Daily', 'Weekly', 'Monthly'
 
@@ -331,7 +336,7 @@ exports.getEmployeeScore = async (req, res) => {
 
 exports.getGlobalPerformance = async (req, res) => {
   try {
-    const { DelegationTask, Employee, Tenant, ChecklistTask } = getModels(req);
+    const { DelegationTask, Employee, Tenant, ChecklistTask, FlowInstance } = getModels(req);
     const { tenantId } = req.params;
     const { range = 'Daily' } = req.query;
     const now = new Date();
@@ -381,7 +386,7 @@ exports.getGlobalPerformance = async (req, res) => {
 };
 exports.deleteTask = async (req, res) => {
   try {
-    const { DelegationTask, Employee, Tenant, ChecklistTask } = getModels(req);
+    const { DelegationTask, Employee, Tenant, ChecklistTask, FlowInstance } = getModels(req);
     const { taskId } = req.params;
     await DelegationTask.findByIdAndDelete(taskId);
     res.status(200).json({ message: "Task cancelled successfully" });
@@ -392,7 +397,7 @@ exports.deleteTask = async (req, res) => {
 
 exports.completeChecklistTask = async (req, res) => {
   try {
-    const { DelegationTask, Employee, Tenant, ChecklistTask } = getModels(req);
+    const { DelegationTask, Employee, Tenant, ChecklistTask, FlowInstance } = getModels(req);
     /**
      * 1. Extract data from the Multi-part Form Body
      */
@@ -521,7 +526,7 @@ exports.completeChecklistTask = async (req, res) => {
 
 exports.getAllChecklists = async (req, res) => {
   try {
-    const { DelegationTask, Employee, Tenant, ChecklistTask } = getModels(req);
+    const { DelegationTask, Employee, Tenant, ChecklistTask, FlowInstance } = getModels(req);
     const { tenantId } = req.params;
 
     // 1. Validation: Ensure ID is valid
@@ -546,7 +551,7 @@ exports.getAllChecklists = async (req, res) => {
 };
 exports.updateChecklistTask = async (req, res) => {
   try {
-    const { DelegationTask, Employee, Tenant, ChecklistTask } = getModels(req);
+    const { DelegationTask, Employee, Tenant, ChecklistTask, FlowInstance } = getModels(req);
     const { id } = req.params;
 
     /**
@@ -650,7 +655,7 @@ anchor.setHours(0, 0, 0, 0);
 };
 exports.createChecklistTask = async (req, res) => {
   try {
-    const { DelegationTask, Employee, Tenant, ChecklistTask } = getModels(req);
+    const { DelegationTask, Employee, Tenant, ChecklistTask, FlowInstance } = getModels(req);
     /**
      * 1. EXTRACT DATA
      * Captured from the new v3.0 high-density Create Protocol UI.
@@ -750,7 +755,7 @@ if (frequency === "Weekly") {
 // 1. Updated: Supervisor/Coordinator Force Done
 exports.coordinatorForceDone = async (req, res) => {
   try {
-    const { DelegationTask, Employee, Tenant, ChecklistTask } = getModels(req);
+    const { DelegationTask, Employee, Tenant, ChecklistTask, FlowInstance } = getModels(req);
     const { taskId, coordinatorId, remarks } = req.body;
 
     // Find the Supervisor/Coordinator details
@@ -870,7 +875,7 @@ exports.coordinatorForceDone = async (req, res) => {
  */
 exports.getEmployeeDeepDive = async (req, res) => {
   try {
-    const { DelegationTask, Employee, Tenant, ChecklistTask } = getModels(req);
+    const { DelegationTask, Employee, Tenant, ChecklistTask, FlowInstance } = getModels(req);
     const { employeeId } = req.params;
     const { startDate, endDate } = req.query;
 
@@ -1038,7 +1043,7 @@ checklists.forEach(t => {
 // ENDPOINT TO SAVE TARGET
 exports.updateEmployeeTarget = async (req, res) => {
   try {
-    const { DelegationTask, Employee, Tenant, ChecklistTask } = getModels(req);
+    const { DelegationTask, Employee, Tenant, ChecklistTask, FlowInstance } = getModels(req);
     const { employeeId, target } = req.body;
     await Employee.findByIdAndUpdate(employeeId, { weeklyLateTarget: target });
     res.status(200).json({ message: "Target synchronized." });
@@ -1050,7 +1055,7 @@ exports.updateEmployeeTarget = async (req, res) => {
 // 2. Updated: Manual Dashboard Reminder using DoubleTick Template
 exports.sendWhatsAppReminder = async (req, res) => {
   try {
-    const { DelegationTask, Employee, Tenant, ChecklistTask } = getModels(req);
+    const { DelegationTask, Employee, Tenant, ChecklistTask, FlowInstance } = getModels(req);
     const { whatsappNumber, taskTitle, customMessage, taskId, coordinatorId } = req.body;
 
     // 1. Fetch Task and Coordinator details for the template variables
@@ -1159,7 +1164,7 @@ exports.dispatchDailyBriefings = async () => {
 
 exports.getCoordinatorTasks = async (req, res) => {
   try {
-    const { DelegationTask, Employee, Tenant, ChecklistTask } = getModels(req);
+    const { DelegationTask, Employee, Tenant, ChecklistTask, FlowInstance } = getModels(req);
     const { coordinatorId } = req.params;
 
     // 1. Find the Coordinator
@@ -1244,7 +1249,7 @@ exports.getCoordinatorTasks = async (req, res) => {
 /*
 exports.handleRevision = async (req, res) => {
   try {
-    const { DelegationTask, Employee, Tenant, ChecklistTask } = getModels(req);
+    const { DelegationTask, Employee, Tenant, ChecklistTask, FlowInstance } = getModels(req);
     const { taskId, action, newDeadline, newDoerId, remarks, assignerId } = req.body;
     const { proposedDeadline } = req.body;
 
@@ -1400,7 +1405,7 @@ if (action === 'Request') {
 
 exports.handleRevision = async (req, res) => {
   try {
-    const { DelegationTask, Employee, Tenant, ChecklistTask } = getModels(req);
+    const { DelegationTask, Employee, Tenant, ChecklistTask, FlowInstance } = getModels(req);
     const { taskId, action, newDeadline, newDoerId, remarks, assignerId, proposedDeadline } = req.body;
 
     // 1. Fetch Task
@@ -1572,7 +1577,7 @@ exports.handleRevision = async (req, res) => {
 
 exports.respondToTask = async (req, res) => {
   try {
-    const { DelegationTask, Employee, Tenant, ChecklistTask } = getModels(req);
+    const { DelegationTask, Employee, Tenant, ChecklistTask, FlowInstance } = getModels(req);
     // 1. SAFE DATA EXTRACTION
     const body = req.body || {};
     const { taskId, status, revisedDeadline, remarks, doerId } = body;
@@ -1752,7 +1757,7 @@ exports.respondToTask = async (req, res) => {
 };
 exports.getMappingOverview = async (req, res) => {
   try {
-    const { DelegationTask, Employee, Tenant, ChecklistTask } = getModels(req);
+    const { DelegationTask, Employee, Tenant, ChecklistTask, FlowInstance } = getModels(req);
     const { tenantId } = req.params;
 
     // Verification
@@ -1772,7 +1777,7 @@ exports.getMappingOverview = async (req, res) => {
 };
 exports.getCoordinatorMapping = async (req, res) => {
   try {
-    const { DelegationTask, Employee, Tenant, ChecklistTask } = getModels(req);
+    const { DelegationTask, Employee, Tenant, ChecklistTask, FlowInstance } = getModels(req);
     const { tenantId } = req.params;
 
     if (!mongoose.Types.ObjectId.isValid(tenantId)) {
@@ -1896,7 +1901,7 @@ exports.createTask = async (req, res) => {
 // server/controllers/taskController.js
 exports.deleteChecklistTask = async (req, res) => {
   try {
-    const { DelegationTask, Employee, Tenant, ChecklistTask } = getModels(req);
+    const { DelegationTask, Employee, Tenant, ChecklistTask, FlowInstance } = getModels(req);
     const { id } = req.params;
 
     // 1. Validate ID format to prevent server-side casting errors
@@ -1929,7 +1934,7 @@ exports.deleteChecklistTask = async (req, res) => {
 
 exports.getChecklistTasks = async (req, res) => {
   try {
-    const { DelegationTask, Employee, Tenant, ChecklistTask } = getModels(req);
+    const { DelegationTask, Employee, Tenant, ChecklistTask, FlowInstance } = getModels(req);
     const { doerId } = req.params;
     const now = new Date();
     const startOfToday = new Date();
@@ -2122,7 +2127,7 @@ exports.getChecklistTasks = async (req, res) => {
 // DIAGNOSTIC ENDPOINT - Add this temporarily
 exports.debugChecklistCards = async (req, res) => {
   try {
-    const { DelegationTask, Employee, Tenant, ChecklistTask } = getModels(req);
+    const { DelegationTask, Employee, Tenant, ChecklistTask, FlowInstance } = getModels(req);
     const { doerId } = req.params;
     const now = new Date();
     const startOfToday = new Date();
@@ -2187,7 +2192,7 @@ exports.debugChecklistCards = async (req, res) => {
 };
 exports.getReviewAnalytics = async (req, res) => {
   try {
-    const { DelegationTask, Employee, Tenant, ChecklistTask } = getModels(req);
+    const { DelegationTask, Employee, Tenant, ChecklistTask, FlowInstance } = getModels(req);
     const { tenantId } = req.params;
     const { view = 'Weekly', date = new Date() } = req.query;
 

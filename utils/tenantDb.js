@@ -24,7 +24,7 @@ async function getTenantConnection(tenantId, mongoUri) {
     return conn;
   } catch (err) {
     console.error(`[TenantDB] Failed to connect custom DB for tenant ${tenantId}:`, err.message);
-    return mongoose.connection; // fallback to default
+    throw err; // let middleware handle fallback
   }
 }
 

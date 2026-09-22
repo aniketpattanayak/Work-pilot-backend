@@ -24,9 +24,9 @@ async function M(req) {
 // ─── Per-tenant DB model getter ───────────────────────────────────────────────
 function getModels(req) {
   return {
-    FlowTemplate: req?.db ? (req.db.models['FlowTemplate'] || req.db.model('FlowTemplate', require('../models/FlowTemplate').schema)) : require('../models/FlowTemplate'),
-    FlowInstance: req?.db ? (req.db.models['FlowInstance'] || req.db.model('FlowInstance', require('../models/FlowInstance').schema)) : require('../models/FlowInstance'),
-    Employee: req?.db ? (req.db.models['Employee'] || req.db.model('Employee', require('../models/Employee').schema)) : require('../models/Employee'),
+    FlowTemplate: req?.db ? req.db.model('FlowTemplate') : require('../models/FlowTemplate'),
+    FlowInstance: req?.db ? req.db.model('FlowInstance') : require('../models/FlowInstance'),
+    Employee: req?.db ? req.db.model('Employee') : require('../models/Employee'),
   };
 }
 
