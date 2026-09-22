@@ -2,19 +2,41 @@ const Conversation = require('../models/Conversation');
 const Message      = require('../models/Message');
 const Employee     = require('../models/Employee');
 
+// ─── PER-TENANT DB MODEL RESOLUTION ───────────────────────────────────────────
+// Same req.db pattern already used in taskController.js / newFmsController.js.
+// Dedicated-DB tenants: reads/writes go to THEIR database.
+// Shared-DB tenants: req.db is null, falls back to the original models —
+// i.e. no behavior change for any client without a dedicated DB.
+function getChatModels(req) {
+  return {
+    Conversation: req.db ? req.db.model('Conversation') : Conversation,
+    Message:      req.db ? req.db.model('Message')      : Message,
+    Employee:     req.db ? req.db.model('Employee')      : Employee,
+  };
+}
+
+// ─── AUTHORIZATION HELPER ──────────────────────────────────────────────────
+// Loads a conversation only if it belongs to this tenant AND the requesting
+// employee is a participant (or it's a tenant-wide announcement). Returns
+// null if not found or not allowed — callers respond 403 accordingly.
+async function loadAuthorizedConversation(ConversationModel, conversationId, tenantId, employeeId) {
+  return ConversationModel.findOne({
+    _id: conversationId,
+    tenantId,
+    $or: [
+      { participants: employeeId },
+      { type: 'announcement' },
+    ],
+  });
+}
+
 // ─── GET CONVERSATIONS ────────────────────────────────────────────────────────
-/**
- * GET /api/chat/conversations
- * Returns all conversations for the logged-in employee
- * Sorted by lastMessage.sentAt desc
- */
 exports.getConversations = async (req, res) => {
   try {
+    const { Conversation, Employee } = getChatModels(req);
     const employeeId = req.user.id;
     const tenantId   = req.user.tenantId;
 
-    // DMs and task threads where this employee is a participant
-    // Announcements are visible to everyone in the tenant
     const conversations = await Conversation.find({
       tenantId,
       isActive: true,
@@ -26,7 +48,6 @@ exports.getConversations = async (req, res) => {
     .sort({ 'lastMessage.sentAt': -1, updatedAt: -1 })
     .lean();
 
-    // Populate participant names for DM conversations
     const empIds = [...new Set(conversations.flatMap(c => c.participants || []).map(p => p.toString()))];
     const empDocs = await Employee.find({ _id: { $in: empIds } }).select('name role').lean();
     const empMap = {};
@@ -34,7 +55,6 @@ exports.getConversations = async (req, res) => {
 
     const result = conversations.map(c => {
       const unreadCount = c.unreadCounts?.[employeeId.toString()] || 0;
-      // For DM — find the OTHER participant's name
       let displayName = c.title || '';
       let otherEmployee = null;
       if (c.type === 'dm') {
@@ -57,20 +77,15 @@ exports.getConversations = async (req, res) => {
 };
 
 // ─── GET OR CREATE DM ─────────────────────────────────────────────────────────
-/**
- * POST /api/chat/dm
- * Body: { otherEmployeeId }
- * Returns existing DM conversation or creates a new one
- */
 exports.getOrCreateDM = async (req, res) => {
   try {
+    const { Conversation, Employee } = getChatModels(req);
     const employeeId      = req.user.id;
     const tenantId        = req.user.tenantId;
     const { otherEmployeeId } = req.body;
 
     if (!otherEmployeeId) return res.status(400).json({ message: 'otherEmployeeId required' });
 
-    // Find existing DM between these two
     let conversation = await Conversation.findOne({
       tenantId,
       type: 'dm',
@@ -78,8 +93,10 @@ exports.getOrCreateDM = async (req, res) => {
     }).lean();
 
     if (!conversation) {
-      // Create new DM
-      const other = await Employee.findById(otherEmployeeId).select('name').lean();
+      // Tightened: previously looked up by ID alone with no tenant check.
+      const other = await Employee.findOne({ _id: otherEmployeeId, tenantId }).select('name').lean();
+      if (!other) return res.status(404).json({ message: 'That employee was not found in your company.' });
+
       conversation = await Conversation.create({
         tenantId,
         type: 'dm',
@@ -96,12 +113,9 @@ exports.getOrCreateDM = async (req, res) => {
 };
 
 // ─── GET OR CREATE TASK THREAD ────────────────────────────────────────────────
-/**
- * POST /api/chat/task-thread
- * Body: { taskId, taskType, taskTitle, participants[] }
- */
 exports.getOrCreateTaskThread = async (req, res) => {
   try {
+    const { Conversation } = getChatModels(req);
     const tenantId = req.user.tenantId;
     const { taskId, taskType, taskTitle, participants } = req.body;
 
@@ -127,18 +141,14 @@ exports.getOrCreateTaskThread = async (req, res) => {
 };
 
 // ─── CREATE ANNOUNCEMENT ──────────────────────────────────────────────────────
-/**
- * POST /api/chat/announcement
- * Admin only — Body: { title, text }
- */
 exports.createAnnouncement = async (req, res) => {
   try {
+    const { Conversation, Message } = getChatModels(req);
     const tenantId = req.user.tenantId;
     const { title, text } = req.body;
 
     if (!title || !text) return res.status(400).json({ message: 'title and text required' });
 
-    // Create conversation
     const conversation = await Conversation.create({
       tenantId,
       type: 'announcement',
@@ -146,7 +156,6 @@ exports.createAnnouncement = async (req, res) => {
       participants: [],
     });
 
-    // Create the announcement message
     const message = await Message.create({
       conversationId: conversation._id,
       tenantId,
@@ -156,7 +165,6 @@ exports.createAnnouncement = async (req, res) => {
       text,
     });
 
-    // Update lastMessage on conversation
     await Conversation.findByIdAndUpdate(conversation._id, {
       lastMessage: {
         text,
@@ -174,15 +182,18 @@ exports.createAnnouncement = async (req, res) => {
 };
 
 // ─── GET MESSAGES ─────────────────────────────────────────────────────────────
-/**
- * GET /api/chat/:conversationId/messages?page=1&limit=50
- */
 exports.getMessages = async (req, res) => {
   try {
+    const { Conversation, Message } = getChatModels(req);
     const { conversationId } = req.params;
+    const tenantId   = req.user.tenantId;
+    const employeeId = req.user.id;
     const page  = parseInt(req.query.page)  || 1;
     const limit = parseInt(req.query.limit) || 50;
     const skip  = (page - 1) * limit;
+
+    const conversation = await loadAuthorizedConversation(Conversation, conversationId, tenantId, employeeId);
+    if (!conversation) return res.status(403).json({ message: 'You do not have access to this conversation.' });
 
     const messages = await Message.find({ conversationId })
       .sort({ createdAt: -1 })
@@ -190,7 +201,6 @@ exports.getMessages = async (req, res) => {
       .limit(limit)
       .lean();
 
-    // Return in ascending order (oldest first for display)
     res.json(messages.reverse());
   } catch (err) {
     console.error('[Chat] getMessages error:', err.message);
@@ -199,12 +209,9 @@ exports.getMessages = async (req, res) => {
 };
 
 // ─── SEND MESSAGE ─────────────────────────────────────────────────────────────
-/**
- * POST /api/chat/:conversationId/messages
- * Body: { text, fileUrl, fileName, fileType, mentions[] }
- */
 exports.sendMessage = async (req, res) => {
   try {
+    const { Conversation, Message, Employee } = getChatModels(req);
     const { conversationId } = req.params;
     const { text, fileUrl, fileName, fileType, mentions } = req.body;
     const tenantId   = req.user.tenantId;
@@ -212,10 +219,9 @@ exports.sendMessage = async (req, res) => {
 
     if (!text && !fileUrl) return res.status(400).json({ message: 'text or file required' });
 
-    const conversation = await Conversation.findById(conversationId);
-    if (!conversation) return res.status(404).json({ message: 'Conversation not found' });
+    const conversation = await loadAuthorizedConversation(Conversation, conversationId, tenantId, employeeId);
+    if (!conversation) return res.status(403).json({ message: 'You do not have access to this conversation.' });
 
-    // Fetch employee name from DB since JWT may not include it
     let senderName = req.user.name || '';
     let senderRole = req.user.role || (req.user.roles?.[0] || '');
     if (!senderName) {
@@ -224,7 +230,6 @@ exports.sendMessage = async (req, res) => {
       senderRole = senderRole || emp?.role || emp?.roles?.[0] || '';
     }
 
-    // Create message
     const message = await Message.create({
       conversationId,
       tenantId,
@@ -236,10 +241,9 @@ exports.sendMessage = async (req, res) => {
       fileName: fileName || '',
       fileType: fileType || '',
       mentions: mentions || [],
-      readBy:   [employeeId], // sender has read their own message
+      readBy:   [employeeId],
     });
 
-    // Update conversation lastMessage + increment unread for other participants
     const updateObj = {
       'lastMessage.text':       text || (fileUrl ? `📎 ${fileName || 'File'}` : ''),
       'lastMessage.senderId':   employeeId,
@@ -248,13 +252,11 @@ exports.sendMessage = async (req, res) => {
       'lastMessage.hasFile':    !!fileUrl,
     };
 
-    // Increment unread count for all participants except sender
     const participants = conversation.participants.map(p => p.toString());
     const others = participants.filter(p => p !== employeeId.toString());
 
-    // Also include everyone for announcements
     if (conversation.type === 'announcement') {
-      // Don't track unread for announcements per-person (could be thousands)
+      // no per-person unread tracking for announcements
     } else {
       for (const otherId of others) {
         updateObj[`unreadCounts.${otherId}`] = (conversation.unreadCounts?.get?.(otherId) || 0) + 1;
@@ -263,7 +265,6 @@ exports.sendMessage = async (req, res) => {
 
     await Conversation.findByIdAndUpdate(conversationId, { $set: updateObj });
 
-    // Emit via socket (handled in socketHandler.js)
     const io = req.app.get('io');
     if (io) {
       io.to(`conv_${conversationId}`).emit('new_message', message);
@@ -281,27 +282,25 @@ exports.sendMessage = async (req, res) => {
 };
 
 // ─── MARK READ ────────────────────────────────────────────────────────────────
-/**
- * POST /api/chat/:conversationId/read
- * Marks all messages as read for current employee
- */
 exports.markRead = async (req, res) => {
   try {
+    const { Conversation, Message } = getChatModels(req);
     const { conversationId } = req.params;
+    const tenantId   = req.user.tenantId;
     const employeeId = req.user.id;
 
-    // Add employeeId to readBy on all unread messages
+    const conversation = await loadAuthorizedConversation(Conversation, conversationId, tenantId, employeeId);
+    if (!conversation) return res.status(403).json({ message: 'You do not have access to this conversation.' });
+
     await Message.updateMany(
       { conversationId, readBy: { $ne: employeeId } },
       { $addToSet: { readBy: employeeId } }
     );
 
-    // Reset unread count for this employee
     await Conversation.findByIdAndUpdate(conversationId, {
       $set: { [`unreadCounts.${employeeId}`]: 0 },
     });
 
-    // Emit read receipt
     const io = req.app.get('io');
     if (io) {
       io.to(`conv_${conversationId}`).emit('messages_read', {
@@ -318,12 +317,9 @@ exports.markRead = async (req, res) => {
 };
 
 // ─── GET UNREAD COUNT ─────────────────────────────────────────────────────────
-/**
- * GET /api/chat/unread-count
- * Total unread messages for current employee across all conversations
- */
 exports.getUnreadCount = async (req, res) => {
   try {
+    const { Conversation } = getChatModels(req);
     const employeeId = req.user.id.toString();
     const tenantId   = req.user.tenantId;
 
@@ -344,19 +340,15 @@ exports.getUnreadCount = async (req, res) => {
 };
 
 // ─── GET ALL EMPLOYEES FOR DM PICKER ─────────────────────────────────────────
-/**
- * GET /api/chat/employees
- * List of employees in the tenant for starting a DM
- */
 exports.getEmployees = async (req, res) => {
   try {
+    const { Employee } = getChatModels(req);
     const tenantId   = req.user.tenantId;
     const employeeId = req.user.id;
-    const EmployeeModel = req.db ? req.db.model('Employee') : Employee;
 
-    const employees = await EmployeeModel.find({
+    const employees = await Employee.find({
       tenantId,
-      _id: { $ne: employeeId }, // exclude self
+      _id: { $ne: employeeId },
       isActive: { $ne: false },
     }).select('name role').lean();
 
@@ -367,17 +359,12 @@ exports.getEmployees = async (req, res) => {
 };
 
 // ─── UPLOAD FILE ─────────────────────────────────────────────────────────────
-/**
- * POST /api/chat/upload
- * Uploads a file and returns the URL
- */
 exports.uploadFile = async (req, res) => {
   try {
     if (!req.file) return res.status(400).json({ message: 'No file uploaded' });
 
     const s3Uploader = require('../utils/s3Uploader');
     const result = await s3Uploader.uploadFile(req.file);
-
 
     res.json({
       fileUrl:  result.url || result.Location,
