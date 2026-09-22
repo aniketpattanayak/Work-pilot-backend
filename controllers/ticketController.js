@@ -1,6 +1,6 @@
 const SupportTicket = require('../models/Ticket');
 const Employee = require('../models/Employee');
-const sendWhatsAppMessage = require('../utils/whatsappNotify');
+const { notifyTenant } = require('../utils/notify');
 
 
 // A. Raise a New Ticket
@@ -101,7 +101,7 @@ exports.resolveTicket = async (req, res) => {
     // Notify User of Resolution via WhatsApp
     if (ticket.reporterId?.whatsappNumber) {
         const msg = `✅ *Ticket Resolved*\n\nHi ${ticket.reporterName}, your issue "${ticket.title}" has been fixed.\n\n*Solution:* ${adminRemarks}`;
-        await sendWhatsAppMessage(ticket.reporterId.whatsappNumber, msg);
+        await notifyTenant(ticket.tenantId, ticket.reporterId.whatsappNumber, msg);
     }
 
     res.status(200).json({ message: "Ticket marked as Resolved", ticket });

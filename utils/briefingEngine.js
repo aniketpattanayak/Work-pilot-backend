@@ -22,7 +22,7 @@ const mongoose = require('mongoose');
 const Tenant = require('../models/Tenant');
 const Employee = require('../models/Employee');
 const DelegationTask = require('../models/DelegationTask');
-const sendWhatsAppMessage = require('./whatsappNotify');
+const { notifyTenant } = require('./notify');
 
 /**
  * Dispatches morning briefings for a single tenant using a
@@ -99,7 +99,7 @@ const dispatchBriefingForTenant = async (tenant) => {
         };
 
         try {
-          await sendWhatsAppMessage(emp.whatsappNumber, payload);
+          await notifyTenant(tenant._id, emp.whatsappNumber, payload);
         } catch (waErr) {
           console.error(`[Briefing] WA failed for ${emp.name}:`, waErr.message);
         }

@@ -4,7 +4,7 @@ const _Employee       = require('../models/Employee');
 const _Tenant         = require('../models/Tenant');
 const _ChecklistTask  = require('../models/ChecklistTask');
 const mongoose        = require('mongoose');
-const sendWhatsAppMessage = require('../utils/whatsappNotify');
+const { notifyTenant } = require('../utils/notify');
 const moment          = require('moment');
 const { calculateNextDate } = require('../utils/scheduler');
 const { getReqModels } = require('../utils/reqModels');
@@ -487,20 +487,20 @@ exports.completeChecklistTask = async (req, res) => {
 
         // A. Notify the Primary Doer (Confirmation)
         if (task.doerId?.whatsappNumber) {
-          await sendWhatsAppMessage(task.doerId.whatsappNumber, payload);
+          await notifyTenant(tenant._id, task.doerId.whatsappNumber, payload);
         }
 
         // B. Notify the Admin (Factory Manager)
         const admin = await Employee.findOne({ tenantId: tenant._id, roles: 'Admin' });
         if (admin?.whatsappNumber) {
-          await sendWhatsAppMessage(admin.whatsappNumber, payload);
+          await notifyTenant(tenant._id, admin.whatsappNumber, payload);
         }
         
         // C. Notify Quality Coordinator (If Assigned)
         if (task.coordinatorId) {
           const coordinator = await Employee.findById(task.coordinatorId);
           if (coordinator?.whatsappNumber) {
-            await sendWhatsAppMessage(coordinator.whatsappNumber, payload);
+            await notifyTenant(tenant._id, coordinator.whatsappNumber, payload);
           }
         }
       }
@@ -850,12 +850,12 @@ exports.coordinatorForceDone = async (req, res) => {
       const finalHeader = `⚡ *Work Finalized by Supervisor*`;
 
       // DISPATCH TO ALL
-      if (task.doerId?.whatsappNumber) await sendWhatsAppMessage(task.doerId.whatsappNumber, `${finalHeader}\n\nHi ${task.doerId.name}, your task has been closed.` + fullTaskDetails);
-      if (!isChecklist && task.assignerId?.whatsappNumber) await sendWhatsAppMessage(task.assignerId.whatsappNumber, `${finalHeader}\n\nHi ${task.assignerId.name}, the work you assigned is now marked DONE.` + fullTaskDetails);
-      if (task.coordinatorId?.whatsappNumber) await sendWhatsAppMessage(task.coordinatorId.whatsappNumber, `🛡️ *Task Closure Alert*\n\nHi ${task.coordinatorId.name}, a task you track was finished.` + fullTaskDetails);
+      if (task.doerId?.whatsappNumber) await notifyTenant(task.tenantId, task.doerId.whatsappNumber, `${finalHeader}\n\nHi ${task.doerId.name}, your task has been closed.` + fullTaskDetails);
+      if (!isChecklist && task.assignerId?.whatsappNumber) await notifyTenant(task.tenantId, task.assignerId.whatsappNumber, `${finalHeader}\n\nHi ${task.assignerId.name}, the work you assigned is now marked DONE.` + fullTaskDetails);
+      if (task.coordinatorId?.whatsappNumber) await notifyTenant(task.tenantId, task.coordinatorId.whatsappNumber, `🛡️ *Task Closure Alert*\n\nHi ${task.coordinatorId.name}, a task you track was finished.` + fullTaskDetails);
 
       for (const helper of helpers) {
-        if (helper.whatsappNumber) await sendWhatsAppMessage(helper.whatsappNumber, `🤝 *Team Work Update*\n\nHi ${helper.name}, the task you were helping with is closed.` + fullTaskDetails);
+        if (helper.whatsappNumber) await notifyTenant(task.tenantId, helper.whatsappNumber, `🤝 *Team Work Update*\n\nHi ${helper.name}, the task you were helping with is closed.` + fullTaskDetails);
       }
 
     } catch (waError) {
@@ -1090,7 +1090,7 @@ exports.sendWhatsAppReminder = async (req, res) => {
     };
 
     // 2. Dispatch to the specific number (Doer)
-    await sendWhatsAppMessage(whatsappNumber, payload);
+    await notifyTenant(task.tenantId, whatsappNumber, payload);
 
     console.log(`🔔 Reminder Template "${payload.templateName}" sent to ${whatsappNumber}`);
     res.status(200).json({ message: "Reminder sent successfully!" });
@@ -1327,7 +1327,7 @@ if (action === 'Request') {
               loginLink                             // {{5}}
             ]
           };
-          await sendWhatsAppMessage(task.assignerId.whatsappNumber, revisionPayload);
+          await notifyTenant(task.tenantId, task.assignerId.whatsappNumber, revisionPayload);
           console.log(`🔄 Revision Request Template sent to Assigner: ${task.assignerId.name}`);
         }
       } catch (waErr) { console.error("⚠️ Revision Request Notify Error:", waErr.message); }
@@ -1352,11 +1352,11 @@ if (action === 'Request') {
 
         const message = `📅 *Extra Time Approved*\n\nHi [Name], the deadline for this task has been updated.` + fullDetails;
 
-        if (task.doerId?.whatsappNumber) await sendWhatsAppMessage(task.doerId.whatsappNumber, message.replace("[Name]", task.doerId.name));
-        if (task.assignerId?.whatsappNumber) await sendWhatsAppMessage(task.assignerId.whatsappNumber, message.replace("[Name]", task.assignerId.name));
-        if (task.coordinatorId?.whatsappNumber) await sendWhatsAppMessage(task.coordinatorId.whatsappNumber, message.replace("[Name]", task.coordinatorId.name));
+        if (task.doerId?.whatsappNumber) await notifyTenant(task.tenantId, task.doerId.whatsappNumber, message.replace("[Name]", task.doerId.name));
+        if (task.assignerId?.whatsappNumber) await notifyTenant(task.tenantId, task.assignerId.whatsappNumber, message.replace("[Name]", task.assignerId.name));
+        if (task.coordinatorId?.whatsappNumber) await notifyTenant(task.tenantId, task.coordinatorId.whatsappNumber, message.replace("[Name]", task.coordinatorId.name));
         for (const helper of helpers) {
-          if (helper.whatsappNumber) await sendWhatsAppMessage(helper.whatsappNumber, message.replace("[Name]", helper.name));
+          if (helper.whatsappNumber) await notifyTenant(task.tenantId, helper.whatsappNumber, message.replace("[Name]", helper.name));
         }
       } catch (waErr) { console.error("WA Error:", waErr.message); }
     }
@@ -1383,11 +1383,11 @@ if (action === 'Request') {
 
         const message = `🔄 *Work Reassigned*\n\nHi [Name], this task has been moved to ${newDoer?.name}.` + fullTaskDetails;
 
-        if (newDoer?.whatsappNumber) await sendWhatsAppMessage(newDoer.whatsappNumber, message.replace("[Name]", newDoer.name));
-        if (updatedTask.assignerId?.whatsappNumber) await sendWhatsAppMessage(updatedTask.assignerId.whatsappNumber, message.replace("[Name]", updatedTask.assignerId.name));
-        if (updatedTask.coordinatorId?.whatsappNumber) await sendWhatsAppMessage(updatedTask.coordinatorId.whatsappNumber, message.replace("[Name]", updatedTask.coordinatorId.name));
+        if (newDoer?.whatsappNumber) await notifyTenant(updatedTask.tenantId, newDoer.whatsappNumber, message.replace("[Name]", newDoer.name));
+        if (updatedTask.assignerId?.whatsappNumber) await notifyTenant(updatedTask.tenantId, updatedTask.assignerId.whatsappNumber, message.replace("[Name]", updatedTask.assignerId.name));
+        if (updatedTask.coordinatorId?.whatsappNumber) await notifyTenant(updatedTask.tenantId, updatedTask.coordinatorId.whatsappNumber, message.replace("[Name]", updatedTask.coordinatorId.name));
         for (const helper of helpers) {
-          if (helper.whatsappNumber) await sendWhatsAppMessage(helper.whatsappNumber, message.replace("[Name]", helper.name));
+          if (helper.whatsappNumber) await notifyTenant(updatedTask.tenantId, helper.whatsappNumber, message.replace("[Name]", helper.name));
         }
       } catch (waErr) { console.error("WA Error:", waErr.message); }
     }
@@ -1464,7 +1464,7 @@ exports.handleRevision = async (req, res) => {
             ]
           };
 
-          await sendWhatsAppMessage(task.assignerId.whatsappNumber, revisionPayload);
+          await notifyTenant(task.tenantId, task.assignerId.whatsappNumber, revisionPayload);
         }
       } catch (waErr) {
         console.error("⚠️ Revision Request Notify Error:", waErr.message);
@@ -1496,13 +1496,13 @@ exports.handleRevision = async (req, res) => {
 
         const message = `📅 *Extra Time Approved*\n\nHi [Name], the deadline for this task has been updated.` + fullDetails;
 
-        if (task.doerId?.whatsappNumber) await sendWhatsAppMessage(task.doerId.whatsappNumber, message.replace("[Name]", task.doerId.name));
-        if (task.assignerId?.whatsappNumber) await sendWhatsAppMessage(task.assignerId.whatsappNumber, message.replace("[Name]", task.assignerId.name));
-        if (task.coordinatorId?.whatsappNumber) await sendWhatsAppMessage(task.coordinatorId.whatsappNumber, message.replace("[Name]", task.coordinatorId.name));
+        if (task.doerId?.whatsappNumber) await notifyTenant(task.tenantId, task.doerId.whatsappNumber, message.replace("[Name]", task.doerId.name));
+        if (task.assignerId?.whatsappNumber) await notifyTenant(task.tenantId, task.assignerId.whatsappNumber, message.replace("[Name]", task.assignerId.name));
+        if (task.coordinatorId?.whatsappNumber) await notifyTenant(task.tenantId, task.coordinatorId.whatsappNumber, message.replace("[Name]", task.coordinatorId.name));
 
         for (const helper of helpers) {
           if (helper.whatsappNumber) {
-            await sendWhatsAppMessage(helper.whatsappNumber, message.replace("[Name]", helper.name));
+            await notifyTenant(task.tenantId, helper.whatsappNumber, message.replace("[Name]", helper.name));
           }
         }
 
@@ -1543,13 +1543,13 @@ exports.handleRevision = async (req, res) => {
 
         const message = `🔄 *Work Reassigned*\n\nHi [Name], this task has been moved to ${newDoer?.name}.` + fullTaskDetails;
 
-        if (newDoer?.whatsappNumber) await sendWhatsAppMessage(newDoer.whatsappNumber, message.replace("[Name]", newDoer.name));
-        if (updatedTask.assignerId?.whatsappNumber) await sendWhatsAppMessage(updatedTask.assignerId.whatsappNumber, message.replace("[Name]", updatedTask.assignerId.name));
-        if (updatedTask.coordinatorId?.whatsappNumber) await sendWhatsAppMessage(updatedTask.coordinatorId.whatsappNumber, message.replace("[Name]", updatedTask.coordinatorId.name));
+        if (newDoer?.whatsappNumber) await notifyTenant(updatedTask.tenantId, newDoer.whatsappNumber, message.replace("[Name]", newDoer.name));
+        if (updatedTask.assignerId?.whatsappNumber) await notifyTenant(updatedTask.tenantId, updatedTask.assignerId.whatsappNumber, message.replace("[Name]", updatedTask.assignerId.name));
+        if (updatedTask.coordinatorId?.whatsappNumber) await notifyTenant(updatedTask.tenantId, updatedTask.coordinatorId.whatsappNumber, message.replace("[Name]", updatedTask.coordinatorId.name));
 
         for (const helper of helpers) {
           if (helper.whatsappNumber) {
-            await sendWhatsAppMessage(helper.whatsappNumber, message.replace("[Name]", helper.name));
+            await notifyTenant(updatedTask.tenantId, helper.whatsappNumber, message.replace("[Name]", helper.name));
           }
         }
 
@@ -1730,13 +1730,13 @@ exports.respondToTask = async (req, res) => {
 
         // Notify Assigner (The person who gave the work)
         if (task.assignerId?.whatsappNumber) {
-          await sendWhatsAppMessage(task.assignerId.whatsappNumber, payload);
+          await notifyTenant(task.tenantId, task.assignerId.whatsappNumber, payload);
           console.log(`✅ Assigner Notified: ${task.assignerId.name}`);
         }
 
         // Notify Quality Coordinator (If assigned)
         if (task.coordinatorId?.whatsappNumber) {
-          await sendWhatsAppMessage(task.coordinatorId.whatsappNumber, payload);
+          await notifyTenant(task.tenantId, task.coordinatorId.whatsappNumber, payload);
         }
       }
     } catch (waError) {
@@ -1880,8 +1880,8 @@ exports.createTask = async (req, res) => {
           ]
         };
 
-        const sendWhatsAppMessage = require('../utils/whatsappNotify');
-        await sendWhatsAppMessage(doer.whatsappNumber, payload);
+        const { notifyTenant } = require('../utils/notify');
+        await notifyTenant(taskData.tenantId, doer.whatsappNumber, payload);
       }
     } catch (waError) {
       console.error("⚠️ WhatsApp Error:", waError.message);

@@ -95,8 +95,8 @@ router.post('/send-whatsapp-reminder', authMiddleware, subscriptionGuard, async 
     if (!toPhone || !templateName) {
       return res.status(400).json({ message: 'toPhone and templateName required' });
     }
-    const sendWhatsApp = require('../utils/whatsappNotify');
-    await sendWhatsApp(toPhone, { templateName, variables: variables || [] });
+    const { notifyTenant } = require('../utils/notify');
+    await notifyTenant(req.user.tenantId, toPhone, { templateName, variables: variables || [] });
     res.json({ message: 'WhatsApp reminder sent' });
   } catch (err) {
     console.error('[WhatsApp] send-whatsapp-reminder error:', err.message);

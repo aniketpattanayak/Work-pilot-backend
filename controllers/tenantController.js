@@ -5,7 +5,7 @@ const { log: logActivity } = require('../utils/activityLogger');
 const jwt = require('jsonwebtoken');
 const DelegationTask = require('../models/DelegationTask');
 const ChecklistTask = require('../models/ChecklistTask');
-const sendWhatsAppMessage = require('../utils/whatsappNotify');
+const { notifyTenant } = require('../utils/notify');
 
 
 
@@ -142,7 +142,7 @@ exports.handleRevision = async (req, res) => {
     // --- PHASE 2: WHATSAPP DISPATCH ---
     if (recipientPhone && notificationMessage) {
       try {
-        await sendWhatsAppMessage(recipientPhone, notificationMessage);
+        await notifyTenant(task.tenantId, recipientPhone, notificationMessage);
       } catch (waError) {
         console.error("⚠️ Revision WhatsApp Dispatch Failed:", waError.message);
       }
@@ -318,7 +318,7 @@ exports.addEmployee = async (req, res) => {
           ]
         };
 
-        await sendWhatsAppMessage(whatsappNumber, welcomeData);
+        await notifyTenant(tenant._id, whatsappNumber, welcomeData);
       }
     } catch (waError) {
       console.error("⚠️ Welcome Template Failed:", waError.message);
@@ -861,7 +861,7 @@ exports.updateEmployee = async (req, res) => {
           ]
         };
 
-        await sendWhatsAppMessage(updatedEmployee.whatsappNumber, updateDataPayload);
+        await notifyTenant(tenant._id, updatedEmployee.whatsappNumber, updateDataPayload);
       }
     } catch (waError) {
       console.error("⚠️ Profile Update Template Failed:", waError.message);
