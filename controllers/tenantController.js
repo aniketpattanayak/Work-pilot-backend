@@ -6,6 +6,7 @@ const jwt = require('jsonwebtoken');
 const DelegationTask = require('../models/DelegationTask');
 const ChecklistTask = require('../models/ChecklistTask');
 const { notifyTenant } = require('../utils/notify');
+const { getModels: getTenantModels } = require('../utils/getModels');
 
 
 
@@ -595,7 +596,7 @@ exports.superAdminLogin = async (req, res) => {
 
 exports.loginEmployee = async (req, res) => {
   try {
-    const { Tenant, Employee, DelegationTask, ChecklistTask } = getModels(req);
+    const { Tenant, DelegationTask, ChecklistTask } = getModels(req);
     const { email, password, subdomain } = req.body;
 
     // 1. Find the Factory/Tenant by subdomain
@@ -612,8 +613,25 @@ exports.loginEmployee = async (req, res) => {
       });
     }
 
-    // 2. Find the Employee within that specific Factory
-    const employee = await Employee.findOne({ email, tenantId: tenant._id });
+    // 2. Find the Employee. Login runs BEFORE the auth/tenantDb middleware,
+    // so req.db is never set here — a tenant with their own dedicated DB
+    // (customMongoUri) must be looked up explicitly, or anyone added via
+    // Add Employee AFTER the DB split (they're created straight into the
+    // tenant's own DB now) can never log in even though their account is
+    // real. Check the tenant's own DB first, then fall back to the shared
+    // DB (covers the original bootstrap admin account, which still only
+    // lives there).
+    const customUri = tenant.superAdmin?.customMongoUri || null;
+    let employee = null;
+    try {
+      const { Employee: TenantEmployee } = await getTenantModels(tenant._id.toString(), customUri);
+      employee = await TenantEmployee.findOne({ email, tenantId: tenant._id });
+    } catch (e) {
+      console.error('[loginEmployee] Tenant DB employee lookup failed:', e.message);
+    }
+    if (!employee && customUri) {
+      employee = await Employee.findOne({ email, tenantId: tenant._id });
+    }
     if (!employee) return res.status(401).json({ message: "Invalid Credentials." });
 
     // 3. Verify the Password
