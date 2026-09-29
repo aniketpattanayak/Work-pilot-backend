@@ -473,6 +473,16 @@ exports.bulkAddChecklists = async (req, res) => {
 
     const VALID_FREQUENCIES = ['Daily', 'Weekly', 'Monthly', 'Quarterly', 'Half-Yearly', 'Yearly', 'Interval'];
 
+    const WEEKDAY_MAP = { sun: 0, mon: 1, tue: 2, wed: 3, thu: 4, fri: 5, sat: 6 };
+    const parseDaysOfWeek = (raw) => (raw || '').split(',')
+      .map(s => s.trim().toLowerCase().slice(0, 3))
+      .filter(Boolean)
+      .map(s => WEEKDAY_MAP[s])
+      .filter(n => n !== undefined);
+    const parseDaysOfMonth = (raw) => (raw || '').split(',')
+      .map(s => parseInt(s.trim(), 10))
+      .filter(n => Number.isInteger(n) && n >= 1 && n <= 31);
+
     const results = { success: 0, failed: [] };
 
     for (const cl of checklists) {
@@ -489,14 +499,34 @@ exports.bulkAddChecklists = async (req, res) => {
           throw new Error(`Frequency must be one of: ${VALID_FREQUENCIES.join(', ')} (got "${frequency}")`);
         }
 
-        // NOTE: bulk upload has no column for which weekday / month-date to
-        // run on — Weekly defaults to Monday, Monthly defaults to the 1st.
-        // Adjust via Manage Checklist > Edit > Frequency Tuning afterwards
-        // if a different day is needed.
+        // Weekly/Monthly need to know WHICH day(s) — pulled from the extra
+        // "Days of Week (if Weekly)" / "Days of Month (if Monthly)" columns,
+        // the same day-selection the manual Create Checklist Task form offers.
+        const frequencyConfig = { daysOfWeek: [], daysOfMonth: [] };
+        if (frequency === 'Weekly') {
+          const raw = cl['Days of Week (if Weekly)'] || cl.daysOfWeek || '';
+          frequencyConfig.daysOfWeek = parseDaysOfWeek(raw);
+          if (frequencyConfig.daysOfWeek.length === 0) {
+            throw new Error('Weekly frequency requires "Days of Week (if Weekly)", e.g. "Mon,Wed,Fri"');
+          }
+          const weekends = tenant.weekends || [0];
+          const conflictDays = frequencyConfig.daysOfWeek.filter(d => weekends.includes(d));
+          if (conflictDays.length > 0) {
+            throw new Error(`Selected day(s) fall on an employee off day: ${conflictDays.join(',')}`);
+          }
+        }
+        if (frequency === 'Monthly') {
+          const raw = cl['Days of Month (if Monthly)'] || cl.daysOfMonth || '';
+          frequencyConfig.daysOfMonth = parseDaysOfMonth(raw);
+          if (frequencyConfig.daysOfMonth.length === 0) {
+            throw new Error('Monthly frequency requires "Days of Month (if Monthly)", e.g. "1,15"');
+          }
+        }
+
         const baseAnchorDate = startDateRaw ? new Date(startDateRaw) : new Date();
         const nextDueDate = calculateNextDate(
           frequency,
-          {},
+          frequencyConfig,
           tenant.holidays || [],
           baseAnchorDate,
           true,
@@ -509,7 +539,7 @@ exports.bulkAddChecklists = async (req, res) => {
           description: cl['Description'] || cl.description || '',
           doerId: assignee._id,
           frequency,
-          frequencyConfig: {},
+          frequencyConfig,
           startDate: baseAnchorDate,
           nextDueDate,
           status: 'Active',
