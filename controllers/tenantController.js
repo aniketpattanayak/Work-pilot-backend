@@ -6,6 +6,7 @@ const jwt = require('jsonwebtoken');
 const DelegationTask = require('../models/DelegationTask');
 const ChecklistTask = require('../models/ChecklistTask');
 const { notifyTenant } = require('../utils/notify');
+const { calculateNextDate } = require('../utils/scheduler');
 const { getModels: getTenantModels } = require('../utils/getModels');
 
 
@@ -462,35 +463,65 @@ exports.bulkAddChecklists = async (req, res) => {
       return res.status(400).json({ message: 'tenantId and checklists array required' });
     }
 
+    const tenant = await Tenant.findById(tenantId);
+    if (!tenant) return res.status(404).json({ message: 'Tenant not found' });
+
     const employees = await Employee.find({ tenantId }).lean();
     const findEmp = (name) => employees.find(e =>
       e.name.toLowerCase().trim() === (name || '').toLowerCase().trim()
     );
 
-
-
+    const VALID_FREQUENCIES = ['Daily', 'Weekly', 'Monthly', 'Quarterly', 'Half-Yearly', 'Yearly', 'Interval'];
 
     const results = { success: 0, failed: [] };
 
     for (const cl of checklists) {
       try {
-        const assignee = findEmp(cl['Assigned To'] || cl.assignedTo);
-        const itemsRaw = cl['Items (semicolon separated)'] || cl.items || '';
-        const items    = itemsRaw.split(';').map(s => s.trim()).filter(Boolean).map(label => ({ label, done: false }));
+        const taskName     = cl['Checklist Title'] || cl.title || cl.taskName;
+        const assignedName = cl['Assigned To'] || cl.assignedTo;
+        const assignee     = findEmp(assignedName);
+        const frequency    = (cl['Frequency'] || cl.frequency || '').trim();
+        const startDateRaw = cl['Start Date'] || cl['Deadline'] || cl.startDate;
+
+        if (!taskName) throw new Error('Checklist Title is required');
+        if (!assignee) throw new Error(`No employee found matching "${assignedName}"`);
+        if (!VALID_FREQUENCIES.includes(frequency)) {
+          throw new Error(`Frequency must be one of: ${VALID_FREQUENCIES.join(', ')} (got "${frequency}")`);
+        }
+
+        // NOTE: bulk upload has no column for which weekday / month-date to
+        // run on — Weekly defaults to Monday, Monthly defaults to the 1st.
+        // Adjust via Manage Checklist > Edit > Frequency Tuning afterwards
+        // if a different day is needed.
+        const baseAnchorDate = startDateRaw ? new Date(startDateRaw) : new Date();
+        const nextDueDate = calculateNextDate(
+          frequency,
+          {},
+          tenant.holidays || [],
+          baseAnchorDate,
+          true,
+          tenant.weekends || [0]
+        );
 
         await ChecklistTask.create({
           tenantId,
-          title:       cl['Checklist Title'] || cl.title,
-          description: cl['Description']     || cl.description || '',
-          assigneeId:  assignee?._id,
-          assigneeName:assignee?.name || cl['Assigned To'],
-          deadline:    cl['Deadline'] ? new Date(cl['Deadline']) : null,
-          items,
-          status: 'pending',
+          taskName,
+          description: cl['Description'] || cl.description || '',
+          doerId: assignee._id,
+          frequency,
+          frequencyConfig: {},
+          startDate: baseAnchorDate,
+          nextDueDate,
+          status: 'Active',
+          history: [{
+            action: 'Checklist Created',
+            remarks: `Bulk-uploaded. First mission anchored for ${nextDueDate.toLocaleDateString('en-IN')}`,
+            timestamp: new Date(),
+          }],
         });
         results.success++;
       } catch (err) {
-        results.failed.push({ title: cl['Checklist Title'], reason: err.message });
+        results.failed.push({ title: cl['Checklist Title'] || cl.title, reason: err.message });
       }
     }
 
