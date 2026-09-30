@@ -483,6 +483,23 @@ exports.bulkAddChecklists = async (req, res) => {
       .map(s => parseInt(s.trim(), 10))
       .filter(n => Number.isInteger(n) && n >= 1 && n <= 31);
 
+    const parseFlexibleDate = (raw) => {
+      if (!raw) return new Date();
+      const s = String(raw).trim();
+      const dmy = s.match(/^(\d{1,2})[-\/](\d{1,2})[-\/](\d{4})$/);
+      if (dmy) {
+        const d = dmy[1], m = dmy[2], y = dmy[3];
+        return new Date(Number(y), Number(m) - 1, Number(d));
+      }
+      const iso = s.match(/^(\d{4})-(\d{1,2})-(\d{1,2})$/);
+      if (iso) {
+        const y = iso[1], m = iso[2], d = iso[3];
+        return new Date(Number(y), Number(m) - 1, Number(d));
+      }
+      const fallback = new Date(s);
+      return isNaN(fallback.getTime()) ? new Date() : fallback;
+    };
+
     const results = { success: 0, failed: [] };
 
     for (const cl of checklists) {
@@ -490,7 +507,15 @@ exports.bulkAddChecklists = async (req, res) => {
         const taskName     = cl['Checklist Title'] || cl.title || cl.taskName;
         const assignedName = cl['Assigned To'] || cl.assignedTo;
         const assignee     = findEmp(assignedName);
-        const frequency    = (cl['Frequency'] || cl.frequency || '').trim();
+        let frequency = (cl['Frequency'] || cl.frequency || '').trim();
+        const FREQUENCY_TYPOS = { quatarly: 'Quarterly', quaterly: 'Quarterly', qtrly: 'Quarterly' };
+        const freqKey = frequency.toLowerCase();
+        if (FREQUENCY_TYPOS[freqKey]) {
+          frequency = FREQUENCY_TYPOS[freqKey];
+        } else {
+          const properCase = VALID_FREQUENCIES.find(f => f.toLowerCase() === freqKey);
+          if (properCase) frequency = properCase;
+        }
         const startDateRaw = cl['Start Date'] || cl['Deadline'] || cl.startDate;
 
         if (!taskName) throw new Error('Checklist Title is required');
@@ -499,31 +524,23 @@ exports.bulkAddChecklists = async (req, res) => {
           throw new Error(`Frequency must be one of: ${VALID_FREQUENCIES.join(', ')} (got "${frequency}")`);
         }
 
-        // Weekly/Monthly need to know WHICH day(s) — pulled from the extra
-        // "Days of Week (if Weekly)" / "Days of Month (if Monthly)" columns,
-        // the same day-selection the manual Create Checklist Task form offers.
+        const baseAnchorDate = startDateRaw ? parseFlexibleDate(startDateRaw) : new Date();
+
+        // Weekly/Monthly: always anchor to the row's own Start Date — the
+        // weekday (or date-of-month) it falls on becomes the recurrence.
+        // The "Days of Week/Month" columns are ignored entirely.
         const frequencyConfig = { daysOfWeek: [], daysOfMonth: [] };
         if (frequency === 'Weekly') {
-          const raw = cl['Days of Week (if Weekly)'] || cl.daysOfWeek || '';
-          frequencyConfig.daysOfWeek = parseDaysOfWeek(raw);
-          if (frequencyConfig.daysOfWeek.length === 0) {
-            throw new Error('Weekly frequency requires "Days of Week (if Weekly)", e.g. "Mon,Wed,Fri"');
-          }
+          frequencyConfig.daysOfWeek = [baseAnchorDate.getDay()];
           const weekends = tenant.weekends || [0];
           const conflictDays = frequencyConfig.daysOfWeek.filter(d => weekends.includes(d));
           if (conflictDays.length > 0) {
-            throw new Error(`Selected day(s) fall on an employee off day: ${conflictDays.join(',')}`);
+            throw new Error(`Start Date falls on an employee off day: ${conflictDays.join(',')}`);
           }
         }
         if (frequency === 'Monthly') {
-          const raw = cl['Days of Month (if Monthly)'] || cl.daysOfMonth || '';
-          frequencyConfig.daysOfMonth = parseDaysOfMonth(raw);
-          if (frequencyConfig.daysOfMonth.length === 0) {
-            throw new Error('Monthly frequency requires "Days of Month (if Monthly)", e.g. "1,15"');
-          }
+          frequencyConfig.daysOfMonth = [baseAnchorDate.getDate()];
         }
-
-        const baseAnchorDate = startDateRaw ? new Date(startDateRaw) : new Date();
         const nextDueDate = calculateNextDate(
           frequency,
           frequencyConfig,
