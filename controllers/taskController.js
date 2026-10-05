@@ -1813,6 +1813,9 @@ exports.createTask = async (req, res) => {
   const moment = require('moment');
 
   try {
+    // Resolve models against the tenant's own DB (req.db), not the shared DB,
+    // otherwise tasks for tenants with a dedicated DB are saved where the app never reads.
+    const { DelegationTask, Employee, Tenant } = getModels(req);
     const taskData = { ...req.body };
 
     // --- PARSE HELPER DOERS ---
