@@ -154,7 +154,9 @@ exports.getAssignerTasks = async (req, res) => {
       return res.status(400).json({ message: "Invalid Assigner ID format provided." });
     }
 
-    const tasks = await DelegationTask.find({ assignerId: assignerId })
+    const isAdminUser = Array.isArray(req.user?.roles) && req.user.roles.includes('Admin') && req.user?.tenantId;
+    const assignerFilter = isAdminUser ? { tenantId: req.user.tenantId } : { assignerId: assignerId };
+    const tasks = await DelegationTask.find(assignerFilter)
       .populate('doerId', 'name department roles email') // Populate Doer info
       .populate('coordinatorId', 'name')                 // Populate Coordinator info
       .populate('assignerId', 'name')                    // Populate Assigner info
