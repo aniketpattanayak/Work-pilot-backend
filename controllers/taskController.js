@@ -880,7 +880,7 @@ exports.getEmployeeDeepDive = async (req, res) => {
     const { startDate, endDate } = req.query;
 
     // 1. Fetch employee to check leave configuration
-    const employee = await Employee.findById(employeeId).select('leaveStatus');
+    const employee = await Employee.findById(employeeId).select('leaveStatus tenantId');
     const hasLeave = employee?.leaveStatus?.onLeave && employee.leaveStatus.startDate && employee.leaveStatus.endDate;
 
     // 2. Fetch both task types matching the date range
@@ -1032,6 +1032,75 @@ checklists.forEach(t => {
 });
 
 
+
+    // 5. Process FMS flows (same rules the Review Meeting summary uses): flows completed in the
+    //    range that he took part in, plus every active flow whose current step is his.
+    try {
+      if (employee && employee.tenantId) {
+        const empIdStr = employeeId.toString();
+        const fmsInstances = await FlowInstance.find({
+          tenantId: employee.tenantId,
+          $or: [
+            { status: 'completed', completedAt: { $gte: new Date(startDate), $lte: new Date(endDate) }, 'nodeHistory.assignedToId': empIdStr },
+            { status: 'active', 'activeStep.assignedToId': empIdStr }
+          ]
+        }).lean();
+
+        const nowFms = new Date();
+        fmsInstances.forEach(inst => {
+          const history = Array.isArray(inst.nodeHistory) ? inst.nodeHistory : [];
+          const lastStep = history.length ? history[history.length - 1] : null;
+          const isCompleted = inst.status === 'completed';
+          const active = inst.activeStep && inst.activeStep.nodeName ? inst.activeStep : null;
+
+          let status;
+          if (isCompleted) {
+            status = lastStep && lastStep.onTime === false ? 'LATE' : 'COMPLETED';
+          } else {
+            const planned = inst.activeStep && inst.activeStep.plannedDeadline;
+            status = planned && new Date(planned) < nowFms ? 'OVERDUE' : 'PENDING';
+          }
+
+          detailedRows.push({
+            id: inst._id,
+            name: `${inst.templateName || 'FMS'} #${inst.orderIdentifier}`,
+            type: 'FMS',
+            deadline: isCompleted ? ((lastStep && lastStep.plannedDeadline) || inst.completedAt || null) : ((inst.activeStep && inst.activeStep.plannedDeadline) || null),
+            completedAt: isCompleted ? (inst.completedAt || null) : null,
+            status,
+            remarks: '',
+            fms: {
+              orderIdentifier: inst.orderIdentifier,
+              templateName: inst.templateName || '',
+              instanceStatus: inst.status,
+              startedAt: inst.startedAt || null,
+              steps: history.map(h => ({
+                nodeName: h.nodeName,
+                assignedToName: h.assignedToName || '',
+                completedByName: h.completedByName || '',
+                decision: h.decision || null,
+                plannedDeadline: h.plannedDeadline || null,
+                completedAt: h.completedAt || null,
+                onTime: h.onTime !== false,
+                delayMinutes: h.delayMinutes || 0,
+                inputs: h.inputs || {},
+                mine: h.assignedToId ? h.assignedToId.toString() === empIdStr : false
+              })),
+              pendingStep: active ? {
+                nodeName: active.nodeName,
+                assignedToName: active.assignedToName || '',
+                activatedAt: active.activatedAt || null,
+                plannedDeadline: active.plannedDeadline || null,
+                overdue: !!(active.plannedDeadline && new Date(active.plannedDeadline) < nowFms),
+                mine: active.assignedToId ? active.assignedToId.toString() === empIdStr : false
+              } : null
+            }
+          });
+        });
+      }
+    } catch (fmsErr) {
+      console.error('⚠️ Deep-dive FMS section failed (delegation and checklist rows are still returned):', fmsErr.message);
+    }
 
     res.status(200).json(detailedRows);
   } catch (error) {
@@ -1430,10 +1499,14 @@ exports.handleRevision = async (req, res) => {
       : "\nNo attachments provided.";
     
     if (action === 'Request') {
+      // A revision can only be requested before the deadline has passed.
+      if (task.deadline && new Date() > new Date(task.deadline)) {
+        return res.status(400).json({ message: "The deadline has passed, so a revision can no longer be requested for this task." });
+      }
+
       task.status = 'Revision Requested';
       task.remarks = remarks || '';
 
-      
       if (proposedDeadline) {
         task.proposedDeadline = new Date(proposedDeadline);
       }
@@ -1515,8 +1588,7 @@ exports.handleRevision = async (req, res) => {
 
       const oldDoerName = task.doerId?.name || "Previous Staff";
       task.doerId = newDoerId;
-      task.status = 'Pending';
-
+      task.status = 'Accepted';
 
       if (newDeadline) {
         task.deadline = new Date(newDeadline);
@@ -1848,6 +1920,8 @@ exports.createTask = async (req, res) => {
     }
 
     // --- SAVE TO DATABASE ---
+    // Tasks are auto-accepted on creation: the doer no longer has to press "Accept".
+    taskData.status = 'Accepted';
     const newTask = new DelegationTask(taskData);
     
     newTask.history = [{
