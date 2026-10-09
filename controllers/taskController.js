@@ -644,6 +644,11 @@ exports.getAllChecklists = async (req, res) => {
     });
   }
 };
+const parseStartDate = (v) => {
+  const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(String(v));
+  return m ? new Date(Number(m[1]), Number(m[2]) - 1, Number(m[3])) : new Date(v);
+};
+
 exports.updateChecklistTask = async (req, res) => {
   try {
     const { DelegationTask, Employee, Tenant, ChecklistTask, FlowInstance } = getModels(req);
@@ -654,7 +659,7 @@ exports.updateChecklistTask = async (req, res) => {
      * Added 'description' to the destructuring to ensure it is captured 
      * from the high-density grid's edit mode.
      */
-    const { taskName, description, doerId, status, frequency, frequencyConfig , createdAt } = req.body;
+    const { taskName, description, doerId, status, frequency, frequencyConfig , createdAt, startDate } = req.body;
 
     /**
      * 2. SMART RE-CALCULATION GUARD
@@ -686,7 +691,23 @@ exports.updateChecklistTask = async (req, res) => {
     const freqChanged = frequency && frequency !== existingTask.frequency;
     const configChanged = frequencyConfig && JSON.stringify(frequencyConfig) !== JSON.stringify(existingTask.frequencyConfig);
 
-    if (freqChanged || configChanged) {
+    // A corrected start date (the app only sends it when the admin changed it)
+    let newStart = null;
+    if (startDate) {
+      newStart = parseStartDate(startDate);
+      if (isNaN(newStart.getTime())) {
+        return res.status(400).json({ message: "Invalid start date." });
+      }
+      const earliestAllowed = new Date();
+      earliestAllowed.setUTCHours(0, 0, 0, 0);
+      earliestAllowed.setUTCDate(earliestAllowed.getUTCDate() - 1);
+      if (newStart < earliestAllowed) {
+        return res.status(400).json({ message: "Start date cannot be in the past." });
+      }
+    }
+    const startChanged = !!newStart;
+
+    if (freqChanged || configChanged || startChanged) {
       const { calculateNextDate } = require('../utils/scheduler');
 
       // Use the scheduler's calculateNextDate to find the very next valid mission
@@ -697,7 +718,11 @@ exports.updateChecklistTask = async (req, res) => {
       //const anchor = new Date();
 
 
-      const anchor = createdAt ? new Date(createdAt) : new Date(existingTask.createdAt);
+      const anchor = newStart
+        ? new Date(newStart)
+        : (existingTask.startDate
+            ? new Date(existingTask.startDate)
+            : (createdAt ? new Date(createdAt) : new Date(existingTask.createdAt)));
 anchor.setHours(0, 0, 0, 0);  
 
 
@@ -728,6 +753,7 @@ anchor.setHours(0, 0, 0, 0);
           frequencyConfig,
           nextDueDate: finalNextDueDate ,
           createdAt: createdAt || existingTask.createdAt,
+          ...(newStart ? { startDate: newStart } : {}),
         }
       },
       { new: true }
@@ -782,7 +808,18 @@ exports.createChecklistTask = async (req, res) => {
      * isInitial: true tells the scheduler to anchor to this date for Daily/Q/H/Y
      * or scan forward from this date for Weekly/Monthly.
      */
-    const baseAnchorDate = startDate ? new Date(startDate) : new Date();
+    const baseAnchorDate = startDate ? parseStartDate(startDate) : new Date();
+    if (startDate) {
+      if (isNaN(baseAnchorDate.getTime())) {
+        return res.status(400).json({ message: "Invalid start date." });
+      }
+      const earliestAllowed = new Date();
+      earliestAllowed.setUTCHours(0, 0, 0, 0);
+      earliestAllowed.setUTCDate(earliestAllowed.getUTCDate() - 1);
+      if (baseAnchorDate < earliestAllowed) {
+        return res.status(400).json({ message: "Start date cannot be in the past." });
+      }
+    }
 
 
 

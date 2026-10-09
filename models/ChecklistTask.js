@@ -26,6 +26,7 @@ const ChecklistTaskSchema = new mongoose.Schema({
     dayOfMonth: Number,
     month:      Number,
   },
+  startDate:     { type: Date }, // start date chosen by the admin; the schedule is anchored on it
   lastCompleted: { type: Date },
   nextDueDate:   { type: Date, required: true },
   status: {
