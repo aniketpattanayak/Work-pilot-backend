@@ -1215,7 +1215,19 @@ exports.updateEmployeeTarget = async (req, res) => {
   try {
     const { DelegationTask, Employee, Tenant, ChecklistTask, FlowInstance } = getModels(req);
     const { employeeId, target } = req.body;
-    await Employee.findByIdAndUpdate(employeeId, { weeklyLateTarget: target });
+    const targetValue = Number(target);
+    if (target === '' || target === null || target === undefined || !Number.isFinite(targetValue) || targetValue < 0 || targetValue > 100) {
+      return res.status(400).json({ message: "Late target must be a number between 0 and 100." });
+    }
+    if (!mongoose.Types.ObjectId.isValid(employeeId)) {
+      return res.status(400).json({ message: "Invalid employee." });
+    }
+    const targetEmp = await Employee.findById(employeeId).select('tenantId');
+    if (!targetEmp) return res.status(404).json({ message: "Employee not found." });
+    if (!req.user?.isSuperAdmin && targetEmp.tenantId && String(targetEmp.tenantId) !== String(req.user?.tenantId)) {
+      return res.status(403).json({ message: "Forbidden." });
+    }
+    await Employee.findByIdAndUpdate(employeeId, { weeklyLateTarget: targetValue });
     res.status(200).json({ message: "Target synchronized." });
   } catch (error) {
     res.status(500).json({ message: "Update failed" });
@@ -1604,6 +1616,9 @@ exports.handleRevision = async (req, res) => {
       if (task.deadline && new Date() > new Date(task.deadline)) {
         return res.status(400).json({ message: "The deadline has passed, so a revision can no longer be requested for this task." });
       }
+      if ((task.history || []).some(h => h.action === 'Deadline Approved')) {
+        return res.status(400).json({ message: "A revision was already approved for this task, so another revision cannot be requested." });
+      }
 
       task.status = 'Revision Requested';
       task.remarks = remarks || '';
@@ -1650,6 +1665,9 @@ exports.handleRevision = async (req, res) => {
 
       
       const finalDeadline = newDeadline || task.proposedDeadline || task.deadline;
+      if (isNaN(new Date(finalDeadline).getTime())) {
+        return res.status(400).json({ message: "Invalid deadline date." });
+      }
 
       task.deadline = new Date(finalDeadline);
       task.status = 'Accepted';
