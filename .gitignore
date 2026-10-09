@@ -45,4 +45,6 @@ coverage/
 # --- LOCAL DATABASE (if any) ---
 # If you are using local mongo data for testing
 data/
-db/
+db/*.bak
+scripts/tenant-tools/
+fix-*.js
