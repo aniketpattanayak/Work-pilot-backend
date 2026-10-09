@@ -27,6 +27,10 @@ const TenantSchema = new mongoose.Schema({
     default: [0] 
   },
 
+  // Company-defined lists used by the dropdowns in Add Employee (edited in Settings)
+  sectors:   { type: [String], default: [] },
+  locations: { type: [String], default: [] },
+
   holidays: [
     {
       name: String,

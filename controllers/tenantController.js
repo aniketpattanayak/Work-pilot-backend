@@ -207,8 +207,44 @@ exports.updateSettings = async (req, res) => {
       officeHours,
       holidays,
       badgeLibrary,
-      weekends
+      weekends,
+      sectors,
+      locations
     } = req.body;
+
+    // Masters: Sector / Department and Location lists (company Admin only)
+    let masterSet = {};
+    if (sectors !== undefined || locations !== undefined) {
+      const callerRoles = Array.isArray(req.user?.roles) ? req.user.roles : [];
+      const isAdminCaller = req.user?.isSuperAdmin || callerRoles.includes('Admin');
+      if (!isAdminCaller || (!req.user?.isSuperAdmin && String(tenantId) !== String(req.user?.tenantId))) {
+        return res.status(403).json({ message: 'Only your company Admin can change sectors and locations.' });
+      }
+      const cleanList = (arr) => {
+        if (!Array.isArray(arr)) return null;
+        const seen = new Set(); const out = [];
+        for (const v of arr) {
+          if (typeof v !== 'string') return null;
+          const t = v.trim().replace(/\s+/g, ' ');
+          if (!t) continue;
+          if (t.length > 60) return null;
+          const k = t.toLowerCase();
+          if (seen.has(k)) continue;
+          seen.add(k); out.push(t);
+        }
+        return out.length <= 200 ? out : null;
+      };
+      if (sectors !== undefined) {
+        const c = cleanList(sectors);
+        if (!c) return res.status(400).json({ message: 'Sectors must be a list of names (max 60 characters each).' });
+        masterSet.sectors = c;
+      }
+      if (locations !== undefined) {
+        const c = cleanList(locations);
+        if (!c) return res.status(400).json({ message: 'Locations must be a list of names (max 60 characters each).' });
+        masterSet.locations = c;
+      }
+    }
 
     // 2. Update the Tenant document in MongoDB
     // The { new: true } option is CRITICAL so it returns the SAVED data
@@ -220,7 +256,8 @@ exports.updateSettings = async (req, res) => {
           pointSettings,  // Saved from Phase 2
           officeHours,    // Foundation Setup
           holidays,       // Foundation Setup
-          weekends        // NEW: Persisting the custom weekend array
+          weekends,        // NEW: Persisting the custom weekend array
+          ...masterSet     // sectors / locations (only when sent)
         }
       },
       { new: true, runValidators: true }
@@ -268,7 +305,7 @@ exports.addEmployee = async (req, res) => {
     const { Tenant, Employee, DelegationTask, ChecklistTask } = getModels(req);
     const {
       tenantId, name, email, department, whatsappNumber,
-      roles, password, managedDoers, managedAssigners, workOnSunday,
+      roles, password, managedDoers, managedAssigners, workOnSunday, location,
     } = req.body;
 
     // 0. Check email uniqueness within this tenant
@@ -285,6 +322,7 @@ exports.addEmployee = async (req, res) => {
     const newEmployee = new Employee({
       tenantId, name, email, department, whatsappNumber,
       workOnSunday: workOnSunday || false,
+      location: typeof location === 'string' ? location.trim().slice(0, 60) : undefined,
       roles: (Array.isArray(roles) && roles.length > 0) ? roles : ['Doer'],
       password: hashedPassword,
       managedDoers: managedDoers || [],
@@ -919,10 +957,11 @@ exports.updateEmployee = async (req, res) => {
   try {
     const { Tenant, Employee, DelegationTask, ChecklistTask } = getModels(req);
     const { id } = req.params;
-    const { name, email, whatsappNumber, department, roles, managedDoers, managedAssigners, password, workOnSunday, leaveStatus } = req.body;
+    const { name, email, whatsappNumber, department, location, roles, managedDoers, managedAssigners, password, workOnSunday, leaveStatus } = req.body;
 
     const updateData = {
       name, email, department, roles, whatsappNumber, workOnSunday, leaveStatus,
+      location: typeof location === 'string' ? location.trim().slice(0, 60) : undefined,
       managedDoers: Array.isArray(managedDoers) ? managedDoers.map(d => d._id || d) : [],
       managedAssigners: Array.isArray(managedAssigners) ? managedAssigners.map(a => a._id || a) : []
     };

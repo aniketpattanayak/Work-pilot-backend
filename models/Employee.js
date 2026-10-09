@@ -8,6 +8,7 @@ const EmployeeSchema = new mongoose.Schema({
   tenantId:        { type: mongoose.Schema.Types.ObjectId, ref: 'Tenant', required: true },
   name:            { type: String, required: true },
   department:      String,
+  location:        String,
   whatsappNumber:  { type: String, required: true },
   email:           { type: String, required: true },
   password:        { type: String, required: true },
