@@ -66,7 +66,9 @@ exports.getDoerTasks = async (req, res) => {
       $or: [
         { doerId: doerId },
         { "helperDoers.helperId": doerId },
-        { doerId: { $in: buddyForIds } }
+        { doerId: { $in: buddyForIds } },
+        // My Tasks only: also return tasks I passed on, so I can still follow them
+        ...(req.query.includePassedOn === '1' ? [{ 'forwardChain.employeeId': doerId }] : [])
       ]
     })
       .populate('assignerId', 'name email shadowName')
