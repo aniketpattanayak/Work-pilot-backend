@@ -9,6 +9,7 @@ const Tenant = require('../models/Tenant');
 const mongoose = require('mongoose');
 const { authMiddleware, sameTenantOnly } = require('../middleware/auth');
 const subscriptionGuard = require('../middleware/subscriptionGuard');
+const tenantDbMiddleware = require('../middleware/tenantDb');
 
 // 1. Get report settings for a factory
 router.get('/settings/:tenantId', authMiddleware, subscriptionGuard, sameTenantOnly, async (req, res) => {
@@ -66,7 +67,7 @@ router.post('/settings', authMiddleware, subscriptionGuard, async (req, res) => 
 });
 
 // 3. Manual CSV download
-router.get('/download/:tenantId', authMiddleware, subscriptionGuard, sameTenantOnly, reportController.manualDownload);
+router.get('/download/:tenantId', authMiddleware, subscriptionGuard, tenantDbMiddleware, sameTenantOnly, reportController.manualDownload);
 
 // 4. Send test email report
 router.post('/send-test', authMiddleware, subscriptionGuard, async (req, res) => {

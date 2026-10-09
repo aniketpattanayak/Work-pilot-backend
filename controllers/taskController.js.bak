@@ -30,7 +30,7 @@ function getModels(req) {
   return {
     DelegationTask: safeModel(db, 'DelegationTask', require('../models/DelegationTask')),
     Employee:       safeModel(db, 'Employee',       require('../models/Employee')),
-    Tenant:         require('../models/Tenant'), // Tenant records are platform metadata — always shared, never per-tenant-DB
+    Tenant:         safeModel(db, 'Tenant',         require('../models/Tenant')),
     ChecklistTask:  safeModel(db, 'ChecklistTask',  require('../models/ChecklistTask')),
     FlowInstance:   safeModel(db, 'FlowInstance',   require('../models/FlowInstance')),
   };
@@ -154,9 +154,7 @@ exports.getAssignerTasks = async (req, res) => {
       return res.status(400).json({ message: "Invalid Assigner ID format provided." });
     }
 
-    const isAdminUser = Array.isArray(req.user?.roles) && req.user.roles.includes('Admin') && req.user?.tenantId;
-    const assignerFilter = isAdminUser ? { tenantId: req.user.tenantId } : { assignerId: assignerId };
-    const tasks = await DelegationTask.find(assignerFilter)
+    const tasks = await DelegationTask.find({ assignerId: assignerId })
       .populate('doerId', 'name department roles email') // Populate Doer info
       .populate('coordinatorId', 'name')                 // Populate Coordinator info
       .populate('assignerId', 'name')                    // Populate Assigner info
@@ -386,84 +384,6 @@ exports.getGlobalPerformance = async (req, res) => {
     res.status(500).json({ message: "Global Analytics Error", error: error.message });
   }
 };
-// Edit a delegation task (title, description, assignee, deadline date, priority).
-// Allowed for an Admin or for the person who assigned the task, within the same company.
-exports.updateTask = async (req, res) => {
-  try {
-    const { DelegationTask } = getModels(req);
-    const { taskId } = req.params;
-
-    if (!mongoose.Types.ObjectId.isValid(taskId)) {
-      return res.status(400).json({ message: "Invalid task ID." });
-    }
-    const task = await DelegationTask.findById(taskId);
-    if (!task) return res.status(404).json({ message: "Task not found." });
-
-    if (!req.user?.isSuperAdmin && String(task.tenantId) !== String(req.user?.tenantId)) {
-      return res.status(403).json({ message: "Forbidden." });
-    }
-    const roles = Array.isArray(req.user?.roles) ? req.user.roles : [];
-    if (!req.user?.isSuperAdmin && !roles.includes('Admin') && String(task.assignerId) !== String(req.user?.id)) {
-      return res.status(403).json({ message: "Only the assigner or an admin can edit this task." });
-    }
-
-    const { title, description, doerId, deadline, priority } = req.body;
-    const changes = [];
-
-    if (typeof title === 'string' && title.trim() && title.trim() !== task.title) {
-      task.title = title.trim();
-      changes.push('title');
-    }
-    if (typeof description === 'string' && description !== (task.description || '')) {
-      task.description = description;
-      changes.push('description');
-    }
-    if (doerId && String(doerId) !== String(task.doerId)) {
-      if (!mongoose.Types.ObjectId.isValid(doerId)) {
-        return res.status(400).json({ message: "Invalid assignee." });
-      }
-      task.doerId = doerId;
-      changes.push('assignee');
-    }
-    if (priority) {
-      const map = { low: 'Low', medium: 'Medium', high: 'High', urgent: 'Urgent' };
-      const p = map[String(priority).toLowerCase()];
-      if (!p) return res.status(400).json({ message: "Invalid priority." });
-      if (p !== task.priority) {
-        task.priority = p;
-        changes.push('priority');
-      }
-    }
-    if (deadline) {
-      // The form only sends a date (YYYY-MM-DD). Keep the task's original time of day so
-      // saving without touching the date never moves the deadline.
-      const newDay = String(deadline).slice(0, 10);
-      const oldIso = new Date(task.deadline).toISOString();
-      if (newDay !== oldIso.slice(0, 10)) {
-        const d = new Date(newDay + 'T' + oldIso.slice(11));
-        if (isNaN(d.getTime())) return res.status(400).json({ message: "Invalid deadline." });
-        task.deadline = d;
-        changes.push('deadline');
-      }
-    }
-
-    if (changes.length === 0) {
-      return res.status(200).json({ message: "No changes to save.", task });
-    }
-
-    const entry = { action: "Task Edited", remarks: "Edited: " + changes.join(', '), timestamp: new Date() };
-    if (mongoose.Types.ObjectId.isValid(req.user?.id)) entry.performedBy = req.user.id;
-    if (!task.history) task.history = [];
-    task.history.push(entry);
-
-    await task.save();
-    res.status(200).json({ message: "Task updated successfully", task });
-  } catch (error) {
-    console.error("❌ updateTask error:", error.message);
-    res.status(500).json({ message: "Failed to update task", error: error.message });
-  }
-};
-
 exports.deleteTask = async (req, res) => {
   try {
     const { DelegationTask, Employee, Tenant, ChecklistTask, FlowInstance } = getModels(req);
@@ -960,7 +880,7 @@ exports.getEmployeeDeepDive = async (req, res) => {
     const { startDate, endDate } = req.query;
 
     // 1. Fetch employee to check leave configuration
-    const employee = await Employee.findById(employeeId).select('leaveStatus tenantId');
+    const employee = await Employee.findById(employeeId).select('leaveStatus');
     const hasLeave = employee?.leaveStatus?.onLeave && employee.leaveStatus.startDate && employee.leaveStatus.endDate;
 
     // 2. Fetch both task types matching the date range
@@ -1112,75 +1032,6 @@ checklists.forEach(t => {
 });
 
 
-
-    // 5. Process FMS flows (same rules the Review Meeting summary uses): flows completed in the
-    //    range that he took part in, plus every active flow whose current step is his.
-    try {
-      if (employee && employee.tenantId) {
-        const empIdStr = employeeId.toString();
-        const fmsInstances = await FlowInstance.find({
-          tenantId: employee.tenantId,
-          $or: [
-            { status: 'completed', completedAt: { $gte: new Date(startDate), $lte: new Date(endDate) }, 'nodeHistory.assignedToId': empIdStr },
-            { status: 'active', 'activeStep.assignedToId': empIdStr }
-          ]
-        }).lean();
-
-        const nowFms = new Date();
-        fmsInstances.forEach(inst => {
-          const history = Array.isArray(inst.nodeHistory) ? inst.nodeHistory : [];
-          const lastStep = history.length ? history[history.length - 1] : null;
-          const isCompleted = inst.status === 'completed';
-          const active = inst.activeStep && inst.activeStep.nodeName ? inst.activeStep : null;
-
-          let status;
-          if (isCompleted) {
-            status = lastStep && lastStep.onTime === false ? 'LATE' : 'COMPLETED';
-          } else {
-            const planned = inst.activeStep && inst.activeStep.plannedDeadline;
-            status = planned && new Date(planned) < nowFms ? 'OVERDUE' : 'PENDING';
-          }
-
-          detailedRows.push({
-            id: inst._id,
-            name: `${inst.templateName || 'FMS'} #${inst.orderIdentifier}`,
-            type: 'FMS',
-            deadline: isCompleted ? ((lastStep && lastStep.plannedDeadline) || inst.completedAt || null) : ((inst.activeStep && inst.activeStep.plannedDeadline) || null),
-            completedAt: isCompleted ? (inst.completedAt || null) : null,
-            status,
-            remarks: '',
-            fms: {
-              orderIdentifier: inst.orderIdentifier,
-              templateName: inst.templateName || '',
-              instanceStatus: inst.status,
-              startedAt: inst.startedAt || null,
-              steps: history.map(h => ({
-                nodeName: h.nodeName,
-                assignedToName: h.assignedToName || '',
-                completedByName: h.completedByName || '',
-                decision: h.decision || null,
-                plannedDeadline: h.plannedDeadline || null,
-                completedAt: h.completedAt || null,
-                onTime: h.onTime !== false,
-                delayMinutes: h.delayMinutes || 0,
-                inputs: h.inputs || {},
-                mine: h.assignedToId ? h.assignedToId.toString() === empIdStr : false
-              })),
-              pendingStep: active ? {
-                nodeName: active.nodeName,
-                assignedToName: active.assignedToName || '',
-                activatedAt: active.activatedAt || null,
-                plannedDeadline: active.plannedDeadline || null,
-                overdue: !!(active.plannedDeadline && new Date(active.plannedDeadline) < nowFms),
-                mine: active.assignedToId ? active.assignedToId.toString() === empIdStr : false
-              } : null
-            }
-          });
-        });
-      }
-    } catch (fmsErr) {
-      console.error('⚠️ Deep-dive FMS section failed (delegation and checklist rows are still returned):', fmsErr.message);
-    }
 
     res.status(200).json(detailedRows);
   } catch (error) {
@@ -1579,14 +1430,10 @@ exports.handleRevision = async (req, res) => {
       : "\nNo attachments provided.";
     
     if (action === 'Request') {
-      // A revision can only be requested before the deadline has passed.
-      if (task.deadline && new Date() > new Date(task.deadline)) {
-        return res.status(400).json({ message: "The deadline has passed, so a revision can no longer be requested for this task." });
-      }
-
       task.status = 'Revision Requested';
       task.remarks = remarks || '';
 
+      
       if (proposedDeadline) {
         task.proposedDeadline = new Date(proposedDeadline);
       }
@@ -1668,7 +1515,8 @@ exports.handleRevision = async (req, res) => {
 
       const oldDoerName = task.doerId?.name || "Previous Staff";
       task.doerId = newDoerId;
-      task.status = 'Accepted';
+      task.status = 'Pending';
+
 
       if (newDeadline) {
         task.deadline = new Date(newDeadline);
@@ -1965,9 +1813,6 @@ exports.createTask = async (req, res) => {
   const moment = require('moment');
 
   try {
-    // Resolve models against the tenant's own DB (req.db), not the shared DB,
-    // otherwise tasks for tenants with a dedicated DB are saved where the app never reads.
-    const { DelegationTask, Employee, Tenant } = getModels(req);
     const taskData = { ...req.body };
 
     // --- PARSE HELPER DOERS ---
@@ -2000,8 +1845,6 @@ exports.createTask = async (req, res) => {
     }
 
     // --- SAVE TO DATABASE ---
-    // Tasks are auto-accepted on creation: the doer no longer has to press "Accept".
-    taskData.status = 'Accepted';
     const newTask = new DelegationTask(taskData);
     
     newTask.history = [{

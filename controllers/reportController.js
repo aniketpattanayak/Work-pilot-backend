@@ -114,6 +114,10 @@ exports.manualDownload = async (req, res) => {
 
         const startDate = moment().subtract(days, 'days').startOf('day').toDate();
 
+        // Use the company's own database when it has a dedicated one (set by tenantDbMiddleware)
+        const DelegationTask = req.db ? req.db.model('DelegationTask') : require('../models/DelegationTask');
+        const ChecklistTask  = req.db ? req.db.model('ChecklistTask')  : require('../models/ChecklistTask');
+
         const [delegations, checklists] = await Promise.all([
             DelegationTask.find({ tenantId, createdAt: { $gte: startDate } }).populate('assignerId doerId'),
             ChecklistTask.find({ tenantId }).populate('doerId')

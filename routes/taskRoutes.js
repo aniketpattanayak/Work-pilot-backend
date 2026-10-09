@@ -134,6 +134,7 @@ router.post('/create-task', authMiddleware, subscriptionGuard, tenantDbMiddlewar
   taskController.createTask
 );
 router.delete('/:taskId', authMiddleware, subscriptionGuard, tenantDbMiddleware, taskController.deleteTask);
+router.put('/:taskId([0-9a-fA-F]{24})', authMiddleware, subscriptionGuard, tenantDbMiddleware, taskController.updateTask);
 router.post('/handle-revision', authMiddleware, subscriptionGuard, tenantDbMiddleware, taskController.handleRevision);
 router.post('/coordinator-force-done', authMiddleware, subscriptionGuard, tenantDbMiddleware, taskController.coordinatorForceDone);
 router.put('/coordinator-force-done', authMiddleware, subscriptionGuard, tenantDbMiddleware, taskController.coordinatorForceDone);
