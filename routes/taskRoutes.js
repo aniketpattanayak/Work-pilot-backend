@@ -135,6 +135,7 @@ router.post('/create-task', authMiddleware, subscriptionGuard, tenantDbMiddlewar
 );
 router.delete('/:taskId', authMiddleware, subscriptionGuard, tenantDbMiddleware, taskController.deleteTask);
 router.post('/handle-revision', authMiddleware, subscriptionGuard, tenantDbMiddleware, taskController.handleRevision);
+router.post('/assign-onward', authMiddleware, subscriptionGuard, tenantDbMiddleware, taskController.assignOnward);
 router.post('/coordinator-force-done', authMiddleware, subscriptionGuard, tenantDbMiddleware, taskController.coordinatorForceDone);
 router.put('/coordinator-force-done', authMiddleware, subscriptionGuard, tenantDbMiddleware, taskController.coordinatorForceDone);
 router.put('/respond', authMiddleware, subscriptionGuard, tenantDbMiddleware, ...useUpload(_upload.single('evidence')), taskController.respondToTask);

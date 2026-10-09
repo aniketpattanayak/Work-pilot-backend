@@ -70,6 +70,7 @@ exports.getDoerTasks = async (req, res) => {
       ]
     })
       .populate('assignerId', 'name email shadowName')
+      .populate('forwardChain.employeeId', 'name')
       .populate('doerId', 'name leaveStatus') // Populate leaveStatus to check per-task
       .populate('coordinatorId', 'name')
       .populate('history.performedBy', 'name')
@@ -156,11 +157,12 @@ exports.getAssignerTasks = async (req, res) => {
     }
 
     const isAdminUser = ((Array.isArray(req.user?.roles) && req.user.roles.includes('Admin')) || isViewerOnly(req.user)) && req.user?.tenantId;
-    const assignerFilter = isAdminUser ? { tenantId: req.user.tenantId } : { assignerId: assignerId };
+    const assignerFilter = isAdminUser ? { tenantId: req.user.tenantId } : { $or: [{ assignerId: assignerId }, { 'forwardChain.employeeId': assignerId }] };
     const tasks = await DelegationTask.find(assignerFilter)
       .populate('doerId', 'name department roles email') // Populate Doer info
       .populate('coordinatorId', 'name')                 // Populate Coordinator info
       .populate('assignerId', 'name')                    // Populate Assigner info
+      .populate('forwardChain.employeeId', 'name')
       .populate('history.performedBy', 'name')           // FIXED: Converts IDs to names in Audit Log
       .sort({ createdAt: -1 });
 
@@ -1962,6 +1964,17 @@ exports.respondToTask = async (req, res) => {
           console.log(`✅ Assigner Notified: ${task.assignerId.name}`);
         }
 
+        // Notify every onward assigner in the chain (they also gave this work out)
+        if ((task.forwardChain || []).length) {
+          const chainPeople = await Employee.find({ _id: { $in: task.forwardChain.map(c => c.employeeId) } }).select('name whatsappNumber');
+          const doneNums = new Set([task.assignerId?.whatsappNumber].filter(Boolean));
+          for (const cp of chainPeople) {
+            if (!cp.whatsappNumber || doneNums.has(cp.whatsappNumber)) continue;
+            doneNums.add(cp.whatsappNumber);
+            await notifyTenant(task.tenantId, cp.whatsappNumber, payload);
+          }
+        }
+
         // Notify Quality Coordinator (If assigned)
         if (task.coordinatorId?.whatsappNumber) {
           await notifyTenant(task.tenantId, task.coordinatorId.whatsappNumber, payload);
@@ -2574,5 +2587,91 @@ exports.getReviewAnalytics = async (req, res) => {
   } catch (error) {
     console.error("Analytics Calculation Error:", error);
     res.status(500).json({ message: "Analytics calculation failed" });
+  }
+};
+
+// ─── ASSIGN A RECEIVED TASK ONWARD ───────────────────────────────────────────
+// The current doer (must hold the Assigner role) passes the task to someone mapped under them.
+// Same task record: chain = assignerId -> forwardChain[] -> doerId. The new doer completes it.
+exports.assignOnward = async (req, res) => {
+  try {
+    const { DelegationTask, Employee, Tenant } = getModels(req);
+    const { taskId, newDoerId, remarks } = req.body || {};
+    const me = String(req.user?.id || '');
+
+    if (!mongoose.Types.ObjectId.isValid(taskId) || !mongoose.Types.ObjectId.isValid(newDoerId)) {
+      return res.status(400).json({ message: 'Invalid task or person selected.' });
+    }
+
+    const task = await DelegationTask.findById(taskId);
+    if (!task) return res.status(404).json({ message: 'Task not found.' });
+    if (!req.user?.isSuperAdmin && String(task.tenantId) !== String(req.user?.tenantId)) {
+      return res.status(403).json({ message: 'Not allowed.' });
+    }
+    if (String(task.doerId) !== me) {
+      return res.status(403).json({ message: 'Only the person this task is assigned to can assign it onward.' });
+    }
+    if (!['Pending', 'Accepted'].includes(task.status)) {
+      return res.status(400).json({ message: `A task that is "${task.status}" cannot be assigned onward.` });
+    }
+
+    const requester = await Employee.findById(me).select('name roles managedDoers');
+    if (!requester || !(requester.roles || []).includes('Assigner')) {
+      return res.status(403).json({ message: 'Only a user with the Assigner role can assign a task onward.' });
+    }
+    const mapped = (requester.managedDoers || []).map(String);
+    if (!mapped.includes(String(newDoerId))) {
+      return res.status(403).json({ message: 'You can only assign to people mapped under you.' });
+    }
+
+    const inChain = [String(task.assignerId), me, ...(task.forwardChain || []).map(c => String(c.employeeId))];
+    if (inChain.includes(String(newDoerId))) {
+      return res.status(400).json({ message: 'That person is already part of this task\'s assignment chain.' });
+    }
+
+    const newDoer = await Employee.findById(newDoerId).select('name whatsappNumber tenantId');
+    if (!newDoer) return res.status(404).json({ message: 'Selected person not found.' });
+    if (newDoer.tenantId && String(newDoer.tenantId) !== String(task.tenantId)) {
+      return res.status(403).json({ message: 'Not allowed.' });
+    }
+
+    task.forwardChain.push({ employeeId: task.doerId, forwardedAt: new Date() });
+    task.doerId = newDoer._id;
+    task.history.push({
+      action: 'Assigned Onward',
+      performedBy: me,
+      remarks: `${requester.name} assigned this task onward to ${newDoer.name}.` + (remarks ? ` Note: ${remarks}` : ''),
+      timestamp: new Date()
+    });
+    await task.save();
+
+    // WhatsApp: new doer + everyone earlier in the chain (never blocks the request)
+    try {
+      const tenant = await Tenant.findById(task.tenantId);
+      const loginLink = `https://${tenant?.subdomain || 'portal'}.lrbcloud.ai/login`;
+      const ids = [task.assignerId, ...task.forwardChain.map(c => c.employeeId)];
+      const people = await Employee.find({ _id: { $in: ids } }).select('name whatsappNumber');
+      const nameOf = id => (people.find(p => String(p._id) === String(id)) || {}).name || 'Unknown';
+      const chainText = [nameOf(task.assignerId), ...task.forwardChain.map(c => nameOf(c.employeeId)), newDoer.name].join(' → ');
+      const body = `🔄 *Task Assigned Onward*\n\n*Task:* ${task.title}\n*Chain:* ${chainText}\n*Deadline:* ${moment(task.deadline).format('DD MMM YYYY, hh:mm A')}\n\n*Login Link:* ${loginLink}`;
+      const seen = new Set();
+      for (const p of [newDoer, ...people]) {
+        const n = p.whatsappNumber;
+        if (!n || String(p._id) === me || seen.has(n)) continue;
+        seen.add(n);
+        await notifyTenant(task.tenantId, n, `Hi ${p.name},\n\n` + body);
+      }
+    } catch (waErr) {
+      console.error('Assign onward WA error:', waErr.message);
+    }
+
+    const out = await DelegationTask.findById(task._id)
+      .populate('assignerId', 'name')
+      .populate('doerId', 'name')
+      .populate('forwardChain.employeeId', 'name');
+    res.status(200).json({ message: 'Task assigned onward.', task: out });
+  } catch (error) {
+    console.error('assignOnward error:', error.message);
+    res.status(500).json({ message: 'Could not assign the task onward.' });
   }
 };

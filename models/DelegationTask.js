@@ -16,6 +16,15 @@ const DelegationTaskSchema = new mongoose.Schema({
   coordinatorId: { type: mongoose.Schema.Types.ObjectId, ref: 'Employee' },
   coworkers:     [{ type: mongoose.Schema.Types.ObjectId, ref: 'Employee' }],
 
+  // Onward-assignment chain: people who received this task and passed it on, oldest first.
+  // Full chain shown to users = assignerId -> forwardChain[0] -> forwardChain[1] ... -> doerId
+  forwardChain: [
+    {
+      employeeId:  { type: mongoose.Schema.Types.ObjectId, ref: 'Employee' },
+      forwardedAt: { type: Date, default: Date.now },
+    },
+  ],
+
   helperDoers: [
     {
       helperId: { type: mongoose.Schema.Types.ObjectId, ref: 'Employee' },
