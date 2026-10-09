@@ -134,7 +134,6 @@ router.post('/create-task', authMiddleware, subscriptionGuard, tenantDbMiddlewar
   taskController.createTask
 );
 router.delete('/:taskId', authMiddleware, subscriptionGuard, tenantDbMiddleware, taskController.deleteTask);
-router.put('/:taskId([0-9a-fA-F]{24})', authMiddleware, subscriptionGuard, tenantDbMiddleware, taskController.updateTask);
 router.post('/handle-revision', authMiddleware, subscriptionGuard, tenantDbMiddleware, taskController.handleRevision);
 router.post('/coordinator-force-done', authMiddleware, subscriptionGuard, tenantDbMiddleware, taskController.coordinatorForceDone);
 router.put('/coordinator-force-done', authMiddleware, subscriptionGuard, tenantDbMiddleware, taskController.coordinatorForceDone);
@@ -179,5 +178,8 @@ router.get('/company-overview/:tenantId', authMiddleware, subscriptionGuard, ten
 router.get('/employee-deep-dive/:employeeId', authMiddleware, subscriptionGuard, tenantDbMiddleware, taskController.getEmployeeDeepDive);
 router.put('/update-weekly-target', authMiddleware, subscriptionGuard, tenantDbMiddleware, taskController.updateEmployeeTarget);
 router.get('/review-analytics/:tenantId', authMiddleware, subscriptionGuard, tenantDbMiddleware, sameTenantOnly, taskController.getReviewAnalytics);
+
+// Edit a task. Kept LAST so every fixed PUT path above (respond, update-mapping, ...) matches first.
+router.put('/:taskId', authMiddleware, subscriptionGuard, tenantDbMiddleware, taskController.updateTask);
 
 module.exports = router;
