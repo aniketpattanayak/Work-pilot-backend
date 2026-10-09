@@ -469,6 +469,20 @@ exports.deleteTask = async (req, res) => {
   try {
     const { DelegationTask, Employee, Tenant, ChecklistTask, FlowInstance } = getModels(req);
     const { taskId } = req.params;
+    if (!mongoose.Types.ObjectId.isValid(taskId)) {
+      return res.status(400).json({ message: "Invalid task ID." });
+    }
+    const task = await DelegationTask.findById(taskId);
+    if (!task) return res.status(404).json({ message: "Task not found." });
+    const delRoles = Array.isArray(req.user?.roles) ? req.user.roles : [];
+    if (!req.user?.isSuperAdmin) {
+      if (String(task.tenantId) !== String(req.user?.tenantId)) {
+        return res.status(403).json({ message: "Forbidden." });
+      }
+      if (!delRoles.includes('Admin') && String(task.assignerId) !== String(req.user?.id)) {
+        return res.status(403).json({ message: "Only the assigner or an admin can delete this task." });
+      }
+    }
     await DelegationTask.findByIdAndDelete(taskId);
     res.status(200).json({ message: "Task cancelled successfully" });
   } catch (error) {
@@ -649,6 +663,12 @@ exports.updateChecklistTask = async (req, res) => {
     const existingTask = await ChecklistTask.findById(id);
     if (!existingTask) {
       return res.status(404).json({ message: "Checklist record not found" });
+    }
+    if (!req.user?.isSuperAdmin) {
+      const chkRoles = Array.isArray(req.user?.roles) ? req.user.roles : [];
+      if (String(existingTask.tenantId) !== String(req.user?.tenantId) || !chkRoles.includes('Admin')) {
+        return res.status(403).json({ message: "Forbidden." });
+      }
     }
 
     const tenant = await Tenant.findById(existingTask.tenantId);
@@ -2068,11 +2088,17 @@ exports.deleteChecklistTask = async (req, res) => {
     }
 
     // 2. Execute deletion
-    const deletedTask = await ChecklistTask.findByIdAndDelete(id);
-
-    if (!deletedTask) {
+    const toDelete = await ChecklistTask.findById(id);
+    if (!toDelete) {
       return res.status(404).json({ message: "Checklist not found in active registry." });
     }
+    if (!req.user?.isSuperAdmin) {
+      const chkRoles = Array.isArray(req.user?.roles) ? req.user.roles : [];
+      if (String(toDelete.tenantId) !== String(req.user?.tenantId) || !chkRoles.includes('Admin')) {
+        return res.status(403).json({ message: "Forbidden." });
+      }
+    }
+    const deletedTask = await ChecklistTask.findByIdAndDelete(id);
 
     console.log(`🗑️ Node Purged: ${deletedTask.taskName}`);
 

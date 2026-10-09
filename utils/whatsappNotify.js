@@ -87,6 +87,9 @@ const MAYTAPI_TEMPLATES = {
     `Hi ${v[0]},\n\nYour task is overdue. Please complete it immediately.\n\nStep: ${v[1]}\nOrder ID: ${v[2]}\nDelayed by: ${v[3]}\n\nThis delay has been recorded. Please log in and complete this step now.\n\n${v[4]}\n\nThank you\nWorkPilot Team`,
 };
 
+MAYTAPI_TEMPLATES.fms_overdue_manager = (v) =>
+  `Hi ${v[0]},\n\n${v[1]} is late on a task and it needs your attention.\n\nStep: ${v[2]}\nOrder ID: ${v[3]}\nDelayed by: ${v[4]} minutes\n\nPlease follow up with ${v[1]}.`;
+
 const sendViaMaytapi = async (toPhone, data, config) => {
   const phone = cleanPhone(toPhone);
   const { productId, token, phoneId } = config;
