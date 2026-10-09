@@ -9,6 +9,16 @@ const jwt = require('jsonwebtoken');
  * On success, attaches the decoded payload to req.user:
  *   { id, roles, tenantId, isSuperAdmin? }
  */
+// A "Viewer-only" account has the Viewer role and nothing else. It may read the whole
+// company but can never change anything (except raise a support ticket).
+const isViewerOnly = (user) =>
+  !!user && !user.isSuperAdmin &&
+  Array.isArray(user.roles) && user.roles.length > 0 &&
+  user.roles.every((r) => String(r).toLowerCase() === 'viewer');
+
+const SAFE_METHODS = ['GET', 'HEAD', 'OPTIONS'];
+const VIEWER_WRITE_ALLOWLIST = [/\/tickets\/create\/?$/];
+
 const authMiddleware = (req, res, next) => {
   const authHeader = req.headers.authorization;
 
@@ -21,6 +31,13 @@ const authMiddleware = (req, res, next) => {
   try {
     const decoded = jwt.verify(token, process.env.JWT_SECRET);
     req.user = decoded;
+
+    if (isViewerOnly(decoded) && !SAFE_METHODS.includes(req.method)) {
+      const urlPath = String(req.originalUrl || req.url || '').split('?')[0];
+      if (!VIEWER_WRITE_ALLOWLIST.some((re) => re.test(urlPath))) {
+        return res.status(403).json({ message: 'View-only access: this account cannot make changes.' });
+      }
+    }
     next();
   } catch (err) {
     // Distinguish expired tokens from invalid ones for cleaner client UX
@@ -89,4 +106,4 @@ const tenantDbMiddleware = async (req, res, next) => {
   }
 };
 
-module.exports = { authMiddleware, superAdminOnly, sameTenantOnly, tenantDbMiddleware };
+module.exports = { authMiddleware, superAdminOnly, sameTenantOnly, tenantDbMiddleware, isViewerOnly };

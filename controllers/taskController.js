@@ -4,6 +4,7 @@ const _Employee       = require('../models/Employee');
 const _Tenant         = require('../models/Tenant');
 const _ChecklistTask  = require('../models/ChecklistTask');
 const mongoose        = require('mongoose');
+const { isViewerOnly } = require('../middleware/auth');
 const { notifyTenant } = require('../utils/notify');
 const moment          = require('moment');
 const { calculateNextDate } = require('../utils/scheduler');
@@ -154,7 +155,7 @@ exports.getAssignerTasks = async (req, res) => {
       return res.status(400).json({ message: "Invalid Assigner ID format provided." });
     }
 
-    const isAdminUser = Array.isArray(req.user?.roles) && req.user.roles.includes('Admin') && req.user?.tenantId;
+    const isAdminUser = ((Array.isArray(req.user?.roles) && req.user.roles.includes('Admin')) || isViewerOnly(req.user)) && req.user?.tenantId;
     const assignerFilter = isAdminUser ? { tenantId: req.user.tenantId } : { assignerId: assignerId };
     const tasks = await DelegationTask.find(assignerFilter)
       .populate('doerId', 'name department roles email') // Populate Doer info
@@ -1324,7 +1325,7 @@ exports.getCoordinatorTasks = async (req, res) => {
     let checklistQuery = {};
 
     // 2. CRITICAL LOGIC: If Admin, bypass mapping and show everything for the factory
-    if (coordinator.roles.includes('Admin')) {
+    if (coordinator.roles.includes('Admin') || isViewerOnly({ roles: coordinator.roles })) {
       delegationQuery = { tenantId: coordinator.tenantId };
       checklistQuery = { tenantId: coordinator.tenantId };
     } else {
