@@ -14,6 +14,11 @@ const ALLOWED_TYPES = [
   'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
   'application/vnd.ms-excel',
   'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+  'text/csv','application/csv',
+  'text/plain',
+  'application/vnd.ms-powerpoint',
+  'application/vnd.openxmlformats-officedocument.presentationml.presentation',
+  'application/zip','application/x-zip-compressed',
 ];
 
 const hasAwsConfig = !!(
@@ -21,6 +26,14 @@ const hasAwsConfig = !!(
   process.env.AWS_SECRET_ACCESS_KEY &&
   process.env.S3_BUCKET_NAME
 );
+
+const ALLOWED_TYPES_LABEL = 'images, PDF, Word, Excel, PowerPoint, CSV, text and zip files';
+const allowedFileFilter = (req, file, cb) => {
+  if (ALLOWED_TYPES.includes(file.mimetype)) return cb(null, true);
+  const err = new Error('"' + file.originalname + '" is not an allowed file type. Allowed: ' + ALLOWED_TYPES_LABEL + '.');
+  err.code = 'FILE_TYPE_NOT_ALLOWED';
+  cb(err, false);
+};
 
 let upload;
 
@@ -48,9 +61,7 @@ if (hasAwsConfig) {
       },
     }),
     limits: { fileSize: 10 * 1024 * 1024 },
-    fileFilter: (req, file, cb) => {
-      ALLOWED_TYPES.includes(file.mimetype) ? cb(null, true) : cb(new Error(`File type not allowed: ${file.mimetype}`), false);
-    },
+    fileFilter: allowedFileFilter,
   });
 
   console.log('✅ S3 uploader active');
@@ -89,13 +100,33 @@ if (hasAwsConfig) {
   upload = multer({
     storage: new LocalStorage(),
     limits: { fileSize: 10 * 1024 * 1024 },
-    fileFilter: (req, file, cb) => {
-      ALLOWED_TYPES.includes(file.mimetype) ? cb(null, true) : cb(new Error(`File type not allowed: ${file.mimetype}`), false);
-    },
+    fileFilter: allowedFileFilter,
   });
 
   console.log('⚠️  AWS S3 not configured — files saved locally to /server/uploads/');
   console.log('    Set AWS_ACCESS_KEY_ID, AWS_SECRET_ACCESS_KEY, S3_BUCKET_NAME in .env to enable S3');
 }
 
-module.exports = upload;
+const friendlyUploadError = (err) => {
+  if (err && err.code === 'FILE_TYPE_NOT_ALLOWED') return { status: 400, message: err.message };
+  if (err && err.code === 'LIMIT_FILE_SIZE') return { status: 400, message: 'A file is larger than the 10 MB limit. Please attach a smaller file.' };
+  if (err && (err.code === 'LIMIT_FILE_COUNT' || err.code === 'LIMIT_UNEXPECTED_FILE')) return { status: 400, message: 'Too many files attached. Please remove some and try again.' };
+  console.error('Upload error:', err && err.message);
+  return { status: 500, message: 'File upload failed. Please try again.' };
+};
+const guard = (name) => (...args) => {
+  const mw = upload[name](...args);
+  return (req, res, next) => mw(req, res, (err) => {
+    if (!err) return next();
+    const { status, message } = friendlyUploadError(err);
+    return res.status(status).json({ message });
+  });
+};
+
+module.exports = {
+  single: guard('single'),
+  array:  guard('array'),
+  fields: guard('fields'),
+  any:    guard('any'),
+  none:   guard('none'),
+};
