@@ -1780,7 +1780,7 @@ exports.respondToTask = async (req, res) => {
     try {
       if (status === 'Completed' || status === 'Verified') {
         const TenantModel = mongoose.model('Tenant');
-        const EmployeeModel = mongoose.model('Employee');
+        const EmployeeModel = Employee; // company's own database (from getModels(req))
 
         const tenant = await TenantModel.findById(task.tenantId);
         // Points are still anchored to the Primary Lead (task.doerId)
@@ -1874,7 +1874,7 @@ exports.respondToTask = async (req, res) => {
     try {
       const TenantModel = mongoose.model('Tenant');
       const tenant = await TenantModel.findById(task.tenantId);
-      const EmployeeModel = mongoose.model('Employee');
+      const EmployeeModel = Employee; // company's own database (from getModels(req))
       const clicker = await EmployeeModel.findById(doerId);
 
       if (tenant?.whatsappConfig?.isActive && (status === 'Completed' || status === 'Verified')) {
