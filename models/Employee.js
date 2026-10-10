@@ -46,6 +46,8 @@ const EmployeeSchema = new mongoose.Schema({
 
   // Keys of the custom access roles (Tenant.accessRoles) given to this person
   accessRoleKeys: { type: [String], default: [] },
+  // The day the person joined (used to work out leave they have earned). If empty, the day they were added is used.
+  joiningDate: { type: Date },
 
   managedDoers:    [{ type: mongoose.Schema.Types.ObjectId, ref: 'Employee' }],
   managedAssigners:[{ type: mongoose.Schema.Types.ObjectId, ref: 'Employee' }],

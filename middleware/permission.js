@@ -27,8 +27,9 @@ async function loadPermissions(req) {
   if (u.isSuperAdmin) { req.permissions = {}; return req.permissions; }
   if (!u.tenantId) { req.permissions = {}; return req.permissions; }
   const Employee = req.db ? req.db.model('Employee') : require('../models/Employee');
-  const emp = await Employee.findById(u.id).select('roles accessRoleKeys tenantId').lean();
+  const emp = await Employee.findById(u.id).select('roles accessRoleKeys tenantId name department location managedDoers managedAssigners').lean();
   if (!emp || String(emp.tenantId) !== String(u.tenantId)) { req.permissions = {}; return req.permissions; }
+  req.actor = emp;
   const ta = await tenantAccess(u.tenantId);
   const keys = new Set(emp.accessRoleKeys || []);
   const custom = ta.accessRoles.filter((r) => keys.has(r.key));
@@ -41,6 +42,18 @@ const requirePermission = (key, minScope = 'self') => async (req, res, next) => 
   try {
     const perms = await loadPermissions(req);
     if (!can(perms, key, minScope)) return res.status(403).json({ message: 'You do not have permission to do this.' });
+    next();
+  } catch (err) {
+    console.error('[Permission]', err.message);
+    res.status(500).json({ message: 'Could not check permission.' });
+  }
+};
+
+// Lets a request through when the person holds at least one of the listed permissions.
+const requireAnyPermission = (keys, minScope = 'self') => async (req, res, next) => {
+  try {
+    const perms = await loadPermissions(req);
+    if (!keys.some((k) => can(perms, k, minScope))) return res.status(403).json({ message: 'You do not have permission to do this.' });
     next();
   } catch (err) {
     console.error('[Permission]', err.message);
@@ -68,4 +81,4 @@ const adminOfSameCompany = async (req, res, next) => {
   }
 };
 
-module.exports = { requirePermission, loadPermissions, invalidate, adminOfSameCompany };
+module.exports = { requirePermission, requireAnyPermission, loadPermissions, invalidate, adminOfSameCompany };

@@ -39,8 +39,9 @@ const taskController = require('../controllers/taskController');
 const tenantDbMiddleware = require('../middleware/tenantDb');
 const { authMiddleware, superAdminOnly, sameTenantOnly } = require('../middleware/auth');
 const subscriptionGuard = require('../middleware/subscriptionGuard');
-const { requirePermission, adminOfSameCompany } = require('../middleware/permission');
+const { requirePermission, requireAnyPermission, adminOfSameCompany } = require('../middleware/permission');
 const accessController = require('../controllers/accessController');
+const leaveController = require('../controllers/leaveController');
 
 
 // ─── PUBLIC ROUTES (no auth required) ────────────────────────────────────────
@@ -107,6 +108,24 @@ router.put('/access/roles/:key', authMiddleware, subscriptionGuard, tenantDbMidd
 router.delete('/access/roles/:key', authMiddleware, subscriptionGuard, tenantDbMiddleware, requirePermission('access.manage'), accessController.deleteRole);
 router.put('/access/assign', authMiddleware, subscriptionGuard, tenantDbMiddleware, requirePermission('access.manage'), accessController.assignRoles);
 router.put('/access/modules/:tenantId', authMiddleware, superAdminOnly, accessController.setModules);
+
+// Leave management
+const anyLeave = requireAnyPermission(['leave.apply', 'leave.view', 'leave.approve', 'leave.adjust', 'leave.configure']);
+router.get('/leave/types', authMiddleware, subscriptionGuard, tenantDbMiddleware, anyLeave, leaveController.listTypes);
+router.post('/leave/types', authMiddleware, subscriptionGuard, tenantDbMiddleware, requirePermission('leave.configure'), leaveController.createType);
+router.put('/leave/types/:id', authMiddleware, subscriptionGuard, tenantDbMiddleware, requirePermission('leave.configure'), leaveController.updateType);
+router.delete('/leave/types/:id', authMiddleware, subscriptionGuard, tenantDbMiddleware, requirePermission('leave.configure'), leaveController.deleteType);
+router.get('/leave/config', authMiddleware, subscriptionGuard, tenantDbMiddleware, anyLeave, leaveController.getConfig);
+router.put('/leave/config', authMiddleware, subscriptionGuard, tenantDbMiddleware, requirePermission('leave.configure'), leaveController.setConfig);
+router.get('/leave/balance', authMiddleware, subscriptionGuard, tenantDbMiddleware, requireAnyPermission(['leave.apply', 'leave.view']), leaveController.getBalance);
+router.post('/leave/requests', authMiddleware, subscriptionGuard, tenantDbMiddleware, requirePermission('leave.apply'), leaveController.createRequest);
+router.get('/leave/requests', authMiddleware, subscriptionGuard, tenantDbMiddleware, anyLeave, leaveController.listRequests);
+router.put('/leave/requests/:id/decision', authMiddleware, subscriptionGuard, tenantDbMiddleware, requirePermission('leave.approve'), leaveController.decideRequest);
+router.put('/leave/requests/:id/cancel', authMiddleware, subscriptionGuard, tenantDbMiddleware, requireAnyPermission(['leave.apply', 'leave.approve']), leaveController.cancelRequest);
+router.post('/leave/adjust', authMiddleware, subscriptionGuard, tenantDbMiddleware, requirePermission('leave.adjust'), leaveController.adjustBalance);
+router.get('/leave/calendar', authMiddleware, subscriptionGuard, tenantDbMiddleware, requirePermission('leave.view'), leaveController.calendar);
+router.get('/leave/people', authMiddleware, subscriptionGuard, tenantDbMiddleware, requireAnyPermission(['leave.configure', 'leave.adjust']), leaveController.listPeople);
+router.put('/leave/employees/:id/joining-date', authMiddleware, subscriptionGuard, tenantDbMiddleware, requirePermission('leave.configure'), leaveController.setJoiningDate);
 router.get('/authorized-staff/:id', authMiddleware, subscriptionGuard, tenantDbMiddleware, taskController.getAuthorizedStaff);
 
 // Mapping, branding & settings

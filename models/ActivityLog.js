@@ -26,6 +26,8 @@ const ActivityLogSchema = new mongoose.Schema({
       'employee_created', 'employee_updated', 'employee_deleted',
       // Access roles
       'role_saved', 'role_deleted', 'role_assigned',
+      // Leave
+      'leave_type_saved', 'leave_applied', 'leave_decided', 'leave_cancelled', 'leave_adjusted',
       // Chat
       'message_sent', 'announcement_created',
       // SuperAdmin

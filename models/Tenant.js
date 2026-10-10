@@ -47,6 +47,11 @@ const TenantSchema = new mongoose.Schema({
     leave:      { type: Boolean, default: false },
     payroll:    { type: Boolean, default: false }
   },
+  // Leave settings: month the leave year starts (1 = January ... 4 = April) and whether an approver may approve their own leave
+  leaveConfig: {
+    yearStartMonth:    { type: Number, default: 1, min: 1, max: 12 },
+    allowSelfApproval: { type: Boolean, default: false }
+  },
 
   // Review Meeting settings (all optional; defaults apply when nothing is saved)
   reviewConfig: {
