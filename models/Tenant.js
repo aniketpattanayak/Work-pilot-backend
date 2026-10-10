@@ -52,6 +52,17 @@ const TenantSchema = new mongoose.Schema({
     yearStartMonth:    { type: Number, default: 1, min: 1, max: 12 },
     allowSelfApproval: { type: Boolean, default: false }
   },
+  // Attendance settings: location rule, face check, default shift and day lengths
+  attendanceConfig: {
+    requireLocation:  { type: Boolean, default: false },
+    allowOutsideSite: { type: Boolean, default: true },
+    faceMode:         { type: String, enum: ['off', 'optional', 'required'], default: 'off' },
+    faceThreshold:    { type: Number, default: 0.5, min: 0.3, max: 0.7 },
+    defaultShiftId:   { type: mongoose.Schema.Types.ObjectId, default: null },
+    fullDayMinutes:   { type: Number, default: 480 },
+    halfDayMinutes:   { type: Number, default: 240 },
+    regularizeDays:   { type: Number, default: 31 }
+  },
 
   // Review Meeting settings (all optional; defaults apply when nothing is saved)
   reviewConfig: {

@@ -28,6 +28,10 @@ const ActivityLogSchema = new mongoose.Schema({
       'role_saved', 'role_deleted', 'role_assigned',
       // Leave
       'leave_type_saved', 'leave_applied', 'leave_decided', 'leave_cancelled', 'leave_adjusted',
+      // Attendance
+      'attendance_config_saved', 'attendance_shift_saved', 'attendance_shift_deleted', 'attendance_site_saved', 'attendance_site_deleted',
+      'attendance_assigned', 'attendance_regularization_applied', 'attendance_regularization_decided', 'attendance_punch_reviewed',
+      'attendance_manual_punch', 'attendance_face_enrolled', 'attendance_face_decided', 'attendance_face_deleted',
       // Chat
       'message_sent', 'announcement_created',
       // SuperAdmin

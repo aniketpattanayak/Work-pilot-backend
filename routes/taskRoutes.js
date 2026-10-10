@@ -42,6 +42,7 @@ const subscriptionGuard = require('../middleware/subscriptionGuard');
 const { requirePermission, requireAnyPermission, adminOfSameCompany } = require('../middleware/permission');
 const accessController = require('../controllers/accessController');
 const leaveController = require('../controllers/leaveController');
+const attendanceController = require('../controllers/attendanceController');
 
 
 // ─── PUBLIC ROUTES (no auth required) ────────────────────────────────────────
@@ -126,6 +127,37 @@ router.post('/leave/adjust', authMiddleware, subscriptionGuard, tenantDbMiddlewa
 router.get('/leave/calendar', authMiddleware, subscriptionGuard, tenantDbMiddleware, requirePermission('leave.view'), leaveController.calendar);
 router.get('/leave/people', authMiddleware, subscriptionGuard, tenantDbMiddleware, requireAnyPermission(['leave.configure', 'leave.adjust']), leaveController.listPeople);
 router.put('/leave/employees/:id/joining-date', authMiddleware, subscriptionGuard, tenantDbMiddleware, requirePermission('leave.configure'), leaveController.setJoiningDate);
+
+// Attendance
+const attBase = [authMiddleware, subscriptionGuard, tenantDbMiddleware];
+const anyAtt = requireAnyPermission(['attendance.view', 'attendance.punch', 'attendance.approve', 'attendance.edit', 'attendance.configure']);
+router.get('/attendance/config', ...attBase, anyAtt, attendanceController.getConfig);
+router.put('/attendance/config', ...attBase, requirePermission('attendance.configure'), attendanceController.setConfig);
+router.post('/attendance/shifts', ...attBase, requirePermission('attendance.configure'), attendanceController.createShift);
+router.put('/attendance/shifts/:id', ...attBase, requirePermission('attendance.configure'), attendanceController.updateShift);
+router.delete('/attendance/shifts/:id', ...attBase, requirePermission('attendance.configure'), attendanceController.deleteShift);
+router.post('/attendance/sites', ...attBase, requirePermission('attendance.configure'), attendanceController.createSite);
+router.put('/attendance/sites/:id', ...attBase, requirePermission('attendance.configure'), attendanceController.updateSite);
+router.delete('/attendance/sites/:id', ...attBase, requirePermission('attendance.configure'), attendanceController.deleteSite);
+router.get('/attendance/people', ...attBase, requireAnyPermission(['attendance.configure', 'attendance.edit']), attendanceController.listPeople);
+router.put('/attendance/assignments/:employeeId', ...attBase, requirePermission('attendance.configure'), attendanceController.setAssignment);
+router.get('/attendance/today', ...attBase, requirePermission('attendance.punch'), attendanceController.today);
+router.post('/attendance/punch', ...attBase, requirePermission('attendance.punch'), attendanceController.punch);
+router.get('/attendance/my', ...attBase, requireAnyPermission(['attendance.punch', 'attendance.view']), attendanceController.myMonth);
+router.get('/attendance/sheet', ...attBase, requirePermission('attendance.view'), attendanceController.sheet);
+router.get('/attendance/live', ...attBase, requirePermission('attendance.view'), attendanceController.live);
+router.post('/attendance/regularizations', ...attBase, requirePermission('attendance.punch'), attendanceController.createRegularization);
+router.get('/attendance/regularizations', ...attBase, anyAtt, attendanceController.listRegularizations);
+router.put('/attendance/regularizations/:id/decision', ...attBase, requirePermission('attendance.approve'), attendanceController.decideRegularization);
+router.put('/attendance/regularizations/:id/cancel', ...attBase, requirePermission('attendance.punch'), attendanceController.cancelRegularization);
+router.get('/attendance/review', ...attBase, requirePermission('attendance.approve'), attendanceController.listReview);
+router.put('/attendance/punches/:id/review', ...attBase, requirePermission('attendance.approve'), attendanceController.reviewPunch);
+router.post('/attendance/manual', ...attBase, requirePermission('attendance.edit'), attendanceController.manualPunch);
+router.get('/attendance/face/me', ...attBase, requirePermission('attendance.punch'), attendanceController.faceMe);
+router.post('/attendance/face/enrol', ...attBase, requirePermission('attendance.punch'), attendanceController.faceEnrol);
+router.get('/attendance/face/pending', ...attBase, requirePermission('attendance.approve'), attendanceController.facePending);
+router.put('/attendance/face/:employeeId/decision', ...attBase, requirePermission('attendance.approve'), attendanceController.faceDecide);
+router.delete('/attendance/face/:employeeId', ...attBase, anyAtt, attendanceController.faceDelete);
 router.get('/authorized-staff/:id', authMiddleware, subscriptionGuard, tenantDbMiddleware, taskController.getAuthorizedStaff);
 
 // Mapping, branding & settings
