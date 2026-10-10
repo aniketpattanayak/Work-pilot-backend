@@ -35,6 +35,10 @@ const ConversationSchema = new mongoose.Schema({
   // Unread counts per participant: { employeeId: count }
   unreadCounts: { type: Map, of: Number, default: {} },
 
+  // "Delete chat" hides the chat for that person only: they no longer see it or its older messages,
+  // but the messages stay for the other people and for the company's records.
+  deletedFor: [{ employeeId: { type: mongoose.Schema.Types.ObjectId, ref: 'Employee' }, at: { type: Date, default: Date.now }, _id: false }],
+
   isActive: { type: Boolean, default: true },
 }, { timestamps: true });
 

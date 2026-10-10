@@ -19,6 +19,7 @@ router.get ('/employees',                  authMiddleware, tenantDbMiddleware, c
 router.get ('/:conversationId/messages',   authMiddleware, tenantDbMiddleware, c.getMessages);
 router.post('/:conversationId/messages',   authMiddleware, tenantDbMiddleware, c.sendMessage);
 router.post('/:conversationId/read',       authMiddleware, tenantDbMiddleware, c.markRead);
+router.delete('/:conversationId',          authMiddleware, tenantDbMiddleware, c.deleteConversation);
 
 // File upload
 router.post('/upload',                     authMiddleware, upload.single('file'), c.uploadFile);

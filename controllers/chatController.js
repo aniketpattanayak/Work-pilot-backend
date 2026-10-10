@@ -30,6 +30,11 @@ async function loadAuthorizedConversation(ConversationModel, conversationId, ten
   });
 }
 
+const deletedAtFor = (conv, employeeId) => {
+  const d = (conv?.deletedFor || []).find(x => x.employeeId && x.employeeId.toString() === employeeId.toString());
+  return d?.at ? new Date(d.at) : null;
+};
+
 // ─── GET CONVERSATIONS ────────────────────────────────────────────────────────
 exports.getConversations = async (req, res) => {
   try {
@@ -37,7 +42,7 @@ exports.getConversations = async (req, res) => {
     const employeeId = req.user.id;
     const tenantId   = req.user.tenantId;
 
-    const conversations = await Conversation.find({
+    const allConversations = await Conversation.find({
       tenantId,
       isActive: true,
       $or: [
@@ -47,6 +52,14 @@ exports.getConversations = async (req, res) => {
     })
     .sort({ 'lastMessage.sentAt': -1, updatedAt: -1 })
     .lean();
+
+    // A chat the person deleted stays hidden until someone sends a newer message in it.
+    const conversations = allConversations.filter(c => {
+      const delAt = deletedAtFor(c, employeeId);
+      if (!delAt) return true;
+      const last = c.lastMessage?.sentAt ? new Date(c.lastMessage.sentAt) : null;
+      return !!last && last > delAt;
+    });
 
     const empIds = [...new Set(conversations.flatMap(c => c.participants || []).map(p => p.toString()))];
     const empDocs = await Employee.find({ _id: { $in: empIds } }).select('name role').lean();
@@ -105,7 +118,9 @@ exports.getOrCreateDM = async (req, res) => {
       conversation = conversation.toObject();
     }
 
-    res.json(conversation);
+    // Send the other person's name too, so the new chat is listed under their name straight away.
+    const otherDoc = await Employee.findOne({ _id: otherEmployeeId, tenantId }).select('name role').lean();
+    res.json({ ...conversation, displayName: otherDoc?.name || 'Direct Message', otherEmployee: otherDoc || null });
   } catch (err) {
     console.error('[Chat] getOrCreateDM error:', err.message);
     res.status(500).json({ message: 'Failed to get or create DM' });
@@ -195,7 +210,10 @@ exports.getMessages = async (req, res) => {
     const conversation = await loadAuthorizedConversation(Conversation, conversationId, tenantId, employeeId);
     if (!conversation) return res.status(403).json({ message: 'You do not have access to this conversation.' });
 
-    const messages = await Message.find({ conversationId })
+    const myDeletedAt = deletedAtFor(conversation, employeeId);
+    const msgFilter = { conversationId };
+    if (myDeletedAt) msgFilter.createdAt = { $gt: myDeletedAt };
+    const messages = await Message.find(msgFilter)
       .sort({ createdAt: -1 })
       .skip(skip)
       .limit(limit)
@@ -268,16 +286,48 @@ exports.sendMessage = async (req, res) => {
     const io = req.app.get('io');
     if (io) {
       io.to(`conv_${conversationId}`).emit('new_message', message);
-      io.to(`tenant_${tenantId}`).emit('conversation_updated', {
-        conversationId,
-        lastMessage: updateObj,
-      });
+      const updatePayload = { conversationId, lastMessage: updateObj };
+      if (conversation.type === 'announcement') {
+        io.to(`tenant_${tenantId}`).emit('conversation_updated', updatePayload);
+      } else {
+        participants.forEach(pid => io.to(`employee_${pid}`).emit('conversation_updated', updatePayload));
+      }
     }
 
     res.json(message);
   } catch (err) {
     console.error('[Chat] sendMessage error:', err.message);
     res.status(500).json({ message: 'Failed to send message' });
+  }
+};
+
+// ─── DELETE CHAT (for the person who asks) ────────────────────────────────────
+exports.deleteConversation = async (req, res) => {
+  try {
+    const { Conversation } = getChatModels(req);
+    const { conversationId } = req.params;
+    const tenantId   = req.user.tenantId;
+    const employeeId = req.user.id;
+
+    const conversation = await loadAuthorizedConversation(Conversation, conversationId, tenantId, employeeId);
+    if (!conversation) return res.status(403).json({ message: 'You do not have access to this conversation.' });
+
+    if (conversation.type === 'announcement') {
+      const isAdmin = req.user.isSuperAdmin || req.user.role === 'Admin' || (req.user.roles || []).includes('Admin');
+      if (!isAdmin) return res.status(403).json({ message: 'Only an admin can delete an announcement.' });
+      await Conversation.updateOne({ _id: conversationId, tenantId }, { $set: { isActive: false } });
+      return res.json({ message: 'Announcement deleted' });
+    }
+
+    await Conversation.updateOne({ _id: conversationId, tenantId }, { $pull: { deletedFor: { employeeId } } });
+    await Conversation.updateOne({ _id: conversationId, tenantId }, {
+      $push: { deletedFor: { employeeId, at: new Date() } },
+      $set:  { [`unreadCounts.${employeeId}`]: 0 },
+    });
+    res.json({ message: 'Chat deleted' });
+  } catch (err) {
+    console.error('[Chat] deleteConversation error:', err.message);
+    res.status(500).json({ message: 'Failed to delete chat' });
   }
 };
 
