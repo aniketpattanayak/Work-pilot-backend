@@ -1675,8 +1675,49 @@ exports.handleRevision = async (req, res) => {
       if (task.deadline && new Date() > new Date(task.deadline)) {
         return res.status(400).json({ message: "The deadline has passed, so a revision can no longer be requested for this task." });
       }
-      if ((task.history || []).some(h => h.action === 'Deadline Approved')) {
-        return res.status(400).json({ message: "A revision was already approved for this task, so another revision cannot be requested." });
+      if ((task.history || []).some(h => h.action === 'Deadline Approved' || h.action === 'Deadline Revised')) {
+        return res.status(400).json({ message: "The deadline of this task was already changed once, so it cannot be changed again." });
+      }
+      if (task.isRevisionAllowed === false) {
+        return res.status(400).json({ message: "The person who gave this task did not allow deadline changes." });
+      }
+
+      // The assigner set a day limit: the doer picks a new date inside it and it is applied at once.
+      const maxExt = Number(task.maxExtensionDays) || 0;
+      if (maxExt > 0) {
+        const IST = 330 * 60 * 1000;
+        const dayOf = (d) => Math.floor((new Date(d).getTime() + IST) / 86400000);
+        if (!proposedDeadline || isNaN(new Date(proposedDeadline).getTime())) {
+          return res.status(400).json({ message: "Please choose the new date." });
+        }
+        const k = dayOf(proposedDeadline) - dayOf(task.deadline);
+        if (!Number.isInteger(k) || k < 1 || k > maxExt) {
+          return res.status(400).json({ message: `You can move the deadline by 1 to ${maxExt} day(s) only.` });
+        }
+        const reasonText = String(remarks || '').trim();
+        if (!reasonText) return res.status(400).json({ message: "Please write the reason." });
+        const oldDeadline = task.deadline;
+        const newDeadline2 = new Date(new Date(oldDeadline).getTime() + k * 86400000); // same time of day
+        const f = (d) => moment(d).utcOffset(330).format('DD MMM YYYY');
+        task.originalDeadline = task.originalDeadline || oldDeadline;
+        task.deadline = newDeadline2;
+        task.revisedAt = new Date();
+        task.status = 'Accepted';
+        task.proposedDeadline = null;
+        task.remarks = '';
+        task.history.push({
+          action: "Deadline Revised",
+          performedBy: req.user?.id || task.doerId,
+          remarks: `${reasonText} | Deadline moved ${f(oldDeadline)} -> ${f(newDeadline2)} (+${k} day${k > 1 ? 's' : ''}, limit ${maxExt})`,
+          timestamp: new Date()
+        });
+        await task.save();
+        try {
+          const text = `📅 *Deadline Changed*\n\n*Task:* ${task.title}\n*Doer:* ${task.doerId?.name || 'Staff'}\n*Old deadline:* ${f(oldDeadline)}\n*New deadline:* ${f(newDeadline2)} (+${k} day${k > 1 ? 's' : ''})\n*Reason:* ${reasonText}\n\n*Login Link:* ${loginLink}`;
+          if (task.assignerId?.whatsappNumber) await notifyTenant(task.tenantId, task.assignerId.whatsappNumber, text);
+          if (task.coordinatorId?.whatsappNumber) await notifyTenant(task.tenantId, task.coordinatorId.whatsappNumber, text);
+        } catch (waErr) { console.error("Deadline change notify error:", waErr.message); }
+        return res.status(200).json({ message: "Deadline updated", task });
       }
 
       task.status = 'Revision Requested';
@@ -2108,6 +2149,14 @@ exports.createTask = async (req, res) => {
       try { taskData.coworkers = JSON.parse(taskData.coworkers); } catch (e) { taskData.coworkers = []; }
     }
 
+    // Deadline change: the assigner chooses how many days the doer may extend (1 - 90).
+    {
+      const allowRev = !(taskData.isRevisionAllowed === false || taskData.isRevisionAllowed === 'false');
+      let ext = parseInt(taskData.maxExtensionDays, 10);
+      if (!allowRev || !Number.isInteger(ext) || ext < 1) ext = 0;
+      taskData.maxExtensionDays = Math.min(ext, 90);
+    }
+
     // --- SAVE TO DATABASE ---
     // Tasks are auto-accepted on creation: the doer no longer has to press "Accept".
     taskData.status = 'Accepted';
@@ -2385,6 +2434,28 @@ exports.getChecklistTasks = async (req, res) => {
         const nextVal = getNextValidDate(instanceDateObj);
         if (!nextVal || moment(nextVal).isSameOrBefore(instancePointer)) break;
         instancePointer = moment(nextVal).startOf('day');
+      }
+    }
+
+    // Completed runs (My Tasks asks with ?includeDone=1): the last 90 days of this person's own checklist.
+    if (String(req.query.includeDone) === '1') {
+      const since = moment().subtract(Math.min(366, Math.max(1, parseInt(req.query.days, 10) || 90)), 'days').startOf('day');
+      const seen = new Set();
+      for (const task of tasks) {
+        if (!task.doerId || task.doerId._id.toString() !== String(doerId)) continue;
+        const { history: hist, ...rest } = task.toObject();
+        (hist || []).forEach((h) => {
+          if (h.action !== 'Completed' && h.action !== 'Administrative Completion') return;
+          if (!h.timestamp || moment(h.timestamp).isBefore(since)) return;
+          const inst = moment(h.instanceDate || h.timestamp).startOf('day');
+          const key = task._id + '-' + inst.format('YYYY-MM-DD');
+          if (seen.has(key)) return;
+          seen.add(key);
+          allVisibleInstances.push({
+            ...rest, instanceDate: inst.toDate(), isBacklog: false, isBuddyTask: false, isDone: true,
+            completedAt: h.timestamp, originalOwnerName: null
+          });
+        });
       }
     }
 
