@@ -39,6 +39,8 @@ const taskController = require('../controllers/taskController');
 const tenantDbMiddleware = require('../middleware/tenantDb');
 const { authMiddleware, superAdminOnly, sameTenantOnly } = require('../middleware/auth');
 const subscriptionGuard = require('../middleware/subscriptionGuard');
+const { requirePermission, adminOfSameCompany } = require('../middleware/permission');
+const accessController = require('../controllers/accessController');
 
 
 // ─── PUBLIC ROUTES (no auth required) ────────────────────────────────────────
@@ -89,12 +91,22 @@ router.get('/employees', authMiddleware, subscriptionGuard, tenantDbMiddleware, 
     res.status(500).json({ message: 'Failed to fetch employees', error: err.message });
   }
 });
-router.post('/add-employee',   authMiddleware, subscriptionGuard, tenantDbMiddleware, addEmployee);
-router.post('/bulk-employees', authMiddleware, subscriptionGuard, tenantDbMiddleware, bulkAddEmployees);
+router.post('/add-employee',   authMiddleware, subscriptionGuard, tenantDbMiddleware, adminOfSameCompany, addEmployee);
+router.post('/bulk-employees', authMiddleware, subscriptionGuard, tenantDbMiddleware, adminOfSameCompany, bulkAddEmployees);
 router.post('/bulk-tasks',     authMiddleware, subscriptionGuard, tenantDbMiddleware, bulkAddTasks);
 router.post('/bulk-checklist', authMiddleware, subscriptionGuard, tenantDbMiddleware, bulkAddChecklists);
-router.put('/employees/:id', authMiddleware, subscriptionGuard, tenantDbMiddleware, updateEmployee);
-router.delete('/employees/:id', authMiddleware, subscriptionGuard, tenantDbMiddleware, deleteEmployee);
+router.put('/employees/:id', authMiddleware, subscriptionGuard, tenantDbMiddleware, adminOfSameCompany, updateEmployee);
+router.delete('/employees/:id', authMiddleware, subscriptionGuard, tenantDbMiddleware, adminOfSameCompany, deleteEmployee);
+
+// Custom roles and permissions (attendance / leave / payroll)
+router.get('/access/catalog', authMiddleware, subscriptionGuard, accessController.getCatalog);
+router.get('/access/me', authMiddleware, subscriptionGuard, tenantDbMiddleware, accessController.getMyAccess);
+router.get('/access/roles', authMiddleware, subscriptionGuard, tenantDbMiddleware, requirePermission('access.manage'), accessController.listRoles);
+router.post('/access/roles', authMiddleware, subscriptionGuard, tenantDbMiddleware, requirePermission('access.manage'), accessController.createRole);
+router.put('/access/roles/:key', authMiddleware, subscriptionGuard, tenantDbMiddleware, requirePermission('access.manage'), accessController.updateRole);
+router.delete('/access/roles/:key', authMiddleware, subscriptionGuard, tenantDbMiddleware, requirePermission('access.manage'), accessController.deleteRole);
+router.put('/access/assign', authMiddleware, subscriptionGuard, tenantDbMiddleware, requirePermission('access.manage'), accessController.assignRoles);
+router.put('/access/modules/:tenantId', authMiddleware, superAdminOnly, accessController.setModules);
 router.get('/authorized-staff/:id', authMiddleware, subscriptionGuard, tenantDbMiddleware, taskController.getAuthorizedStaff);
 
 // Mapping, branding & settings
