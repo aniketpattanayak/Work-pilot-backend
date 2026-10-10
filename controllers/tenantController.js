@@ -233,7 +233,13 @@ function sanitizeReviewConfig(rc) {
   const orange = num(rc.thresholds && rc.thresholds.orange, 0, 100);
   if (red === null || orange === null) return { error: 'Colour limits must be numbers from 0 to 100.' };
   if (orange > red) return { error: 'The orange limit cannot be higher than the red limit.' };
-  return { value: { period: rc.period, weights, overrides, thresholds: { red, orange } } };
+  const db = rc.driftBands || {};
+  const dg = num(db.greenMax === undefined ? 10 : db.greenMax, 0, 100000);
+  const dy = num(db.yellowMax === undefined ? 50 : db.yellowMax, 0, 100000);
+  const dor = num(db.orangeMax === undefined ? 100 : db.orangeMax, 0, 100000);
+  if (dg === null || dy === null || dor === null || ![dg, dy, dor].every(Number.isInteger)) return { error: 'Drift day limits must be whole numbers of days.' };
+  if (!(dg < dy && dy < dor)) return { error: 'Drift limits must go up: green end < yellow end < orange end.' };
+  return { value: { period: rc.period, weights, overrides, thresholds: { red, orange }, driftBands: { greenMax: dg, yellowMax: dy, orangeMax: dor } } };
 }
 
 exports.updateSettings = async (req, res) => {

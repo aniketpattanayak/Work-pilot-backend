@@ -69,6 +69,11 @@ router.post('/settings', authMiddleware, subscriptionGuard, async (req, res) => 
 // 3. Manual CSV download
 router.get('/download/:tenantId', authMiddleware, subscriptionGuard, tenantDbMiddleware, sameTenantOnly, reportController.manualDownload);
 
+// 3b. Employee activity log (who did what, with time) - Admin only; JSON for the screen, Excel to download
+const activityReport = require('../controllers/activityReport');
+router.get('/activity/:tenantId', authMiddleware, subscriptionGuard, tenantDbMiddleware, sameTenantOnly, activityReport.getActivityLog);
+router.get('/activity/:tenantId/download', authMiddleware, subscriptionGuard, tenantDbMiddleware, sameTenantOnly, activityReport.downloadActivityLog);
+
 // 4. Send test email report
 router.post('/send-test', authMiddleware, subscriptionGuard, tenantDbMiddleware, async (req, res) => {
   try {

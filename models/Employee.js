@@ -13,6 +13,14 @@ const EmployeeSchema = new mongoose.Schema({
   email:           { type: String, required: true },
   password:        { type: String, required: true },
   weeklyLateTarget:{ type: Number, default: 20 },
+  // Every change of the late target (newest last): what it was before, what it became, when and by whom.
+  lateTargetHistory: [{
+    _id: false,
+    target:   { type: Number },
+    previous: { type: Number },
+    setAt:    { type: Date, default: Date.now },
+    setBy:    { type: mongoose.Schema.Types.ObjectId, ref: 'Employee' }
+  }],
 
   roles: {
     type: [String],

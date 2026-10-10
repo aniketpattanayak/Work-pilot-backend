@@ -1259,7 +1259,12 @@ exports.updateEmployeeTarget = async (req, res) => {
     if (!req.user?.isSuperAdmin && targetEmp.tenantId && String(targetEmp.tenantId) !== String(req.user?.tenantId)) {
       return res.status(403).json({ message: "Forbidden." });
     }
-    await Employee.findByIdAndUpdate(employeeId, { weeklyLateTarget: targetValue });
+    const prevTarget = await Employee.findById(employeeId).select('weeklyLateTarget');
+    const before = prevTarget && Number.isFinite(prevTarget.weeklyLateTarget) ? prevTarget.weeklyLateTarget : 20;
+    await Employee.findByIdAndUpdate(employeeId, {
+      weeklyLateTarget: targetValue,
+      $push: { lateTargetHistory: { $each: [{ target: targetValue, previous: before, setAt: new Date(), setBy: req.user && mongoose.Types.ObjectId.isValid(req.user.id) ? req.user.id : undefined }], $slice: -200 } }
+    });
     res.status(200).json({ message: "Target synchronized." });
   } catch (error) {
     res.status(500).json({ message: "Update failed" });
@@ -2476,7 +2481,20 @@ const readReviewConfig = (raw) => {
   let red = n(rc.thresholds?.red, 20, 0, 100);
   let orange = n(rc.thresholds?.orange, 10, 0, 100);
   if (orange > red) orange = red;
-  return { period: REVIEW_PERIODS.includes(rc.period) ? rc.period : 'Monthly', weights, overrides, thresholds: { red, orange } };
+  const dbn = rc.driftBands || {};
+  let g = n(dbn.greenMax, 10, 0, 100000); let y = n(dbn.yellowMax, 50, 0, 100000); let o = n(dbn.orangeMax, 100, 0, 100000);
+  if (!(g < y && y < o)) { g = 10; y = 50; o = 100; }
+  return { period: REVIEW_PERIODS.includes(rc.period) ? rc.period : 'Monthly', weights, overrides, thresholds: { red, orange }, driftBands: { greenMax: g, yellowMax: y, orangeMax: o } };
+};
+
+// The late target that was in force at a given moment (from the saved change history).
+const targetAt = (emp, when) => {
+  const hist = (Array.isArray(emp.lateTargetHistory) ? emp.lateTargetHistory : []).filter((h) => h && h.setAt).sort((a, b) => new Date(a.setAt) - new Date(b.setAt));
+  if (!hist.length) return { target: Number.isFinite(emp.weeklyLateTarget) ? emp.weeklyLateTarget : 20, source: 'current' };
+  let found = null;
+  hist.forEach((h) => { if (new Date(h.setAt).getTime() <= when.getTime()) found = h; });
+  if (found) return { target: found.target, source: 'set' };
+  return { target: Number.isFinite(hist[0].previous) ? hist[0].previous : 20, source: 'set' };
 };
 
 // Most specific rule wins: location + department  >  location only  >  department only  >  company default.
@@ -2696,7 +2714,7 @@ exports.getReviewAnalytics = async (req, res) => {
     const rc = reviewContext(view, date, custom);
 
     const [employees, delegations, checklists, fmsInstances] = await Promise.all([
-      Employee.find({ tenantId }).select('name department location weeklyLateTarget'),
+      Employee.find({ tenantId }).select('name department location weeklyLateTarget lateTargetHistory'),
       DelegationTask.find({ tenantId, deadline: { $gte: rc.startDate, $lte: rc.endDate } }),
       ChecklistTask.find({ tenantId, status: 'Active' }),
       FlowInstance.find({ tenantId, $or: [
@@ -2708,9 +2726,42 @@ exports.getReviewAnalytics = async (req, res) => {
     const ctx = { ...rc, delegations, checklists, fmsInstances, cfg };
     const report = employees.map(emp => buildEmployeeReviewStats(emp, ctx));
 
+    // The period just before this one: what each person's late target was then, and what they actually did.
+    try {
+      const dayMs = 24 * 60 * 60 * 1000;
+      let prev;
+      if (custom) {
+        const len = rc.endDate.getTime() - rc.startDate.getTime() + 1;
+        prev = { startDate: new Date(rc.startDate.getTime() - len), endDate: new Date(rc.startDate.getTime() - 1) };
+      } else {
+        prev = resolveReviewPeriod(view, new Date(rc.startDate.getTime() - 1));
+      }
+      const prc = reviewContext(view, date, prev);
+      const [pDelegations, pFms] = await Promise.all([
+        DelegationTask.find({ tenantId, deadline: { $gte: prev.startDate, $lte: prev.endDate } }),
+        FlowInstance.find({ tenantId, status: 'completed', completedAt: { $gte: prev.startDate, $lte: prev.endDate } }).lean()
+      ]);
+      const pctx = { ...prc, delegations: pDelegations, checklists, fmsInstances: pFms, cfg };
+      const prevName = reviewPeriodName(view, prev.startDate, prev.endDate);
+      const empById = new Map(employees.map((e) => [String(e._id), e]));
+      report.forEach((row) => {
+        const emp = empById.get(String(row.employeeId));
+        if (!emp) return;
+        const ps = buildEmployeeReviewStats(emp, pctx);
+        const t = targetAt(emp, prev.endDate);
+        row.previous = {
+          periodName: prevName, periodStart: prev.startDate.toISOString(), periodEnd: prev.endDate.toISOString(),
+          target: t.target, targetSource: t.source,
+          latePct: ps.overall.latePct, notDonePct: ps.overall.notDonePct, hasTasks: ps.overall.hasTasks
+        };
+      });
+    } catch (prevErr) {
+      console.error('Previous period calculation skipped:', prevErr.message);
+    }
+
     res.status(200).json({
       view, startDate: rc.startDate, endDate: rc.endDate, report,
-      config: { period: cfg.period, thresholds: cfg.thresholds, weights: cfg.weights }
+      config: { period: cfg.period, thresholds: cfg.thresholds, weights: cfg.weights, driftBands: cfg.driftBands }
     });
   } catch (error) {
     console.error("Analytics Calculation Error:", error);

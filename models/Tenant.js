@@ -51,6 +51,12 @@ const TenantSchema = new mongoose.Schema({
     thresholds: {
       red:    { type: Number, default: 20 },
       orange: { type: Number, default: 10 }
+    },
+    // Drift column colours (days): 0..greenMax green, up to yellowMax yellow, up to orangeMax orange, above = red
+    driftBands: {
+      greenMax:  { type: Number, default: 10 },
+      yellowMax: { type: Number, default: 50 },
+      orangeMax: { type: Number, default: 100 }
     }
   },
 
