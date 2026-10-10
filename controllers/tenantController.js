@@ -39,8 +39,8 @@ exports.getEmployeeList = async (req, res) => {
 
     const [employees, total] = await Promise.all([
       Employee.find({ tenantId })
-        .populate('managedDoers',    'name role department')
-        .populate('managedAssigners','name role department')
+        .populate('managedDoers',    'name role roles department location whatsappNumber')
+        .populate('managedAssigners','name role roles department location whatsappNumber')
         .select('-password')
         .sort({ createdAt: -1 })
         .skip(skip)
