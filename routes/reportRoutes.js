@@ -70,7 +70,7 @@ router.post('/settings', authMiddleware, subscriptionGuard, async (req, res) => 
 router.get('/download/:tenantId', authMiddleware, subscriptionGuard, tenantDbMiddleware, sameTenantOnly, reportController.manualDownload);
 
 // 4. Send test email report
-router.post('/send-test', authMiddleware, subscriptionGuard, async (req, res) => {
+router.post('/send-test', authMiddleware, subscriptionGuard, tenantDbMiddleware, async (req, res) => {
   try {
     const { tenantId } = req.body;
 
@@ -84,7 +84,7 @@ router.post('/send-test', authMiddleware, subscriptionGuard, async (req, res) =>
       return res.status(400).json({ message: 'No admin email saved for this factory.' });
     }
 
-    const content = await reportController.generateDetailedReport(tenantId, 7);
+    const content = await reportController.generateDetailedReport(tenantId, 7, req.db || null);
     const sendReportEmail = require('../utils/emailService');
     const success = await sendReportEmail(
       tenant.reportEmail,

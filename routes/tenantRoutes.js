@@ -48,7 +48,8 @@ router.put('/update-branding', authMiddleware, subscriptionGuard, ...useUpload(_
 router.put('/update-settings', authMiddleware, subscriptionGuard, updateSettings);
 router.get('/settings/:tenantId', authMiddleware, subscriptionGuard, sameTenantOnly, async (req, res) => {
   try {
-    const tenant = await Tenant.findById(req.params.tenantId);
+    // never send the password hash, the WhatsApp key or the database address to the browser
+    const tenant = await Tenant.findById(req.params.tenantId).select('-password -whatsappConfig.apiKey -superAdmin.customMongoUri -superAdmin.customWhatsappKey');
     if (!tenant) return res.status(404).json({ message: 'Tenant not found' });
     res.status(200).json(tenant);
   } catch (err) {

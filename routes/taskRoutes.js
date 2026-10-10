@@ -106,7 +106,8 @@ router.put('/assign-coordinator', authMiddleware, subscriptionGuard, tenantDbMid
 // Settings fetch
 router.get('/settings/:tenantId', authMiddleware, subscriptionGuard, tenantDbMiddleware, sameTenantOnly, async (req, res) => {
   try {
-    const tenant = await Tenant.findById(req.params.tenantId);
+    // never send the password hash, the WhatsApp key or the database address to the browser
+    const tenant = await Tenant.findById(req.params.tenantId).select('-password -whatsappConfig.apiKey -superAdmin.customMongoUri -superAdmin.customWhatsappKey');
     if (!tenant) return res.status(404).json({ message: 'Tenant not found' });
     res.status(200).json(tenant);
   } catch (err) {

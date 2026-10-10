@@ -285,7 +285,10 @@ exports.sendMessage = async (req, res) => {
 
     const io = req.app.get('io');
     if (io) {
-      io.to(`conv_${conversationId}`).emit('new_message', message);
+      // Also deliver to every other participant's personal room, so people who have not opened this chat still get it live
+      let room = io.to(`conv_${conversationId}`);
+      if (conversation.type !== 'announcement') others.forEach((pid) => { room = room.to(`employee_${pid}`); });
+      room.emit('new_message', message);
       const updatePayload = { conversationId, lastMessage: updateObj };
       if (conversation.type === 'announcement') {
         io.to(`tenant_${tenantId}`).emit('conversation_updated', updatePayload);
@@ -413,11 +416,9 @@ exports.uploadFile = async (req, res) => {
   try {
     if (!req.file) return res.status(400).json({ message: 'No file uploaded' });
 
-    const s3Uploader = require('../utils/s3Uploader');
-    const result = await s3Uploader.uploadFile(req.file);
-
+    // The shared uploader (S3 or local disk) has already stored the file and set its address
     res.json({
-      fileUrl:  result.url || result.Location,
+      fileUrl:  req.file.location || req.file.path,
       fileName: req.file.originalname,
       fileType: req.file.mimetype,
     });

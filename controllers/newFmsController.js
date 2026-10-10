@@ -342,19 +342,28 @@ exports.completeStep = async (req, res) => {
     const instance = await FlowInstance.findById(instanceId);
     if (!instance) return res.status(404).json({ message: 'Instance not found' });
 
-    // Security: employee can only complete their own assigned step
-    if (instance.activeStep?.assignedToId &&
-        instance.activeStep.assignedToId !== employeeId &&
+    // Who is pressing the button (the JWT has no name, so read it from the company records)
+    let performer = null;
+    try { performer = await Employee.findById(employeeId).select('name managedDoers').lean(); } catch (e) { performer = null; }
+    const performerName = performer?.name || employeeName;
+
+    // Security: the assigned person, an Admin, or the coordinator of the assigned person can complete the step
+    const assignedTo = instance.activeStep?.assignedToId;
+    if (assignedTo &&
+        String(assignedTo) !== String(employeeId) &&
         !req.user?.isSuperAdmin &&
         !req.user?.roles?.includes('Admin')) {
-      return res.status(403).json({ message: 'This step is not assigned to you' });
+      const coordinatesAssignee = (performer?.managedDoers || []).some(d => String(d) === String(assignedTo));
+      if (!coordinatesAssignee) {
+        return res.status(403).json({ message: 'This step is not assigned to you, and you are not the coordinator of the person it is assigned to.' });
+      }
     }
 
     const template = await FlowTemplate.findById(instance.templateId);
     if (!template) return res.status(404).json({ message: 'Template not found' });
 
     const { instance: updated, next } = await completeStep(
-      instanceId, employeeId, employeeName, decision, inputs || {}, template
+      instanceId, employeeId, performerName, decision, inputs || {}, template
     );
 
     res.json({

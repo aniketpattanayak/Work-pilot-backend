@@ -6,8 +6,6 @@ const jwt = require('jsonwebtoken');
 const DelegationTask = require('../models/DelegationTask');
 const ChecklistTask = require('../models/ChecklistTask');
 const { notifyTenant } = require('../utils/notify');
-const { calculateNextDate } = require('../utils/scheduler');
-const { getModels: getTenantModels } = require('../utils/getModels');
 
 
 
@@ -39,8 +37,8 @@ exports.getEmployeeList = async (req, res) => {
 
     const [employees, total] = await Promise.all([
       Employee.find({ tenantId })
-        .populate('managedDoers',    'name role roles department location whatsappNumber')
-        .populate('managedAssigners','name role roles department location whatsappNumber')
+        .populate('managedDoers',    'name role department')
+        .populate('managedAssigners','name role department')
         .select('-password')
         .sort({ createdAt: -1 })
         .skip(skip)
@@ -196,46 +194,6 @@ exports.getCompanyOverview = async (req, res) => {
     });
   }
 };
-// Review Meeting settings: strict validation (returns { value } or { error })
-const REVIEW_PERIODS = ['Daily', 'Weekly', 'TwiceMonthly', 'Monthly', 'Quarterly'];
-function sanitizeReviewConfig(rc) {
-  if (!rc || typeof rc !== 'object' || Array.isArray(rc)) return { error: 'Review settings are not valid.' };
-  const num = (v, min, max) => {
-    if (v === '' || v === null || typeof v === 'boolean') return null;
-    const n = Number(v);
-    return Number.isFinite(n) && n >= min && n <= max ? n : null;
-  };
-  if (!REVIEW_PERIODS.includes(rc.period)) return { error: 'Choose a valid review period.' };
-  const readWeights = (o) => {
-    const w = { delegation: num(o && o.delegation, 0, 1000), checklist: num(o && o.checklist, 0, 1000), fms: num(o && o.fms, 0, 1000) };
-    if (w.delegation === null || w.checklist === null || w.fms === null) return null;
-    if (w.delegation + w.checklist + w.fms <= 0) return null;
-    return w;
-  };
-  const weights = readWeights(rc.weights);
-  if (!weights) return { error: 'Weightage must be numbers from 0 to 1000, and at least one must be above 0.' };
-  const rows = Array.isArray(rc.overrides) ? rc.overrides : [];
-  if (rows.length > 200) return { error: 'Too many weightage rules (max 200).' };
-  const seen = new Set(); const overrides = [];
-  for (const r of rows) {
-    const loc = typeof (r && r.location) === 'string' ? r.location.trim().replace(/\s+/g, ' ') : '';
-    const dep = typeof (r && r.department) === 'string' ? r.department.trim().replace(/\s+/g, ' ') : '';
-    if (loc.length > 60 || dep.length > 60) return { error: 'Location / department names must be under 60 characters.' };
-    if (!loc && !dep) return { error: 'Each weightage rule needs a location, a department, or both.' };
-    const w = readWeights(r);
-    if (!w) return { error: 'Each weightage rule needs numbers from 0 to 1000, with at least one above 0.' };
-    const key = loc.toLowerCase() + '|' + dep.toLowerCase();
-    if (seen.has(key)) return { error: 'Two weightage rules are for the same location and department.' };
-    seen.add(key);
-    overrides.push({ location: loc, department: dep, ...w });
-  }
-  const red = num(rc.thresholds && rc.thresholds.red, 0, 100);
-  const orange = num(rc.thresholds && rc.thresholds.orange, 0, 100);
-  if (red === null || orange === null) return { error: 'Colour limits must be numbers from 0 to 100.' };
-  if (orange > red) return { error: 'The orange limit cannot be higher than the red limit.' };
-  return { value: { period: rc.period, weights, overrides, thresholds: { red, orange } } };
-}
-
 exports.updateSettings = async (req, res) => {
   try {
     const { Tenant, Employee, DelegationTask, ChecklistTask } = getModels(req);
@@ -247,67 +205,8 @@ exports.updateSettings = async (req, res) => {
       officeHours,
       holidays,
       badgeLibrary,
-      weekends,
-      sectors,
-      locations,
-      reviewConfig
+      weekends
     } = req.body;
-
-    // Only the company's own Admin (or the platform SuperAdmin) may change company settings
-    {
-      const callerRoles0 = Array.isArray(req.user?.roles) ? req.user.roles : [];
-      const isAdminCaller0 = req.user?.isSuperAdmin || callerRoles0.includes('Admin');
-      if (!isAdminCaller0 || (!req.user?.isSuperAdmin && String(tenantId) !== String(req.user?.tenantId))) {
-        return res.status(403).json({ message: 'Only your company Admin can change these settings.' });
-      }
-    }
-
-    // Masters: Sector / Department and Location lists (company Admin only)
-    let masterSet = {};
-    if (sectors !== undefined || locations !== undefined) {
-      const callerRoles = Array.isArray(req.user?.roles) ? req.user.roles : [];
-      const isAdminCaller = req.user?.isSuperAdmin || callerRoles.includes('Admin');
-      if (!isAdminCaller || (!req.user?.isSuperAdmin && String(tenantId) !== String(req.user?.tenantId))) {
-        return res.status(403).json({ message: 'Only your company Admin can change sectors and locations.' });
-      }
-      const cleanList = (arr) => {
-        if (!Array.isArray(arr)) return null;
-        const seen = new Set(); const out = [];
-        for (const v of arr) {
-          if (typeof v !== 'string') return null;
-          const t = v.trim().replace(/\s+/g, ' ');
-          if (!t) continue;
-          if (t.length > 60) return null;
-          const k = t.toLowerCase();
-          if (seen.has(k)) continue;
-          seen.add(k); out.push(t);
-        }
-        return out.length <= 200 ? out : null;
-      };
-      if (sectors !== undefined) {
-        const c = cleanList(sectors);
-        if (!c) return res.status(400).json({ message: 'Sectors must be a list of names (max 60 characters each).' });
-        masterSet.sectors = c;
-      }
-      if (locations !== undefined) {
-        const c = cleanList(locations);
-        if (!c) return res.status(400).json({ message: 'Locations must be a list of names (max 60 characters each).' });
-        masterSet.locations = c;
-      }
-    }
-
-    // Review Meeting settings (company Admin only)
-    let reviewSet = {};
-    if (reviewConfig !== undefined) {
-      const callerRoles2 = Array.isArray(req.user?.roles) ? req.user.roles : [];
-      const isAdminCaller2 = req.user?.isSuperAdmin || callerRoles2.includes('Admin');
-      if (!isAdminCaller2 || (!req.user?.isSuperAdmin && String(tenantId) !== String(req.user?.tenantId))) {
-        return res.status(403).json({ message: 'Only your company Admin can change the review meeting settings.' });
-      }
-      const rcResult = sanitizeReviewConfig(reviewConfig);
-      if (rcResult.error) return res.status(400).json({ message: rcResult.error });
-      reviewSet.reviewConfig = rcResult.value;
-    }
 
     // 2. Update the Tenant document in MongoDB
     // The { new: true } option is CRITICAL so it returns the SAVED data
@@ -319,9 +218,7 @@ exports.updateSettings = async (req, res) => {
           pointSettings,  // Saved from Phase 2
           officeHours,    // Foundation Setup
           holidays,       // Foundation Setup
-          weekends,        // NEW: Persisting the custom weekend array
-          ...masterSet,    // sectors / locations (only when sent)
-          ...reviewSet     // review meeting settings (only when sent)
+          weekends        // NEW: Persisting the custom weekend array
         }
       },
       { new: true, runValidators: true }
@@ -369,7 +266,7 @@ exports.addEmployee = async (req, res) => {
     const { Tenant, Employee, DelegationTask, ChecklistTask } = getModels(req);
     const {
       tenantId, name, email, department, whatsappNumber,
-      roles, password, managedDoers, managedAssigners, workOnSunday, location,
+      roles, password, managedDoers, managedAssigners, workOnSunday,
     } = req.body;
 
     // 0. Check email uniqueness within this tenant
@@ -386,7 +283,6 @@ exports.addEmployee = async (req, res) => {
     const newEmployee = new Employee({
       tenantId, name, email, department, whatsappNumber,
       workOnSunday: workOnSunday || false,
-      location: typeof location === 'string' ? location.trim().slice(0, 60) : undefined,
       roles: (Array.isArray(roles) && roles.length > 0) ? roles : ['Doer'],
       password: hashedPassword,
       managedDoers: managedDoers || [],
@@ -419,10 +315,7 @@ exports.addEmployee = async (req, res) => {
             roles.join(', '),                  // {{3}}
             department || "Operations",         // {{4}}
             loginLink                          // {{5}}
-          ],
-          // Only read by the Maytapi renderer (tenants using their own
-          // configured WhatsApp API) — never sent to DoubleTick/WATI.
-          password,
+          ]
         };
 
         await notifyTenant(tenant._id, whatsappNumber, welcomeData);
@@ -565,112 +458,35 @@ exports.bulkAddChecklists = async (req, res) => {
       return res.status(400).json({ message: 'tenantId and checklists array required' });
     }
 
-    const tenant = await Tenant.findById(tenantId);
-    if (!tenant) return res.status(404).json({ message: 'Tenant not found' });
-
     const employees = await Employee.find({ tenantId }).lean();
     const findEmp = (name) => employees.find(e =>
       e.name.toLowerCase().trim() === (name || '').toLowerCase().trim()
     );
 
-    const VALID_FREQUENCIES = ['Daily', 'Weekly', 'Monthly', 'Quarterly', 'Half-Yearly', 'Yearly', 'Interval'];
 
-    const WEEKDAY_MAP = { sun: 0, mon: 1, tue: 2, wed: 3, thu: 4, fri: 5, sat: 6 };
-    const parseDaysOfWeek = (raw) => (raw || '').split(',')
-      .map(s => s.trim().toLowerCase().slice(0, 3))
-      .filter(Boolean)
-      .map(s => WEEKDAY_MAP[s])
-      .filter(n => n !== undefined);
-    const parseDaysOfMonth = (raw) => (raw || '').split(',')
-      .map(s => parseInt(s.trim(), 10))
-      .filter(n => Number.isInteger(n) && n >= 1 && n <= 31);
 
-    const parseFlexibleDate = (raw) => {
-      if (!raw) return new Date();
-      const s = String(raw).trim();
-      const dmy = s.match(/^(\d{1,2})[-\/](\d{1,2})[-\/](\d{4})$/);
-      if (dmy) {
-        const d = dmy[1], m = dmy[2], y = dmy[3];
-        return new Date(Number(y), Number(m) - 1, Number(d));
-      }
-      const iso = s.match(/^(\d{4})-(\d{1,2})-(\d{1,2})$/);
-      if (iso) {
-        const y = iso[1], m = iso[2], d = iso[3];
-        return new Date(Number(y), Number(m) - 1, Number(d));
-      }
-      const fallback = new Date(s);
-      return isNaN(fallback.getTime()) ? new Date() : fallback;
-    };
 
     const results = { success: 0, failed: [] };
 
     for (const cl of checklists) {
       try {
-        const taskName     = cl['Checklist Title'] || cl.title || cl.taskName;
-        const assignedName = cl['Assigned To'] || cl.assignedTo;
-        const assignee     = findEmp(assignedName);
-        let frequency = (cl['Frequency'] || cl.frequency || '').trim();
-        const FREQUENCY_TYPOS = { quatarly: 'Quarterly', quaterly: 'Quarterly', qtrly: 'Quarterly' };
-        const freqKey = frequency.toLowerCase();
-        if (FREQUENCY_TYPOS[freqKey]) {
-          frequency = FREQUENCY_TYPOS[freqKey];
-        } else {
-          const properCase = VALID_FREQUENCIES.find(f => f.toLowerCase() === freqKey);
-          if (properCase) frequency = properCase;
-        }
-        const startDateRaw = cl['Start Date'] || cl['Deadline'] || cl.startDate;
-
-        if (!taskName) throw new Error('Checklist Title is required');
-        if (!assignee) throw new Error(`No employee found matching "${assignedName}"`);
-        if (!VALID_FREQUENCIES.includes(frequency)) {
-          throw new Error(`Frequency must be one of: ${VALID_FREQUENCIES.join(', ')} (got "${frequency}")`);
-        }
-
-        const baseAnchorDate = startDateRaw ? parseFlexibleDate(startDateRaw) : new Date();
-
-        // Weekly/Monthly: always anchor to the row's own Start Date — the
-        // weekday (or date-of-month) it falls on becomes the recurrence.
-        // The "Days of Week/Month" columns are ignored entirely.
-        const frequencyConfig = { daysOfWeek: [], daysOfMonth: [] };
-        if (frequency === 'Weekly') {
-          frequencyConfig.daysOfWeek = [baseAnchorDate.getDay()];
-          const weekends = tenant.weekends || [0];
-          const conflictDays = frequencyConfig.daysOfWeek.filter(d => weekends.includes(d));
-          if (conflictDays.length > 0) {
-            throw new Error(`Start Date falls on an employee off day: ${conflictDays.join(',')}`);
-          }
-        }
-        if (frequency === 'Monthly') {
-          frequencyConfig.daysOfMonth = [baseAnchorDate.getDate()];
-        }
-        const nextDueDate = calculateNextDate(
-          frequency,
-          frequencyConfig,
-          tenant.holidays || [],
-          baseAnchorDate,
-          true,
-          tenant.weekends || [0]
-        );
+        const assignee = findEmp(cl['Assigned To'] || cl.assignedTo);
+        const itemsRaw = cl['Items (semicolon separated)'] || cl.items || '';
+        const items    = itemsRaw.split(';').map(s => s.trim()).filter(Boolean).map(label => ({ label, done: false }));
 
         await ChecklistTask.create({
           tenantId,
-          taskName,
-          description: cl['Description'] || cl.description || '',
-          doerId: assignee._id,
-          frequency,
-          frequencyConfig,
-          startDate: baseAnchorDate,
-          nextDueDate,
-          status: 'Active',
-          history: [{
-            action: 'Checklist Created',
-            remarks: `Bulk-uploaded. First mission anchored for ${nextDueDate.toLocaleDateString('en-IN')}`,
-            timestamp: new Date(),
-          }],
+          title:       cl['Checklist Title'] || cl.title,
+          description: cl['Description']     || cl.description || '',
+          assigneeId:  assignee?._id,
+          assigneeName:assignee?.name || cl['Assigned To'],
+          deadline:    cl['Deadline'] ? new Date(cl['Deadline']) : null,
+          items,
+          status: 'pending',
         });
         results.success++;
       } catch (err) {
-        results.failed.push({ title: cl['Checklist Title'] || cl.title, reason: err.message });
+        results.failed.push({ title: cl['Checklist Title'], reason: err.message });
       }
     }
 
@@ -776,7 +592,7 @@ exports.superAdminLogin = async (req, res) => {
 
 exports.loginEmployee = async (req, res) => {
   try {
-    const { Tenant, DelegationTask, ChecklistTask } = getModels(req);
+    const { Tenant, Employee, DelegationTask, ChecklistTask } = getModels(req);
     const { email, password, subdomain } = req.body;
 
     // 1. Find the Factory/Tenant by subdomain
@@ -793,25 +609,8 @@ exports.loginEmployee = async (req, res) => {
       });
     }
 
-    // 2. Find the Employee. Login runs BEFORE the auth/tenantDb middleware,
-    // so req.db is never set here — a tenant with their own dedicated DB
-    // (customMongoUri) must be looked up explicitly, or anyone added via
-    // Add Employee AFTER the DB split (they're created straight into the
-    // tenant's own DB now) can never log in even though their account is
-    // real. Check the tenant's own DB first, then fall back to the shared
-    // DB (covers the original bootstrap admin account, which still only
-    // lives there).
-    const customUri = tenant.superAdmin?.customMongoUri || null;
-    let employee = null;
-    try {
-      const { Employee: TenantEmployee } = await getTenantModels(tenant._id.toString(), customUri);
-      employee = await TenantEmployee.findOne({ email, tenantId: tenant._id });
-    } catch (e) {
-      console.error('[loginEmployee] Tenant DB employee lookup failed:', e.message);
-    }
-    if (!employee && customUri) {
-      employee = await Employee.findOne({ email, tenantId: tenant._id });
-    }
+    // 2. Find the Employee within that specific Factory
+    const employee = await Employee.findOne({ email, tenantId: tenant._id });
     if (!employee) return res.status(401).json({ message: "Invalid Credentials." });
 
     // 3. Verify the Password
@@ -1021,11 +820,10 @@ exports.updateEmployee = async (req, res) => {
   try {
     const { Tenant, Employee, DelegationTask, ChecklistTask } = getModels(req);
     const { id } = req.params;
-    const { name, email, whatsappNumber, department, location, roles, managedDoers, managedAssigners, password, workOnSunday, leaveStatus } = req.body;
+    const { name, email, whatsappNumber, department, roles, managedDoers, managedAssigners, password, workOnSunday, leaveStatus } = req.body;
 
     const updateData = {
       name, email, department, roles, whatsappNumber, workOnSunday, leaveStatus,
-      location: typeof location === 'string' ? location.trim().slice(0, 60) : undefined,
       managedDoers: Array.isArray(managedDoers) ? managedDoers.map(d => d._id || d) : [],
       managedAssigners: Array.isArray(managedAssigners) ? managedAssigners.map(a => a._id || a) : []
     };
@@ -1035,26 +833,15 @@ exports.updateEmployee = async (req, res) => {
       updateData.password = await bcrypt.hash(password, salt);
     }
 
-    const before = await Employee.findById(id).select('name roles department whatsappNumber').lean();
     const updatedEmployee = await Employee.findByIdAndUpdate(id, { $set: updateData }, { new: true })
       .populate('managedDoers', 'name roles department')
       .populate('managedAssigners', 'name roles department')
       .select('-password');
 
-    if (!updatedEmployee) return res.status(404).json({ message: 'Employee not found' });
-
-    // Only message the person when their PROFILE changed (name, role, department, number), not on every save (e.g. leave dates)
-    const sameRoles = (a, b) => [...(a || [])].sort().join('|') === [...(b || [])].sort().join('|');
-    const profileChanged = !before ||
-      before.name !== updatedEmployee.name ||
-      (before.department || '') !== (updatedEmployee.department || '') ||
-      (before.whatsappNumber || '') !== (updatedEmployee.whatsappNumber || '') ||
-      !sameRoles(before.roles, updatedEmployee.roles);
-
     // --- TRIGGER: PROFILE UPDATED TEMPLATE ---
     try {
       const tenant = await Tenant.findById(updatedEmployee.tenantId);
-      if (profileChanged && updatedEmployee.whatsappNumber && tenant) {
+      if (updatedEmployee.whatsappNumber && tenant) {
         const loginLink = `https://${tenant.subdomain || "portal"}.lrbcloud.ai/login`;
 
         /**
@@ -1068,7 +855,7 @@ exports.updateEmployee = async (req, res) => {
           templateName: "_employee_profile_update",
           variables: [
             updatedEmployee.name,      // {{1}}
-            (updatedEmployee.roles || []).join(', '),          // {{2}}
+            roles.join(', '),          // {{2}}
             department || 'General',   // {{3}}
             loginLink                  // {{4}}
           ]

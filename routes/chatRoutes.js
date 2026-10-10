@@ -4,6 +4,7 @@ const router   = express.Router();
 const { authMiddleware } = require('../middleware/auth');
 const tenantDbMiddleware = require('../middleware/tenantDb');
 const c = require('../controllers/chatController');
+const fileUpload = require('../utils/s3Uploader');
 
 const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 25 * 1024 * 1024 } });
 
@@ -22,6 +23,6 @@ router.post('/:conversationId/read',       authMiddleware, tenantDbMiddleware, c
 router.delete('/:conversationId',          authMiddleware, tenantDbMiddleware, c.deleteConversation);
 
 // File upload
-router.post('/upload',                     authMiddleware, upload.single('file'), c.uploadFile);
+router.post('/upload',                     authMiddleware, fileUpload.single('file'), c.uploadFile);
 
 module.exports = router;

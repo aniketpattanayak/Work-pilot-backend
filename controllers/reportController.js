@@ -3,6 +3,8 @@ const ChecklistTask = require('../models/ChecklistTask');
 const Employee = require('../models/Employee');
 const Tenant = require('../models/Tenant');
 const moment = require('moment');
+// Reports are for India: day boundaries and printed times follow IST (+05:30), whatever the server clock says
+const ist = (...a) => moment(...a).utcOffset(330);
 const sendReportEmail = require('../utils/emailService');
 
 
@@ -11,8 +13,25 @@ const sendReportEmail = require('../utils/emailService');
  * Purpose: Creates a detailed text report for a specific factory.
  * Format: clean office -(Done by) Ramesh, 20 feb, done, given by admin...
  */
-exports.generateDetailedReport = async (tenantId, days = 7) => {
-  const startDate = moment().subtract(days, 'days').startOf('day').toDate();
+// The company's own database connection (null = the shared database)
+const tenantDbFor = async (tenant) => {
+  const uri = tenant?.superAdmin?.customMongoUri;
+  if (!uri) return null;
+  const { getTenantConnection } = require('../utils/tenantDb');
+  const conn = await getTenantConnection(String(tenant._id), uri);
+  ['Employee', 'DelegationTask', 'ChecklistTask'].forEach((n) => { if (!conn.models[n]) conn.model(n, require('../models/' + n).schema); });
+  return conn;
+};
+// One broken company must not stop everybody else's report
+const safeReport = async (tenant, days) => {
+  try { return await exports.generateDetailedReport(tenant._id, days, await tenantDbFor(tenant)); }
+  catch (e) { console.error('[Reports] skipped', tenant.companyName, '-', e.message); return null; }
+};
+
+exports.generateDetailedReport = async (tenantId, days = 7, db = null) => {
+  const DelegationTask = db ? db.model('DelegationTask') : require('../models/DelegationTask');
+  const ChecklistTask  = db ? db.model('ChecklistTask')  : require('../models/ChecklistTask');
+  const startDate = ist().subtract(days, 'days').startOf('day').toDate();
   const reportLines = [];
 
   // 1. Fetch only this factory's data using tenantId
@@ -23,31 +42,31 @@ exports.generateDetailedReport = async (tenantId, days = 7) => {
   ]);
 
   reportLines.push(`--- ${tenant?.companyName || 'WORKPILOT'} DETAILED REPORT (LAST ${days} DAYS) ---`);
-  reportLines.push(`Generated on: ${moment().format('DD MMM YYYY, hh:mm A')}\n`);
+  reportLines.push(`Generated on: ${ist().format('DD MMM YYYY, hh:mm A')}\n`);
 
   // 2. Process Delegation Tasks
   delegations.forEach(task => {
     const doneRecord = task.history.find(h => h.action === 'Completed' || h.action === 'Verified');
     const status = doneRecord ? 'done' : 'not done';
-    const time = doneRecord ? moment(doneRecord.timestamp).format('hh:mm A') : 'N/A';
-    const date = moment(task.deadline).format('DD MMM');
+    const time = doneRecord ? ist(doneRecord.timestamp).format('hh:mm A') : 'N/A';
+    const date = ist(task.deadline).format('DD MMM');
     
     reportLines.push(`${task.title} -(Done by) ${task.doerId?.name || 'Staff'}, ${date}, ${status}, given by ${task.assignerId?.name || 'Admin'}, delegation task, Time: ${time}`);
   });
 
   // 3. Process Checklist Tasks (Day-by-Day logic)
   for (let i = 0; i < days; i++) {
-    const currentDay = moment().subtract(i, 'days').startOf('day');
+    const currentDay = ist().subtract(i, 'days').startOf('day');
     const dateLabel = currentDay.format('DD MMM');
 
     checklists.forEach(task => {
       const wasDone = task.history.find(h => 
-        moment(h.instanceDate || h.timestamp).isSame(currentDay, 'day') && 
+        ist(h.instanceDate || h.timestamp).isSame(currentDay, 'day') && 
         (h.action === 'Completed' || h.action === 'Administrative Completion')
       );
 
       const status = wasDone ? 'done' : 'not done';
-      const time = wasDone ? moment(wasDone.timestamp).format('hh:mm A') : 'N/A';
+      const time = wasDone ? ist(wasDone.timestamp).format('hh:mm A') : 'N/A';
       
       reportLines.push(`${task.taskName} -(Done by) ${task.doerId?.name || 'Staff'}, ${dateLabel}, ${status}, given by admin, checklist task, Time: ${time}`);
     });
@@ -64,13 +83,14 @@ exports.triggerAutomatedReports = async () => {
   try {
     // Find all factories that have a report email configured
     const tenants = await Tenant.find({ reportEmail: { $exists: true, $ne: "" } });
-    const today = moment().format('dddd'); // e.g., "Saturday"
-    const dateOfMonth = moment().format('D'); // e.g., "1"
+    const today = ist().format('dddd'); // e.g., "Saturday"
+    const dateOfMonth = ist().format('D'); // e.g., "1"
 
     for (const tenant of tenants) {
       // A. Check Weekly Schedule for this specific factory
       if (tenant.weeklyReportDay === today) {
-        const content = await this.generateDetailedReport(tenant._id, 7);
+        const content = await safeReport(tenant, 7);
+        if (!content) continue;
         await sendReportEmail(
             tenant.reportEmail, 
             `Weekly Work Report: ${tenant.companyName}`, 
@@ -81,7 +101,8 @@ exports.triggerAutomatedReports = async () => {
       
       // B. Check Monthly Schedule for this specific factory
       if (String(tenant.monthlyReportDate) === dateOfMonth) {
-        const content = await this.generateDetailedReport(tenant._id, 30);
+        const content = await safeReport(tenant, 30);
+        if (!content) continue;
         await sendReportEmail(
             tenant.reportEmail, 
             `Monthly Work Report: ${tenant.companyName}`, 
@@ -112,13 +133,13 @@ exports.manualDownload = async (req, res) => {
         const { range } = req.query;
         const days = range === 'monthly' ? 30 : 7;
 
-        const startDate = moment().subtract(days, 'days').startOf('day').toDate();
+        const startDate = ist().subtract(days, 'days').startOf('day').toDate();
 
         // Use the company's own database when it has a dedicated one (set by tenantDbMiddleware)
         const DelegationTask = req.db ? req.db.model('DelegationTask') : require('../models/DelegationTask');
         const ChecklistTask  = req.db ? req.db.model('ChecklistTask')  : require('../models/ChecklistTask');
 
-        const endOfToday = moment().endOf('day').toDate();
+        const endOfToday = ist().endOf('day').toDate();
         const [delegations, checklists] = await Promise.all([
             DelegationTask.find({
                 tenantId,
@@ -155,9 +176,9 @@ exports.manualDownload = async (req, res) => {
             delegationSheet.addRow({
                 task: task.title,
                 doneBy: task.doerId?.name || 'Staff',
-                date: moment(task.deadline).format('DD MMM YYYY'),
+                date: ist(task.deadline).format('DD MMM YYYY'),
                 status: doneRecord ? 'Done' : 'Not Done',
-                completedOn: doneRecord ? moment(doneRecord.timestamp).format('DD MMM YYYY, hh:mm A') : '—',
+                completedOn: doneRecord ? ist(doneRecord.timestamp).format('DD MMM YYYY, hh:mm A') : '—',
                 assignedBy: task.assignerId?.name || 'Admin',
             });
         });
@@ -180,8 +201,8 @@ exports.manualDownload = async (req, res) => {
     const config = task.frequencyConfig || {};
 
     const taskStart = moment.max(
-        moment(task.createdAt).startOf('day'),
-        moment().subtract(days - 1, 'days').startOf('day')
+        ist(task.createdAt).startOf('day'),
+        ist().subtract(days - 1, 'days').startOf('day')
     );
 
     let total = 0;
@@ -189,7 +210,7 @@ exports.manualDownload = async (req, res) => {
 
     for (let i = 0; i < days; i++) {
 
-        const currentDay = moment().subtract(i, 'days').startOf('day');
+        const currentDay = ist().subtract(i, 'days').startOf('day');
 
         if (currentDay.isBefore(taskStart)) continue;
 
@@ -218,7 +239,7 @@ exports.manualDownload = async (req, res) => {
 
         // ✅ INTERVAL (every X days)
         else if (config.intervalDays > 0) {
-            const diff = currentDay.diff(moment(task.createdAt), 'days');
+            const diff = currentDay.diff(ist(task.createdAt), 'days');
             if (diff % config.intervalDays === 0) {
                 isScheduled = true;
             }
@@ -230,7 +251,7 @@ exports.manualDownload = async (req, res) => {
         total++;
 
         const wasDone = task.history.find(h =>
-            moment(h.instanceDate || h.timestamp).isSame(currentDay, 'day') &&
+            ist(h.instanceDate || h.timestamp).isSame(currentDay, 'day') &&
             (h.action === 'Completed' || h.action === 'Administrative Completion')
         );
 
@@ -240,7 +261,7 @@ exports.manualDownload = async (req, res) => {
     checklistSheet.addRow({
         task: task.taskName,
         doneBy: task.doerId?.name || 'Staff',
-        date: `${taskStart.format('DD MMM')} → ${moment().format('DD MMM YYYY')}`,
+        date: `${taskStart.format('DD MMM')} → ${ist().format('DD MMM YYYY')}`,
         frequency : task.frequency,
         status: `${doneCount}/${total} Done`,
         assignedBy: 'Admin'
