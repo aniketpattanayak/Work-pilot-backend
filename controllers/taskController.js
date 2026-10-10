@@ -702,12 +702,7 @@ exports.updateChecklistTask = async (req, res) => {
       if (isNaN(newStart.getTime())) {
         return res.status(400).json({ message: "Invalid start date." });
       }
-      const earliestAllowed = new Date();
-      earliestAllowed.setUTCHours(0, 0, 0, 0);
-      earliestAllowed.setUTCDate(earliestAllowed.getUTCDate() - 1);
-      if (newStart < earliestAllowed) {
-        return res.status(400).json({ message: "Start date cannot be in the past." });
-      }
+      // A start date in the past is allowed: the first due date is calculated from it.
     }
     const startChanged = !!newStart;
 
@@ -817,12 +812,7 @@ exports.createChecklistTask = async (req, res) => {
       if (isNaN(baseAnchorDate.getTime())) {
         return res.status(400).json({ message: "Invalid start date." });
       }
-      const earliestAllowed = new Date();
-      earliestAllowed.setUTCHours(0, 0, 0, 0);
-      earliestAllowed.setUTCDate(earliestAllowed.getUTCDate() - 1);
-      if (baseAnchorDate < earliestAllowed) {
-        return res.status(400).json({ message: "Start date cannot be in the past." });
-      }
+      // A start date in the past is allowed: the first due date is calculated from it.
     }
 
 
