@@ -7,10 +7,12 @@ const ticketController = require('../controllers/ticketController');
 const upload = require('../utils/s3Uploader');
 const { authMiddleware, superAdminOnly } = require('../middleware/auth');
 const subscriptionGuard = require('../middleware/subscriptionGuard');
+const tenantDbMiddleware = require('../middleware/tenantDb');
 
 // 1. Raise a new ticket (any authenticated user)
 router.post('/create',
   authMiddleware,
+  tenantDbMiddleware,
   upload.array('initialMedia', 5),
   ticketController.createTicket
 );
@@ -28,5 +30,9 @@ router.put('/resolve',
   upload.array('resolutionMedia', 3),
   ticketController.resolveTicket
 );
+
+// 5. Reporter: edit / delete own ticket
+router.put('/:ticketId', authMiddleware, subscriptionGuard, ticketController.updateTicket);
+router.delete('/:ticketId', authMiddleware, subscriptionGuard, ticketController.deleteTicket);
 
 module.exports = router;
