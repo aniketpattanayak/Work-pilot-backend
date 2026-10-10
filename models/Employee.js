@@ -44,6 +44,9 @@ const EmployeeSchema = new mongoose.Schema({
     },
   ],
 
+  // Keys of the custom access roles (Tenant.accessRoles) given to this person
+  accessRoleKeys: { type: [String], default: [] },
+
   managedDoers:    [{ type: mongoose.Schema.Types.ObjectId, ref: 'Employee' }],
   managedAssigners:[{ type: mongoose.Schema.Types.ObjectId, ref: 'Employee' }],
 

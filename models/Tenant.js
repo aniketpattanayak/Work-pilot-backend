@@ -31,6 +31,23 @@ const TenantSchema = new mongoose.Schema({
   sectors:   { type: [String], default: [] },
   locations: { type: [String], default: [] },
 
+  // Custom access roles (attendance / leave / payroll permissions) made by the company's Admin
+  accessRoles: [{
+    _id: false,
+    key:         { type: String, required: true },
+    name:        { type: String, required: true },
+    description: { type: String, default: '' },
+    permissions: [{ _id: false, key: String, scope: String }],
+    createdBy:   { type: mongoose.Schema.Types.ObjectId },
+    createdAt:   { type: Date, default: Date.now }
+  }],
+  // HR modules are off for every company until the platform owner switches them on
+  hrModules: {
+    attendance: { type: Boolean, default: false },
+    leave:      { type: Boolean, default: false },
+    payroll:    { type: Boolean, default: false }
+  },
+
   // Review Meeting settings (all optional; defaults apply when nothing is saved)
   reviewConfig: {
     period: { type: String, enum: ['Daily', 'Weekly', 'TwiceMonthly', 'Monthly', 'Quarterly'], default: 'Monthly' },

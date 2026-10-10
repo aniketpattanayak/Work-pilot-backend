@@ -29,6 +29,8 @@ const {
 const tenantDbMiddleware = require('../middleware/tenantDb');
 const { authMiddleware, superAdminOnly, sameTenantOnly } = require('../middleware/auth');
 const subscriptionGuard = require('../middleware/subscriptionGuard');
+const { requirePermission, adminOfSameCompany } = require('../middleware/permission');
+const accessController = require('../controllers/accessController');
 
 // ─── PUBLIC ───────────────────────────────────────────────────────────────────
 router.post('/master-login', superAdminLogin);
@@ -77,9 +79,19 @@ router.delete('/checklist/:id', authMiddleware, subscriptionGuard, taskControlle
 
 // Employee management
 router.get('/employees/:tenantId', authMiddleware, subscriptionGuard, tenantDbMiddleware, sameTenantOnly, getEmployeeList);
-router.post('/add-employee',      authMiddleware, subscriptionGuard, tenantDbMiddleware, addEmployee);
-router.put('/employees/:id', authMiddleware, subscriptionGuard, tenantDbMiddleware, updateEmployee);
-router.delete('/employees/:id', authMiddleware, subscriptionGuard, tenantDbMiddleware, deleteEmployee);
+router.post('/add-employee',      authMiddleware, subscriptionGuard, tenantDbMiddleware, adminOfSameCompany, addEmployee);
+router.put('/employees/:id', authMiddleware, subscriptionGuard, tenantDbMiddleware, adminOfSameCompany, updateEmployee);
+router.delete('/employees/:id', authMiddleware, subscriptionGuard, tenantDbMiddleware, adminOfSameCompany, deleteEmployee);
+
+// Custom roles and permissions (attendance / leave / payroll)
+router.get('/access/catalog', authMiddleware, subscriptionGuard, accessController.getCatalog);
+router.get('/access/me', authMiddleware, subscriptionGuard, tenantDbMiddleware, accessController.getMyAccess);
+router.get('/access/roles', authMiddleware, subscriptionGuard, tenantDbMiddleware, requirePermission('access.manage'), accessController.listRoles);
+router.post('/access/roles', authMiddleware, subscriptionGuard, tenantDbMiddleware, requirePermission('access.manage'), accessController.createRole);
+router.put('/access/roles/:key', authMiddleware, subscriptionGuard, tenantDbMiddleware, requirePermission('access.manage'), accessController.updateRole);
+router.delete('/access/roles/:key', authMiddleware, subscriptionGuard, tenantDbMiddleware, requirePermission('access.manage'), accessController.deleteRole);
+router.put('/access/assign', authMiddleware, subscriptionGuard, tenantDbMiddleware, requirePermission('access.manage'), accessController.assignRoles);
+router.put('/access/modules/:tenantId', authMiddleware, superAdminOnly, accessController.setModules);
 router.put('/update-mapping', authMiddleware, subscriptionGuard, updateEmployeeMapping);
 router.put('/assign-coordinator', authMiddleware, subscriptionGuard, assignToCoordinator);
 router.get('/company-overview/:tenantId', authMiddleware, subscriptionGuard, sameTenantOnly, getCompanyOverview);
