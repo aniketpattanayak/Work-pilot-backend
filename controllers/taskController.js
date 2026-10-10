@@ -2564,9 +2564,9 @@ const blendReviewScore = (stats, weights) => {
 };
 
 // Period boundaries + how much of the period has already passed (shared by every review screen).
-const reviewContext = (view, date) => {
+const reviewContext = (view, date, custom) => {
   const now = new Date();
-  const { startDate, endDate } = resolveReviewPeriod(view, date);
+  const { startDate, endDate } = custom || resolveReviewPeriod(view, date);
   const dayMs = 24 * 60 * 60 * 1000;
   const daysInPeriod = Math.max(1, Math.round((endDate.getTime() - startDate.getTime() + 1) / dayMs));
   const todayStart = istStartOfDay(now);
@@ -2678,10 +2678,22 @@ exports.getReviewAnalytics = async (req, res) => {
     const tenantDoc = await Tenant.findById(tenantId).select('reviewConfig').lean().catch(() => null);
     const cfg = readReviewConfig(tenantDoc && tenantDoc.reviewConfig);
 
-    // An explicit period (the Dashboard asks for 'Weekly') is honoured; otherwise the company's chosen period is used.
+    // A custom From - To range (India dates, both days included) wins; otherwise an explicit period
+    // (the Dashboard asks for 'Weekly'); otherwise the company's chosen period.
     const requestedView = String(req.query.view || '');
-    const view = REVIEW_PERIODS.includes(requestedView) ? requestedView : cfg.period;
-    const rc = reviewContext(view, date);
+    const isoDay = /^\d{4}-\d{2}-\d{2}$/;
+    let custom = null;
+    if (isoDay.test(String(req.query.from || '')) && isoDay.test(String(req.query.to || ''))) {
+      const [fy, fm, fd] = req.query.from.split('-').map(Number);
+      const [ty, tm, td] = req.query.to.split('-').map(Number);
+      const cs = new Date(Date.UTC(fy, fm - 1, fd) - IST_OFFSET_MS);
+      const ce = new Date(Date.UTC(ty, tm - 1, td + 1) - IST_OFFSET_MS - 1);
+      if (isNaN(cs.getTime()) || isNaN(ce.getTime()) || ce < cs) return res.status(400).json({ message: 'The "to" date cannot be before the "from" date.' });
+      if (ce.getTime() - cs.getTime() > 366 * 24 * 60 * 60 * 1000) return res.status(400).json({ message: 'Please choose a range of at most one year.' });
+      custom = { startDate: cs, endDate: ce };
+    }
+    const view = custom ? 'Custom' : (REVIEW_PERIODS.includes(requestedView) ? requestedView : cfg.period);
+    const rc = reviewContext(view, date, custom);
 
     const [employees, delegations, checklists, fmsInstances] = await Promise.all([
       Employee.find({ tenantId }).select('name department location weeklyLateTarget'),
