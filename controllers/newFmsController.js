@@ -522,6 +522,7 @@ exports.getMyTasksWithNodes = async (req, res) => {
     // Match by ID or by name (fallback for old instances where ID wasn't resolved)
     const tasks = await FlowInstance.find({
       status: 'active',
+      ...(req.user?.tenantId ? { tenantId: req.user.tenantId } : {}),
       $or: [
         { 'activeStep.assignedToId': employeeId },
         { 'activeStep.assignedToId': employeeId.toString() },
@@ -532,13 +533,13 @@ exports.getMyTasksWithNodes = async (req, res) => {
     .lean();
 
     // Batch fetch all unique templates
-    const templateIds = [...new Set(tasks.map(t => t.templateId.toString()))];
+    const templateIds = [...new Set(tasks.filter(t => t.templateId).map(t => t.templateId.toString()))];
     const templates   = await FlowTemplate.find({ _id: { $in: templateIds } }).lean();
     const templateMap = Object.fromEntries(templates.map(t => [t._id.toString(), t]));
 
     const enriched = tasks.map(inst => {
-      const template = templateMap[inst.templateId.toString()];
-      const node     = template?.nodes.find(n => n.id === inst.activeStep?.nodeId);
+      const template = inst.templateId ? templateMap[inst.templateId.toString()] : undefined;
+      const node     = template?.nodes?.find(n => n.id === inst.activeStep?.nodeId);
       const currentNodeId = inst.activeStep?.nodeId;
 
       // Find all collected field values from previous steps that are visible to current step
