@@ -196,6 +196,46 @@ exports.getCompanyOverview = async (req, res) => {
     });
   }
 };
+// Review Meeting settings: strict validation (returns { value } or { error })
+const REVIEW_PERIODS = ['Daily', 'Weekly', 'TwiceMonthly', 'Monthly', 'Quarterly'];
+function sanitizeReviewConfig(rc) {
+  if (!rc || typeof rc !== 'object' || Array.isArray(rc)) return { error: 'Review settings are not valid.' };
+  const num = (v, min, max) => {
+    if (v === '' || v === null || typeof v === 'boolean') return null;
+    const n = Number(v);
+    return Number.isFinite(n) && n >= min && n <= max ? n : null;
+  };
+  if (!REVIEW_PERIODS.includes(rc.period)) return { error: 'Choose a valid review period.' };
+  const readWeights = (o) => {
+    const w = { delegation: num(o && o.delegation, 0, 1000), checklist: num(o && o.checklist, 0, 1000), fms: num(o && o.fms, 0, 1000) };
+    if (w.delegation === null || w.checklist === null || w.fms === null) return null;
+    if (w.delegation + w.checklist + w.fms <= 0) return null;
+    return w;
+  };
+  const weights = readWeights(rc.weights);
+  if (!weights) return { error: 'Weightage must be numbers from 0 to 1000, and at least one must be above 0.' };
+  const rows = Array.isArray(rc.overrides) ? rc.overrides : [];
+  if (rows.length > 200) return { error: 'Too many weightage rules (max 200).' };
+  const seen = new Set(); const overrides = [];
+  for (const r of rows) {
+    const loc = typeof (r && r.location) === 'string' ? r.location.trim().replace(/\s+/g, ' ') : '';
+    const dep = typeof (r && r.department) === 'string' ? r.department.trim().replace(/\s+/g, ' ') : '';
+    if (loc.length > 60 || dep.length > 60) return { error: 'Location / department names must be under 60 characters.' };
+    if (!loc && !dep) return { error: 'Each weightage rule needs a location, a department, or both.' };
+    const w = readWeights(r);
+    if (!w) return { error: 'Each weightage rule needs numbers from 0 to 1000, with at least one above 0.' };
+    const key = loc.toLowerCase() + '|' + dep.toLowerCase();
+    if (seen.has(key)) return { error: 'Two weightage rules are for the same location and department.' };
+    seen.add(key);
+    overrides.push({ location: loc, department: dep, ...w });
+  }
+  const red = num(rc.thresholds && rc.thresholds.red, 0, 100);
+  const orange = num(rc.thresholds && rc.thresholds.orange, 0, 100);
+  if (red === null || orange === null) return { error: 'Colour limits must be numbers from 0 to 100.' };
+  if (orange > red) return { error: 'The orange limit cannot be higher than the red limit.' };
+  return { value: { period: rc.period, weights, overrides, thresholds: { red, orange } } };
+}
+
 exports.updateSettings = async (req, res) => {
   try {
     const { Tenant, Employee, DelegationTask, ChecklistTask } = getModels(req);
@@ -209,7 +249,8 @@ exports.updateSettings = async (req, res) => {
       badgeLibrary,
       weekends,
       sectors,
-      locations
+      locations,
+      reviewConfig
     } = req.body;
 
     // Masters: Sector / Department and Location lists (company Admin only)
@@ -246,6 +287,19 @@ exports.updateSettings = async (req, res) => {
       }
     }
 
+    // Review Meeting settings (company Admin only)
+    let reviewSet = {};
+    if (reviewConfig !== undefined) {
+      const callerRoles2 = Array.isArray(req.user?.roles) ? req.user.roles : [];
+      const isAdminCaller2 = req.user?.isSuperAdmin || callerRoles2.includes('Admin');
+      if (!isAdminCaller2 || (!req.user?.isSuperAdmin && String(tenantId) !== String(req.user?.tenantId))) {
+        return res.status(403).json({ message: 'Only your company Admin can change the review meeting settings.' });
+      }
+      const rcResult = sanitizeReviewConfig(reviewConfig);
+      if (rcResult.error) return res.status(400).json({ message: rcResult.error });
+      reviewSet.reviewConfig = rcResult.value;
+    }
+
     // 2. Update the Tenant document in MongoDB
     // The { new: true } option is CRITICAL so it returns the SAVED data
     const updatedTenant = await Tenant.findByIdAndUpdate(
@@ -257,7 +311,8 @@ exports.updateSettings = async (req, res) => {
           officeHours,    // Foundation Setup
           holidays,       // Foundation Setup
           weekends,        // NEW: Persisting the custom weekend array
-          ...masterSet     // sectors / locations (only when sent)
+          ...masterSet,    // sectors / locations (only when sent)
+          ...reviewSet     // review meeting settings (only when sent)
         }
       },
       { new: true, runValidators: true }

@@ -2444,42 +2444,138 @@ exports.debugChecklistCards = async (req, res) => {
     res.status(500).json({ error: error.message });
   }
 };
+// ─── REVIEW MEETING: period + scoring helpers ───────────────────────────────
+const REVIEW_PERIODS = ['Daily', 'Weekly', 'TwiceMonthly', 'Monthly', 'Quarterly'];
+const REVIEW_TYPES = ['delegation', 'checklist', 'fms'];
+
+// Tolerant read of the saved settings (anything missing/invalid falls back to the defaults).
+const readReviewConfig = (raw) => {
+  const n = (v, d, min, max) => { const x = Number(v); return v !== '' && v !== null && v !== undefined && Number.isFinite(x) && x >= min && x <= max ? x : d; };
+  const rc = raw && typeof raw === 'object' ? raw : {};
+  const w = rc.weights || {};
+  const weights = { delegation: n(w.delegation, 1, 0, 1000), checklist: n(w.checklist, 1, 0, 1000), fms: n(w.fms, 1, 0, 1000) };
+  const overrides = (Array.isArray(rc.overrides) ? rc.overrides : []).map((o) => ({
+    location: String(o?.location || '').trim(),
+    department: String(o?.department || '').trim(),
+    delegation: n(o?.delegation, 1, 0, 1000), checklist: n(o?.checklist, 1, 0, 1000), fms: n(o?.fms, 1, 0, 1000)
+  })).filter((o) => o.location || o.department);
+  let red = n(rc.thresholds?.red, 20, 0, 100);
+  let orange = n(rc.thresholds?.orange, 10, 0, 100);
+  if (orange > red) orange = red;
+  return { period: REVIEW_PERIODS.includes(rc.period) ? rc.period : 'Monthly', weights, overrides, thresholds: { red, orange } };
+};
+
+// Most specific rule wins: location + department  >  location only  >  department only  >  company default.
+// A rule with a location only applies to people who have that location.
+const resolveReviewWeights = (emp, cfg) => {
+  const eq = (a, b) => String(a || '').trim().toLowerCase() === String(b || '').trim().toLowerCase();
+  let best = null; let bestScore = 0;
+  for (const o of cfg.overrides) {
+    if (o.location && !eq(o.location, emp.location)) continue;
+    if (o.department && !eq(o.department, emp.department)) continue;
+    const score = o.location && o.department ? 3 : (o.location ? 2 : 1);
+    if (score > bestScore) { best = o; bestScore = score; }
+  }
+  const src = best || cfg.weights;
+  return { delegation: src.delegation, checklist: src.checklist, fms: src.fms, source: best ? 'rule' : 'default' };
+};
+
+const resolveReviewPeriod = (view, referenceDate) => {
+  const ref = new Date(referenceDate);
+  const base = isNaN(ref.getTime()) ? new Date() : ref;
+  const y = base.getFullYear(), m = base.getMonth(), d = base.getDate();
+  let startDate, endDate;
+  if (view === 'Daily') {
+    startDate = new Date(y, m, d, 0, 0, 0, 0);
+    endDate = new Date(y, m, d, 23, 59, 59, 999);
+  } else if (view === 'Weekly') {
+    const day = base.getDay();
+    startDate = new Date(y, m, d - day + (day === 0 ? -6 : 1), 0, 0, 0, 0);
+    endDate = new Date(startDate.getFullYear(), startDate.getMonth(), startDate.getDate() + 6, 23, 59, 59, 999);
+  } else if (view === 'TwiceMonthly') {
+    if (d <= 15) {
+      startDate = new Date(y, m, 1, 0, 0, 0, 0);
+      endDate = new Date(y, m, 15, 23, 59, 59, 999);
+    } else {
+      startDate = new Date(y, m, 16, 0, 0, 0, 0);
+      endDate = new Date(y, m + 1, 0, 23, 59, 59, 999);
+    }
+  } else if (view === 'Quarterly') {
+    const qm = Math.floor(m / 3) * 3;
+    startDate = new Date(y, qm, 1, 0, 0, 0, 0);
+    endDate = new Date(y, qm + 3, 0, 23, 59, 59, 999);
+  } else {
+    startDate = new Date(y, m, 1, 0, 0, 0, 0);
+    endDate = new Date(y, m + 1, 0, 23, 59, 59, 999);
+  }
+  return { startDate, endDate };
+};
+
+const reviewPeriodName = (view, startDate, endDate) => {
+  const f = (d) => d.toLocaleDateString('en-GB');
+  if (view === 'Weekly') return `Week of ${startDate.toLocaleDateString()}`;
+  if (view === 'Daily') return f(startDate);
+  return `${f(startDate)} - ${f(endDate)}`;
+};
+
+// Four buckets per task type:  on-time done, late done, pending (not yet due), late pending (past its deadline).
+const finishBuckets = (s) => {
+  s.lateDone = Math.min(s.late, s.done);
+  s.onTimeDone = Math.max(0, s.done - s.lateDone);
+  s.latePending = Math.min(s.overdue, s.notDone);
+  s.pendingOnTime = Math.max(0, s.notDone - s.latePending);
+  return s;
+};
+
+// One overall score per person: each task type's percentage, blended with the weights.
+// A type with no tasks in the period is left out (its weight is ignored).
+const blendReviewScore = (stats, weights) => {
+  const active = REVIEW_TYPES.map((k) => {
+    const s = stats[k];
+    const den = Math.max(s.total, s.onTimeDone + s.lateDone + s.pendingOnTime + s.latePending);
+    return { k, s, den };
+  }).filter((x) => x.den > 0);
+  const empty = { onTimeDonePct: 0, lateDonePct: 0, pendingOnTimePct: 0, latePendingPct: 0, latePct: 0, notDonePct: 0, hasTasks: false };
+  if (!active.length) return empty;
+  let sumW = active.reduce((a, x) => a + (weights[x.k] || 0), 0);
+  const eqW = sumW <= 0;
+  if (eqW) sumW = active.length;
+  const part = (bucket) => active.reduce((a, x) => a + ((eqW ? 1 : (weights[x.k] || 0)) / sumW) * (100 * x.s[bucket] / x.den), 0);
+  const r2 = (v) => Math.round(v * 100) / 100;
+  const out = {
+    onTimeDonePct: r2(part('onTimeDone')), lateDonePct: r2(part('lateDone')),
+    pendingOnTimePct: r2(part('pendingOnTime')), latePendingPct: r2(part('latePending'))
+  };
+  out.latePct = r2(out.lateDonePct + out.latePendingPct);
+  out.notDonePct = r2(out.pendingOnTimePct + out.latePendingPct);
+  out.hasTasks = true;
+  return out;
+};
+
 exports.getReviewAnalytics = async (req, res) => {
   try {
     const { DelegationTask, Employee, Tenant, ChecklistTask, FlowInstance } = getModels(req);
     const { tenantId } = req.params;
-    const { view = 'Weekly', date = new Date() } = req.query;
+    const { date = new Date() } = req.query;
+
+    const tenantDoc = await Tenant.findById(tenantId).select('reviewConfig').lean().catch(() => null);
+    const cfg = readReviewConfig(tenantDoc && tenantDoc.reviewConfig);
+
+    // An explicit period (the Dashboard asks for 'Weekly') is honoured; otherwise the company's chosen period is used.
+    const requestedView = String(req.query.view || '');
+    const view = REVIEW_PERIODS.includes(requestedView) ? requestedView : cfg.period;
 
     const now = new Date();
-    const referenceDate = new Date(date);
-    let startDate = new Date(referenceDate);
-    let endDate = new Date(referenceDate);
-
-    // 1. TIMELINE BOUNDARIES
-    if (view === 'Daily') {
-      startDate.setHours(0, 0, 0, 0);
-      endDate.setHours(23, 59, 59, 999);
-    } else if (view === 'Weekly') {
-      const day = startDate.getDay();
-      const diff = startDate.getDate() - day + (day === 0 ? -6 : 1);
-      startDate.setDate(diff);
-      startDate.setHours(0, 0, 0, 0);
-      endDate = new Date(startDate);
-      endDate.setDate(startDate.getDate() + 6);
-      endDate.setHours(23, 59, 59, 999);
-    } else {
-      startDate.setDate(1);
-      startDate.setHours(0, 0, 0, 0);
-      endDate = new Date(startDate.getFullYear(), startDate.getMonth() + 1, 0);
-      endDate.setHours(23, 59, 59, 999);
-    }
-
-    // UPDATED: Added 'weeklyLateTarget' to select
-
-
+    const { startDate, endDate } = resolveReviewPeriod(view, date);
+    const dayMs = 24 * 60 * 60 * 1000;
+    const daysInPeriod = Math.max(1, Math.round((endDate.getTime() - startDate.getTime() + 1) / dayMs));
+    const todayStart = new Date(now); todayStart.setHours(0, 0, 0, 0);
+    const elapsedDays = endDate < todayStart
+      ? daysInPeriod
+      : Math.max(0, Math.min(daysInPeriod, Math.floor((todayStart.getTime() - startDate.getTime()) / dayMs)));
 
     const [employees, delegations, checklists, fmsInstances] = await Promise.all([
-      Employee.find({ tenantId }).select('name department weeklyLateTarget'),
+      Employee.find({ tenantId }).select('name department location weeklyLateTarget'),
       DelegationTask.find({ tenantId, deadline: { $gte: startDate, $lte: endDate } }),
       ChecklistTask.find({ tenantId, status: 'Active' }),
       FlowInstance.find({ tenantId, $or: [
@@ -2489,46 +2585,41 @@ exports.getReviewAnalytics = async (req, res) => {
     ]);
 
     const report = employees.map(emp => {
+      const mk = () => ({ total: 0, done: 0, overdue: 0, late: 0, notDone: 0, onTimeDone: 0, lateDone: 0, latePending: 0, pendingOnTime: 0 });
       const stats = {
-        // CRITICAL: Added fields for Frontend Deep-Dive targeting
         employeeId: emp._id,
         employeeName: emp.name,
         department: emp.department,
+        location: emp.location || '',
         weeklyLateTarget: emp.weeklyLateTarget || 20,
         periodStart: startDate.toISOString(),
         periodEnd: endDate.toISOString(),
-        periodName: view === 'Weekly' ? `Week of ${startDate.toLocaleDateString()}` : view,
-
-        delegation: { total: 0, done: 0, overdue: 0, late: 0, notDone: 0 },
-        checklist: { total: 0, done: 0, overdue: 0, late: 0, notDone: 0 },
-        fms: { total: 0, done: 0, overdue: 0, late: 0, notDone: 0 }
+        periodName: reviewPeriodName(view, startDate, endDate),
+        delegation: mk(),
+        checklist: mk(),
+        fms: mk()
       };
 
-      // 2. DELEGATION PROCESSING
+      // DELEGATION
       const empDelegations = delegations.filter(t => t.doerId && t.doerId.toString() === emp._id.toString());
       empDelegations.forEach(t => {
         stats.delegation.total++;
         const doneRecord = t.history.find(h => h.action === 'Completed' || h.action === 'Verified');
-
         if (doneRecord) {
           stats.delegation.done++;
-          if (new Date(doneRecord.timestamp) > new Date(t.deadline)) {
-            stats.delegation.late++;
-          }
+          if (new Date(doneRecord.timestamp) > new Date(t.deadline)) stats.delegation.late++;
         } else {
           stats.delegation.notDone++;
-          if (new Date(t.deadline) < now) {
-            stats.delegation.overdue++;
-          }
+          if (new Date(t.deadline) < now) stats.delegation.overdue++;
         }
       });
 
-      // 3. CHECKLIST PROCESSING
+      // CHECKLIST
       const empChecklists = checklists.filter(t => t.doerId && t.doerId.toString() === emp._id.toString());
       empChecklists.forEach(t => {
         let expected = 0;
-        if (t.frequency === 'Daily') expected = view === 'Weekly' ? 7 : (view === 'Daily' ? 1 : 30);
-        else if (t.frequency === 'Weekly') expected = view === 'Monthly' ? 4 : 1;
+        if (t.frequency === 'Daily') expected = view === 'Weekly' ? 7 : (view === 'Daily' ? 1 : (view === 'Monthly' ? 30 : daysInPeriod));
+        else if (t.frequency === 'Weekly') expected = view === 'Monthly' ? 4 : ((view === 'Weekly' || view === 'Daily') ? 1 : Math.max(1, Math.round(daysInPeriod / 7)));
         else expected = 1;
 
         const rangeCompletions = t.history.filter(h =>
@@ -2539,7 +2630,7 @@ exports.getReviewAnalytics = async (req, res) => {
         stats.checklist.total += expected;
         stats.checklist.done += rangeCompletions.length;
 
-        let missedCount = Math.max(0, expected - rangeCompletions.length);
+        const missedCount = Math.max(0, expected - rangeCompletions.length);
         stats.checklist.notDone += missedCount;
 
         rangeCompletions.forEach(h => {
@@ -2549,14 +2640,12 @@ exports.getReviewAnalytics = async (req, res) => {
           }
         });
 
-        const effectiveEndDate = endDate < now ? endDate : now;
-        if (missedCount > 0 && effectiveEndDate >= startDate) {
-          stats.checklist.overdue += missedCount;
-        }
+        // Only runs whose day has already passed can be late; the rest are still pending on time.
+        const dueSoFar = elapsedDays >= daysInPeriod ? expected : Math.floor(expected * elapsedDays / daysInPeriod);
+        stats.checklist.overdue += Math.max(0, Math.min(missedCount, dueSoFar - rangeCompletions.length));
       });
 
-
-      // 4. FMS PROCESSING
+      // FMS
       const empFmsCompleted = fmsInstances.filter(inst =>
         inst.status === 'completed' &&
         inst.nodeHistory && inst.nodeHistory.some(h => h.assignedToId && h.assignedToId.toString() === emp._id.toString())
@@ -2574,18 +2663,21 @@ exports.getReviewAnalytics = async (req, res) => {
       empFmsActive.forEach(inst => {
         stats.fms.total++;
         const deadline = inst.activeStep && inst.activeStep.plannedDeadline;
-        if (deadline && new Date(deadline) < now) {
-          stats.fms.overdue++;
-          stats.fms.notDone++;
-        } else {
-          stats.fms.notDone++;
-        }
+        stats.fms.notDone++;
+        if (deadline && new Date(deadline) < now) stats.fms.overdue++;
       });
 
+      REVIEW_TYPES.forEach((k) => finishBuckets(stats[k]));
+      const weights = resolveReviewWeights(emp, cfg);
+      stats.weights = weights;
+      stats.overall = blendReviewScore(stats, weights);
       return stats;
     });
 
-    res.status(200).json({ view, startDate, endDate, report });
+    res.status(200).json({
+      view, startDate, endDate, report,
+      config: { period: cfg.period, thresholds: cfg.thresholds, weights: cfg.weights }
+    });
   } catch (error) {
     console.error("Analytics Calculation Error:", error);
     res.status(500).json({ message: "Analytics calculation failed" });

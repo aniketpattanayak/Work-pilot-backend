@@ -31,6 +31,29 @@ const TenantSchema = new mongoose.Schema({
   sectors:   { type: [String], default: [] },
   locations: { type: [String], default: [] },
 
+  // Review Meeting settings (all optional; defaults apply when nothing is saved)
+  reviewConfig: {
+    period: { type: String, enum: ['Daily', 'Weekly', 'TwiceMonthly', 'Monthly', 'Quarterly'], default: 'Monthly' },
+    weights: {
+      delegation: { type: Number, default: 1 },
+      checklist:  { type: Number, default: 1 },
+      fms:        { type: Number, default: 1 }
+    },
+    // location '' = every location, department '' = every department
+    overrides: [{
+      _id: false,
+      location:   { type: String, default: '' },
+      department: { type: String, default: '' },
+      delegation: { type: Number, default: 1 },
+      checklist:  { type: Number, default: 1 },
+      fms:        { type: Number, default: 1 }
+    }],
+    thresholds: {
+      red:    { type: Number, default: 20 },
+      orange: { type: Number, default: 10 }
+    }
+  },
+
   holidays: [
     {
       name: String,
