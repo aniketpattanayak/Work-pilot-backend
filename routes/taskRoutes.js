@@ -179,6 +179,7 @@ router.get('/company-overview/:tenantId', authMiddleware, subscriptionGuard, ten
 router.get('/employee-deep-dive/:employeeId', authMiddleware, subscriptionGuard, tenantDbMiddleware, taskController.getEmployeeDeepDive);
 router.put('/update-weekly-target', authMiddleware, subscriptionGuard, tenantDbMiddleware, taskController.updateEmployeeTarget);
 router.get('/review-analytics/:tenantId', authMiddleware, subscriptionGuard, tenantDbMiddleware, sameTenantOnly, taskController.getReviewAnalytics);
+router.get('/user-dashboard/:employeeId', authMiddleware, subscriptionGuard, tenantDbMiddleware, taskController.getUserDashboard);
 
 // Edit a task. Kept LAST so every fixed PUT path above (respond, update-mapping, ...) matches first.
 router.put('/:taskId', authMiddleware, subscriptionGuard, tenantDbMiddleware, taskController.updateTask);

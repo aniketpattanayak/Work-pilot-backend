@@ -2552,6 +2552,112 @@ const blendReviewScore = (stats, weights) => {
   return out;
 };
 
+// Period boundaries + how much of the period has already passed (shared by every review screen).
+const reviewContext = (view, date) => {
+  const now = new Date();
+  const { startDate, endDate } = resolveReviewPeriod(view, date);
+  const dayMs = 24 * 60 * 60 * 1000;
+  const daysInPeriod = Math.max(1, Math.round((endDate.getTime() - startDate.getTime() + 1) / dayMs));
+  const todayStart = new Date(now); todayStart.setHours(0, 0, 0, 0);
+  const elapsedDays = endDate < todayStart
+    ? daysInPeriod
+    : Math.max(0, Math.min(daysInPeriod, Math.floor((todayStart.getTime() - startDate.getTime()) / dayMs)));
+  return { view, now, startDate, endDate, daysInPeriod, elapsedDays };
+};
+
+// One person's delegation / checklist / FMS numbers for the period. Used by the Review Meeting,
+// the Global View and the personal Dashboard so all three always agree.
+const buildEmployeeReviewStats = (emp, ctx) => {
+  const { delegations, checklists, fmsInstances, cfg, view, now, startDate, endDate, daysInPeriod, elapsedDays } = ctx;
+  const mk = () => ({ total: 0, done: 0, overdue: 0, late: 0, notDone: 0, onTimeDone: 0, lateDone: 0, latePending: 0, pendingOnTime: 0 });
+  const stats = {
+    employeeId: emp._id,
+    employeeName: emp.name,
+    department: emp.department,
+    location: emp.location || '',
+    weeklyLateTarget: emp.weeklyLateTarget || 20,
+    periodStart: startDate.toISOString(),
+    periodEnd: endDate.toISOString(),
+    periodName: reviewPeriodName(view, startDate, endDate),
+    delegation: mk(),
+    checklist: mk(),
+    fms: mk()
+  };
+
+  // DELEGATION
+  const empDelegations = delegations.filter(t => t.doerId && t.doerId.toString() === emp._id.toString());
+  empDelegations.forEach(t => {
+    stats.delegation.total++;
+    const doneRecord = t.history.find(h => h.action === 'Completed' || h.action === 'Verified');
+    if (doneRecord) {
+      stats.delegation.done++;
+      if (new Date(doneRecord.timestamp) > new Date(t.deadline)) stats.delegation.late++;
+    } else {
+      stats.delegation.notDone++;
+      if (new Date(t.deadline) < now) stats.delegation.overdue++;
+    }
+  });
+
+  // CHECKLIST
+  const empChecklists = checklists.filter(t => t.doerId && t.doerId.toString() === emp._id.toString());
+  empChecklists.forEach(t => {
+    let expected = 0;
+    if (t.frequency === 'Daily') expected = view === 'Weekly' ? 7 : (view === 'Daily' ? 1 : (view === 'Monthly' ? 30 : daysInPeriod));
+    else if (t.frequency === 'Weekly') expected = view === 'Monthly' ? 4 : ((view === 'Weekly' || view === 'Daily') ? 1 : Math.max(1, Math.round(daysInPeriod / 7)));
+    else expected = 1;
+
+    const rangeCompletions = t.history.filter(h =>
+      (h.action === 'Completed' || h.action === 'Administrative Completion') &&
+      new Date(h.timestamp) >= startDate && new Date(h.timestamp) <= endDate
+    );
+
+    stats.checklist.total += expected;
+    stats.checklist.done += rangeCompletions.length;
+
+    const missedCount = Math.max(0, expected - rangeCompletions.length);
+    stats.checklist.notDone += missedCount;
+
+    rangeCompletions.forEach(h => {
+      const instanceDueDate = new Date(h.instanceDate || h.timestamp);
+      if (new Date(h.timestamp).toDateString() !== instanceDueDate.toDateString() && new Date(h.timestamp) > instanceDueDate) {
+        stats.checklist.late++;
+      }
+    });
+
+    // Only runs whose day has already passed can be late; the rest are still pending on time.
+    const dueSoFar = elapsedDays >= daysInPeriod ? expected : Math.floor(expected * elapsedDays / daysInPeriod);
+    stats.checklist.overdue += Math.max(0, Math.min(missedCount, dueSoFar - rangeCompletions.length));
+  });
+
+  // FMS
+  const empFmsCompleted = fmsInstances.filter(inst =>
+    inst.status === 'completed' &&
+    inst.nodeHistory && inst.nodeHistory.some(h => h.assignedToId && h.assignedToId.toString() === emp._id.toString())
+  );
+  const empFmsActive = fmsInstances.filter(inst =>
+    inst.status === 'active' &&
+    inst.activeStep && inst.activeStep.assignedToId && inst.activeStep.assignedToId.toString() === emp._id.toString()
+  );
+  empFmsCompleted.forEach(inst => {
+    stats.fms.total++;
+    stats.fms.done++;
+    const lastStep = inst.nodeHistory && inst.nodeHistory.slice(-1)[0];
+    if (lastStep && lastStep.onTime === false) stats.fms.late++;
+  });
+  empFmsActive.forEach(inst => {
+    stats.fms.total++;
+    const deadline = inst.activeStep && inst.activeStep.plannedDeadline;
+    stats.fms.notDone++;
+    if (deadline && new Date(deadline) < now) stats.fms.overdue++;
+  });
+
+  REVIEW_TYPES.forEach((k) => finishBuckets(stats[k]));
+  const weights = resolveReviewWeights(emp, cfg);
+  stats.weights = weights;
+  stats.overall = blendReviewScore(stats, weights);
+  return stats;
+};
+
 exports.getReviewAnalytics = async (req, res) => {
   try {
     const { DelegationTask, Employee, Tenant, ChecklistTask, FlowInstance } = getModels(req);
@@ -2564,123 +2670,123 @@ exports.getReviewAnalytics = async (req, res) => {
     // An explicit period (the Dashboard asks for 'Weekly') is honoured; otherwise the company's chosen period is used.
     const requestedView = String(req.query.view || '');
     const view = REVIEW_PERIODS.includes(requestedView) ? requestedView : cfg.period;
-
-    const now = new Date();
-    const { startDate, endDate } = resolveReviewPeriod(view, date);
-    const dayMs = 24 * 60 * 60 * 1000;
-    const daysInPeriod = Math.max(1, Math.round((endDate.getTime() - startDate.getTime() + 1) / dayMs));
-    const todayStart = new Date(now); todayStart.setHours(0, 0, 0, 0);
-    const elapsedDays = endDate < todayStart
-      ? daysInPeriod
-      : Math.max(0, Math.min(daysInPeriod, Math.floor((todayStart.getTime() - startDate.getTime()) / dayMs)));
+    const rc = reviewContext(view, date);
 
     const [employees, delegations, checklists, fmsInstances] = await Promise.all([
       Employee.find({ tenantId }).select('name department location weeklyLateTarget'),
-      DelegationTask.find({ tenantId, deadline: { $gte: startDate, $lte: endDate } }),
+      DelegationTask.find({ tenantId, deadline: { $gte: rc.startDate, $lte: rc.endDate } }),
       ChecklistTask.find({ tenantId, status: 'Active' }),
       FlowInstance.find({ tenantId, $or: [
-        { status: 'completed', completedAt: { $gte: startDate, $lte: endDate } },
+        { status: 'completed', completedAt: { $gte: rc.startDate, $lte: rc.endDate } },
         { status: 'active' }
       ]}).lean()
     ]);
 
-    const report = employees.map(emp => {
-      const mk = () => ({ total: 0, done: 0, overdue: 0, late: 0, notDone: 0, onTimeDone: 0, lateDone: 0, latePending: 0, pendingOnTime: 0 });
-      const stats = {
-        employeeId: emp._id,
-        employeeName: emp.name,
-        department: emp.department,
-        location: emp.location || '',
-        weeklyLateTarget: emp.weeklyLateTarget || 20,
-        periodStart: startDate.toISOString(),
-        periodEnd: endDate.toISOString(),
-        periodName: reviewPeriodName(view, startDate, endDate),
-        delegation: mk(),
-        checklist: mk(),
-        fms: mk()
-      };
-
-      // DELEGATION
-      const empDelegations = delegations.filter(t => t.doerId && t.doerId.toString() === emp._id.toString());
-      empDelegations.forEach(t => {
-        stats.delegation.total++;
-        const doneRecord = t.history.find(h => h.action === 'Completed' || h.action === 'Verified');
-        if (doneRecord) {
-          stats.delegation.done++;
-          if (new Date(doneRecord.timestamp) > new Date(t.deadline)) stats.delegation.late++;
-        } else {
-          stats.delegation.notDone++;
-          if (new Date(t.deadline) < now) stats.delegation.overdue++;
-        }
-      });
-
-      // CHECKLIST
-      const empChecklists = checklists.filter(t => t.doerId && t.doerId.toString() === emp._id.toString());
-      empChecklists.forEach(t => {
-        let expected = 0;
-        if (t.frequency === 'Daily') expected = view === 'Weekly' ? 7 : (view === 'Daily' ? 1 : (view === 'Monthly' ? 30 : daysInPeriod));
-        else if (t.frequency === 'Weekly') expected = view === 'Monthly' ? 4 : ((view === 'Weekly' || view === 'Daily') ? 1 : Math.max(1, Math.round(daysInPeriod / 7)));
-        else expected = 1;
-
-        const rangeCompletions = t.history.filter(h =>
-          (h.action === 'Completed' || h.action === 'Administrative Completion') &&
-          new Date(h.timestamp) >= startDate && new Date(h.timestamp) <= endDate
-        );
-
-        stats.checklist.total += expected;
-        stats.checklist.done += rangeCompletions.length;
-
-        const missedCount = Math.max(0, expected - rangeCompletions.length);
-        stats.checklist.notDone += missedCount;
-
-        rangeCompletions.forEach(h => {
-          const instanceDueDate = new Date(h.instanceDate || h.timestamp);
-          if (new Date(h.timestamp).toDateString() !== instanceDueDate.toDateString() && new Date(h.timestamp) > instanceDueDate) {
-            stats.checklist.late++;
-          }
-        });
-
-        // Only runs whose day has already passed can be late; the rest are still pending on time.
-        const dueSoFar = elapsedDays >= daysInPeriod ? expected : Math.floor(expected * elapsedDays / daysInPeriod);
-        stats.checklist.overdue += Math.max(0, Math.min(missedCount, dueSoFar - rangeCompletions.length));
-      });
-
-      // FMS
-      const empFmsCompleted = fmsInstances.filter(inst =>
-        inst.status === 'completed' &&
-        inst.nodeHistory && inst.nodeHistory.some(h => h.assignedToId && h.assignedToId.toString() === emp._id.toString())
-      );
-      const empFmsActive = fmsInstances.filter(inst =>
-        inst.status === 'active' &&
-        inst.activeStep && inst.activeStep.assignedToId && inst.activeStep.assignedToId.toString() === emp._id.toString()
-      );
-      empFmsCompleted.forEach(inst => {
-        stats.fms.total++;
-        stats.fms.done++;
-        const lastStep = inst.nodeHistory && inst.nodeHistory.slice(-1)[0];
-        if (lastStep && lastStep.onTime === false) stats.fms.late++;
-      });
-      empFmsActive.forEach(inst => {
-        stats.fms.total++;
-        const deadline = inst.activeStep && inst.activeStep.plannedDeadline;
-        stats.fms.notDone++;
-        if (deadline && new Date(deadline) < now) stats.fms.overdue++;
-      });
-
-      REVIEW_TYPES.forEach((k) => finishBuckets(stats[k]));
-      const weights = resolveReviewWeights(emp, cfg);
-      stats.weights = weights;
-      stats.overall = blendReviewScore(stats, weights);
-      return stats;
-    });
+    const ctx = { ...rc, delegations, checklists, fmsInstances, cfg };
+    const report = employees.map(emp => buildEmployeeReviewStats(emp, ctx));
 
     res.status(200).json({
-      view, startDate, endDate, report,
+      view, startDate: rc.startDate, endDate: rc.endDate, report,
       config: { period: cfg.period, thresholds: cfg.thresholds, weights: cfg.weights }
     });
   } catch (error) {
     console.error("Analytics Calculation Error:", error);
     res.status(500).json({ message: "Analytics calculation failed" });
+  }
+};
+
+// ─── PERSONAL DASHBOARD ──────────────────────────────────────────────────────
+// Everything one person needs on the dashboard in a single call: identity, points, badges,
+// this period's numbers, what is overdue / due soon, and (Admin only) the points leaderboard.
+// A person can open their own; an Admin can open anyone's in the same company.
+exports.getUserDashboard = async (req, res) => {
+  try {
+    const { DelegationTask, Employee, Tenant, ChecklistTask, FlowInstance } = getModels(req);
+    const { employeeId } = req.params;
+    const { date = new Date() } = req.query;
+    if (!mongoose.Types.ObjectId.isValid(employeeId)) return res.status(400).json({ message: 'Invalid employee.' });
+
+    const caller = req.user || {};
+    const callerRoles = Array.isArray(caller.roles) ? caller.roles : [];
+    const isAdminCaller = !!(caller.isSuperAdmin || callerRoles.includes('Admin'));
+    if (!isAdminCaller && String(caller.id) !== String(employeeId)) {
+      return res.status(403).json({ message: 'You can only open your own dashboard.' });
+    }
+
+    // The original bootstrap admin of a company with its own database only exists in the shared database.
+    let emp = await Employee.findById(employeeId).select('-password');
+    if (!emp && req.db) emp = await require('../models/Employee').findById(employeeId).select('-password');
+    if (!emp) return res.status(404).json({ message: 'Employee not found.' });
+    if (!caller.isSuperAdmin && String(emp.tenantId) !== String(caller.tenantId)) {
+      return res.status(403).json({ message: 'Not allowed.' });
+    }
+
+    const tenantId = emp.tenantId;
+    const empIdStr = String(emp._id);
+    const tenantDoc = await Tenant.findById(tenantId).select('reviewConfig').lean().catch(() => null);
+    const cfg = readReviewConfig(tenantDoc && tenantDoc.reviewConfig);
+    const requestedView = String(req.query.view || '');
+    const view = REVIEW_PERIODS.includes(requestedView) ? requestedView : cfg.period;
+    const rc = reviewContext(view, date);
+    const now = rc.now;
+    const dayMs = 24 * 60 * 60 * 1000;
+    const todayStart = new Date(now); todayStart.setHours(0, 0, 0, 0);
+    const todayEnd = new Date(now); todayEnd.setHours(23, 59, 59, 999);
+
+    const [delegations, checklists, fmsInstances, openCandidates] = await Promise.all([
+      DelegationTask.find({ tenantId, doerId: emp._id, deadline: { $gte: rc.startDate, $lte: rc.endDate } }),
+      ChecklistTask.find({ tenantId, doerId: emp._id, status: 'Active' }),
+      FlowInstance.find({ tenantId, $or: [
+        { status: 'completed', completedAt: { $gte: rc.startDate, $lte: rc.endDate }, 'nodeHistory.assignedToId': empIdStr },
+        { status: 'active', 'activeStep.assignedToId': empIdStr }
+      ]}).lean(),
+      DelegationTask.find({ tenantId, doerId: emp._id, deadline: { $lt: new Date(now.getTime() + 7 * dayMs) } }).sort({ deadline: 1 }).limit(300).lean()
+    ]);
+
+    const stats = buildEmployeeReviewStats(emp, { ...rc, delegations, checklists, fmsInstances, cfg });
+
+    const isDone = (t) => (t.history || []).some(h => h.action === 'Completed' || h.action === 'Verified');
+    const openOnes = openCandidates.filter(t => !isDone(t));
+    const pick = (t) => ({ id: t._id, title: t.title || t.taskName || 'Task', deadline: t.deadline, status: t.status || '' });
+    const overdueList = openOnes.filter(t => new Date(t.deadline) < now);
+    const dueSoonList = openOnes.filter(t => new Date(t.deadline) >= now);
+
+    const checklistRows = checklists.map(t => ({ id: t._id, name: t.taskName, frequency: t.frequency, nextDueDate: t.nextDueDate }));
+    const checklistOverdue = checklistRows.filter(c => c.nextDueDate && new Date(c.nextDueDate) < todayStart);
+    const checklistToday = checklistRows.filter(c => c.nextDueDate && new Date(c.nextDueDate) >= todayStart && new Date(c.nextDueDate) <= todayEnd);
+
+    const fmsPending = fmsInstances.filter(i => i.status === 'active' && i.activeStep).map(i => ({
+      id: i._id,
+      name: `${i.templateName || 'FMS'} #${i.orderIdentifier}`,
+      step: i.activeStep.nodeName,
+      deadline: i.activeStep.plannedDeadline || null,
+      overdue: !!(i.activeStep.plannedDeadline && new Date(i.activeStep.plannedDeadline) < now)
+    }));
+
+    let topPerformers = [];
+    if (isAdminCaller) {
+      topPerformers = await Employee.find({ tenantId }).select('name department location totalPoints earnedBadges').sort({ totalPoints: -1 }).limit(5).lean();
+    }
+
+    res.status(200).json({
+      employee: {
+        _id: emp._id, name: emp.name, email: emp.email, department: emp.department || '', location: emp.location || '',
+        roles: emp.roles || [], totalPoints: emp.totalPoints || 0, earnedBadges: emp.earnedBadges || [],
+        leaveStatus: emp.leaveStatus || null
+      },
+      isSelf: String(caller.id) === empIdStr,
+      view, startDate: rc.startDate, endDate: rc.endDate,
+      config: { period: cfg.period, thresholds: cfg.thresholds },
+      stats,
+      overdue: { count: overdueList.length, truncated: openCandidates.length >= 300, items: overdueList.slice(0, 15).map(pick) },
+      dueSoon: { count: dueSoonList.length, items: dueSoonList.slice(0, 15).map(pick) },
+      checklist: { overdueCount: checklistOverdue.length, todayCount: checklistToday.length, items: [...checklistOverdue, ...checklistToday].slice(0, 15) },
+      fms: { pendingCount: fmsPending.length, items: fmsPending.slice(0, 15) },
+      topPerformers
+    });
+  } catch (error) {
+    console.error('Dashboard error:', error);
+    res.status(500).json({ message: 'Dashboard could not be loaded.' });
   }
 };
 
