@@ -2494,40 +2494,37 @@ const resolveReviewWeights = (emp, cfg) => {
   return { delegation: src.delegation, checklist: src.checklist, fms: src.fms, source: best ? 'rule' : 'default' };
 };
 
+// Review periods follow INDIA time (IST, +05:30): a "day" is midnight to midnight in India,
+// whatever time zone the server clock is set to (the server runs on UTC).
+const IST_OFFSET_MS = 330 * 60 * 1000;
+const istStartOfDay = (d) => { const w = new Date(d.getTime() + IST_OFFSET_MS); return new Date(Date.UTC(w.getUTCFullYear(), w.getUTCMonth(), w.getUTCDate()) - IST_OFFSET_MS); };
 const resolveReviewPeriod = (view, referenceDate) => {
   const ref = new Date(referenceDate);
   const base = isNaN(ref.getTime()) ? new Date() : ref;
-  const y = base.getFullYear(), m = base.getMonth(), d = base.getDate();
+  const w = new Date(base.getTime() + IST_OFFSET_MS); // wall-clock fields in IST, read with the UTC getters
+  const y = w.getUTCFullYear(), m = w.getUTCMonth(), d = w.getUTCDate(), day = w.getUTCDay();
+  const at = (yy, mm, dd) => new Date(Date.UTC(yy, mm, dd) - IST_OFFSET_MS); // midnight IST of that date
+  const before = (t) => new Date(t.getTime() - 1);                              // 23:59:59.999 of the previous day
   let startDate, endDate;
   if (view === 'Daily') {
-    startDate = new Date(y, m, d, 0, 0, 0, 0);
-    endDate = new Date(y, m, d, 23, 59, 59, 999);
+    startDate = at(y, m, d); endDate = before(at(y, m, d + 1));
   } else if (view === 'Weekly') {
-    const day = base.getDay();
-    startDate = new Date(y, m, d - day + (day === 0 ? -6 : 1), 0, 0, 0, 0);
-    endDate = new Date(startDate.getFullYear(), startDate.getMonth(), startDate.getDate() + 6, 23, 59, 59, 999);
+    startDate = at(y, m, d - day + (day === 0 ? -6 : 1)); endDate = before(new Date(startDate.getTime() + 7 * 24 * 60 * 60 * 1000));
   } else if (view === 'TwiceMonthly') {
-    if (d <= 15) {
-      startDate = new Date(y, m, 1, 0, 0, 0, 0);
-      endDate = new Date(y, m, 15, 23, 59, 59, 999);
-    } else {
-      startDate = new Date(y, m, 16, 0, 0, 0, 0);
-      endDate = new Date(y, m + 1, 0, 23, 59, 59, 999);
-    }
+    if (d <= 15) { startDate = at(y, m, 1); endDate = before(at(y, m, 16)); }
+    else { startDate = at(y, m, 16); endDate = before(at(y, m + 1, 1)); }
   } else if (view === 'Quarterly') {
     const qm = Math.floor(m / 3) * 3;
-    startDate = new Date(y, qm, 1, 0, 0, 0, 0);
-    endDate = new Date(y, qm + 3, 0, 23, 59, 59, 999);
+    startDate = at(y, qm, 1); endDate = before(at(y, qm + 3, 1));
   } else {
-    startDate = new Date(y, m, 1, 0, 0, 0, 0);
-    endDate = new Date(y, m + 1, 0, 23, 59, 59, 999);
+    startDate = at(y, m, 1); endDate = before(at(y, m + 1, 1));
   }
   return { startDate, endDate };
 };
 
 const reviewPeriodName = (view, startDate, endDate) => {
-  const f = (d) => d.toLocaleDateString('en-GB');
-  if (view === 'Weekly') return `Week of ${startDate.toLocaleDateString()}`;
+  const f = (d) => { const w = new Date(d.getTime() + IST_OFFSET_MS); return String(w.getUTCDate()).padStart(2, '0') + '/' + String(w.getUTCMonth() + 1).padStart(2, '0') + '/' + w.getUTCFullYear(); };
+  if (view === 'Weekly') return `Week of ${f(startDate)}`;
   if (view === 'Daily') return f(startDate);
   return `${f(startDate)} - ${f(endDate)}`;
 };
@@ -2572,7 +2569,7 @@ const reviewContext = (view, date) => {
   const { startDate, endDate } = resolveReviewPeriod(view, date);
   const dayMs = 24 * 60 * 60 * 1000;
   const daysInPeriod = Math.max(1, Math.round((endDate.getTime() - startDate.getTime() + 1) / dayMs));
-  const todayStart = new Date(now); todayStart.setHours(0, 0, 0, 0);
+  const todayStart = istStartOfDay(now);
   const elapsedDays = endDate < todayStart
     ? daysInPeriod
     : Math.max(0, Math.min(daysInPeriod, Math.floor((todayStart.getTime() - startDate.getTime()) / dayMs)));
@@ -2744,8 +2741,8 @@ exports.getUserDashboard = async (req, res) => {
     const rc = reviewContext(view, date);
     const now = rc.now;
     const dayMs = 24 * 60 * 60 * 1000;
-    const todayStart = new Date(now); todayStart.setHours(0, 0, 0, 0);
-    const todayEnd = new Date(now); todayEnd.setHours(23, 59, 59, 999);
+    const todayStart = istStartOfDay(now);
+    const todayEnd = new Date(todayStart.getTime() + 24 * 60 * 60 * 1000 - 1);
 
     const [delegations, checklists, fmsInstances, openCandidates] = await Promise.all([
       DelegationTask.find({ tenantId, doerId: emp._id, deadline: { $gte: rc.startDate, $lte: rc.endDate } }),
