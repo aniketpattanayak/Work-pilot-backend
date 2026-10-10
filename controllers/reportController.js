@@ -118,8 +118,16 @@ exports.manualDownload = async (req, res) => {
         const DelegationTask = req.db ? req.db.model('DelegationTask') : require('../models/DelegationTask');
         const ChecklistTask  = req.db ? req.db.model('ChecklistTask')  : require('../models/ChecklistTask');
 
+        const endOfToday = moment().endOf('day').toDate();
         const [delegations, checklists] = await Promise.all([
-            DelegationTask.find({ tenantId, createdAt: { $gte: startDate } }).populate('assignerId doerId'),
+            DelegationTask.find({
+                tenantId,
+                $or: [
+                    { createdAt: { $gte: startDate } },
+                    { deadline: { $gte: startDate, $lte: endOfToday } },
+                    { 'history.timestamp': { $gte: startDate } },
+                ],
+            }).populate('assignerId doerId'),
             ChecklistTask.find({ tenantId }).populate('doerId')
         ]);
 
@@ -135,6 +143,7 @@ exports.manualDownload = async (req, res) => {
             { header: 'Assigned To', key: 'doneBy' },
             { header: 'Deadline', key: 'date' },
             { header: 'Status', key: 'status' },
+            { header: 'Completed On', key: 'completedOn' },
             { header: 'Assigned By', key: 'assignedBy' },
         ];
 
@@ -148,6 +157,7 @@ exports.manualDownload = async (req, res) => {
                 doneBy: task.doerId?.name || 'Staff',
                 date: moment(task.deadline).format('DD MMM YYYY'),
                 status: doneRecord ? 'Done' : 'Not Done',
+                completedOn: doneRecord ? moment(doneRecord.timestamp).format('DD MMM YYYY, hh:mm A') : '—',
                 assignedBy: task.assignerId?.name || 'Admin',
             });
         });
@@ -251,8 +261,9 @@ exports.manualDownload = async (req, res) => {
         res.end();
 
     } catch (error) {
-        console.error("Excel Export Error:", error.message);
-        res.status(500).json({ message: "Failed to generate spreadsheet" });
+        console.error('[Reports] Excel export failed for tenant', req.params?.tenantId, '-', error.stack || error.message);
+        if (res.headersSent) return res.end();
+        res.status(500).json({ message: 'Failed to generate spreadsheet', error: error.message });
     }
 };
 
