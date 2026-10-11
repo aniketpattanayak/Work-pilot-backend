@@ -659,3 +659,6 @@ exports.faceDelete = async (req, res) => {
     res.json({ ok: true });
   } catch (e) { res.status(500).json({ message: 'Could not delete the face.' }); }
 };
+
+// Used by the payroll controller so payroll counts days exactly as attendance does
+exports.payrollHelpers = { buildDays, loadTenant, assignmentMaps };

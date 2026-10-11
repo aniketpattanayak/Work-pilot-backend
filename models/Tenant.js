@@ -65,6 +65,23 @@ const TenantSchema = new mongoose.Schema({
     graceMinutes:     { type: Number, default: 10 }
   },
 
+  // Payroll settings: how days are counted, rounding, who may approve, payslip header and the salary components (HRA, allowances, deductions)
+  payrollConfig: {
+    dayBasis:          { type: String, enum: ['calendar', '30'], default: 'calendar' },
+    roundNet:          { type: Boolean, default: true },
+    allowSelfApproval: { type: Boolean, default: false },
+    employerName:      { type: String, default: '' },
+    employerAddress:   { type: String, default: '' },
+    components: [{
+      _id: false, key: String, name: String,
+      type:   { type: String, enum: ['earning', 'deduction'] },
+      calc:   { type: String, enum: ['fixed', 'percentBasic'], default: 'fixed' },
+      value:  { type: Number, default: 0 },
+      prorate:{ type: Boolean, default: true },
+      active: { type: Boolean, default: true }
+    }]
+  },
+
   // Review Meeting settings (all optional; defaults apply when nothing is saved)
   reviewConfig: {
     period: { type: String, enum: ['Daily', 'Weekly', 'TwiceMonthly', 'Monthly', 'Quarterly'], default: 'Monthly' },

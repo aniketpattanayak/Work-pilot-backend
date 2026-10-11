@@ -43,6 +43,7 @@ const { requirePermission, requireAnyPermission, adminOfSameCompany } = require(
 const accessController = require('../controllers/accessController');
 const leaveController = require('../controllers/leaveController');
 const attendanceController = require('../controllers/attendanceController');
+const payrollController = require('../controllers/payrollController');
 
 
 // ─── PUBLIC ROUTES (no auth required) ────────────────────────────────────────
@@ -158,6 +159,29 @@ router.post('/attendance/face/enrol', ...attBase, requirePermission('attendance.
 router.get('/attendance/face/pending', ...attBase, requirePermission('attendance.approve'), attendanceController.facePending);
 router.put('/attendance/face/:employeeId/decision', ...attBase, requirePermission('attendance.approve'), attendanceController.faceDecide);
 router.delete('/attendance/face/:employeeId', ...attBase, anyAtt, attendanceController.faceDelete);
+
+// Payroll (salary structures, monthly run, payslips). Payroll is closed to everyone, Admins included, until given through a role.
+const payBase = [authMiddleware, subscriptionGuard, tenantDbMiddleware];
+const anyPay = requireAnyPermission(['payroll.viewSalary', 'payroll.prepare', 'payroll.approve', 'payroll.release', 'payroll.export', 'payroll.configure']);
+const payRuns = requireAnyPermission(['payroll.viewSalary', 'payroll.prepare', 'payroll.approve', 'payroll.release', 'payroll.export', 'payroll.configure'], 'company');
+router.get('/payroll/config', ...payBase, anyPay, payrollController.getConfig);
+router.put('/payroll/config', ...payBase, requirePermission('payroll.configure'), payrollController.setConfig);
+router.get('/payroll/salaries', ...payBase, requirePermission('payroll.viewSalary'), payrollController.listSalaries);
+router.get('/payroll/salaries/:employeeId', ...payBase, requirePermission('payroll.viewSalary'), payrollController.getSalary);
+router.put('/payroll/salaries/:employeeId', ...payBase, requirePermission('payroll.configure'), payrollController.setSalary);
+router.get('/payroll/runs', ...payBase, payRuns, payrollController.listRuns);
+router.post('/payroll/runs', ...payBase, requirePermission('payroll.prepare', 'company'), payrollController.createRun);
+router.get('/payroll/runs/:id', ...payBase, payRuns, payrollController.getRun);
+router.post('/payroll/runs/:id/recalculate', ...payBase, requirePermission('payroll.prepare', 'company'), payrollController.recalculate);
+router.put('/payroll/runs/:id/lines/:employeeId', ...payBase, requirePermission('payroll.prepare', 'company'), payrollController.updateLine);
+router.delete('/payroll/runs/:id', ...payBase, requirePermission('payroll.prepare', 'company'), payrollController.cancelRun);
+router.put('/payroll/runs/:id/approve', ...payBase, requirePermission('payroll.approve'), payrollController.approveRun);
+router.put('/payroll/runs/:id/reopen', ...payBase, requirePermission('payroll.approve'), payrollController.reopenRun);
+router.put('/payroll/runs/:id/release', ...payBase, requirePermission('payroll.release'), payrollController.releaseRun);
+router.get('/payroll/runs/:id/export', ...payBase, requirePermission('payroll.export'), payrollController.exportRun);
+router.get('/payroll/my-payslips', ...payBase, payrollController.myPayslips);
+router.get('/payroll/payslip/:runId/:employeeId', ...payBase, payrollController.payslip);
+router.get('/payroll/person/:employeeId/payslips', ...payBase, requirePermission('payroll.viewSalary'), payrollController.personPayslips);
 router.get('/authorized-staff/:id', authMiddleware, subscriptionGuard, tenantDbMiddleware, taskController.getAuthorizedStaff);
 
 // Mapping, branding & settings
