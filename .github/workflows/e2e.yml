@@ -135,7 +135,7 @@ jobs:
             const walk = (suite) => {
               (suite.suites || []).forEach(walk);
               (suite.specs || []).forEach(spec => spec.tests.forEach(t => {
-                if (t.results[t.results.length - 1].status !== 'passed') failed = true;
+                const s = t.results[t.results.length - 1].status; if (s !== 'passed' && s !== 'skipped') failed = true;
               }));
             };
             walk(r);

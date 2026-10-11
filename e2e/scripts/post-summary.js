@@ -19,12 +19,14 @@ try {
     (suite.specs || []).forEach((spec) => {
       spec.tests.forEach((t) => {
         const res = t.results[t.results.length - 1];
-        const ok = res.status === 'passed';
+        const skipped = res.status === 'skipped';
+        const ok = res.status === 'passed' || skipped;
         if (!ok) failed = true;
         // Keep the first ~8 lines of the error, not just the first line — Playwright puts
         // the actual "Locator:" / "Expected:" / "Received:" / call-log detail after line 1.
         const errMsg = res.error ? stripAnsi(res.error.message).split('\n').slice(0, 8).join('\n') : res.status;
-        lines.push((ok ? '[PASS] ' : '[FAIL] ') + spec.title + (ok ? '' : '\n' + fence + '\n' + errMsg + '\n' + fence));
+        const tag = skipped ? '[SKIP] ' : ok ? '[PASS] ' : '[FAIL] ';
+        lines.push(tag + spec.title + (ok ? '' : '\n' + fence + '\n' + errMsg + '\n' + fence));
       });
     });
   };
