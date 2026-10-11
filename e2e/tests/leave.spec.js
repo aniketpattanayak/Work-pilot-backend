@@ -19,6 +19,21 @@ async function login(page) {
 // that permission, the form won't exist — this test will fail clearly at the first `expect`,
 // rather than silently skip, so a real permission/setup gap gets surfaced.
 test('apply for leave and see the request listed', async ({ page }) => {
+  // Capture what the browser's own GET /tasks/leave/types actually returns, so a mismatch
+  // with what the setup script sees (checked server-side already) is diagnosable from the
+  // error message alone — a previous run proved the backend genuinely has a type while the
+  // UI's dropdown stayed empty, source unknown. Attached before navigating, since
+  // LeavePage.jsx fires this request immediately on mount.
+  let typesApiDebug = '(no /leave/types response observed)';
+  page.on('response', async (r) => {
+    if (r.url().includes('/leave/types') && r.request().method() === 'GET') {
+      try {
+        const body = await r.text();
+        typesApiDebug = `GET ${r.url()} -> ${r.status()} cache-control=${r.headers()['cache-control'] || '(none)'} cf-cache-status=${r.headers()['cf-cache-status'] || '(none)'} body=${body}`;
+      } catch (e) { typesApiDebug = `GET /leave/types response read failed: ${e.message}`; }
+    }
+  });
+
   await login(page);
   await page.goto('/dashboard/leave');
 
@@ -29,20 +44,6 @@ test('apply for leave and see the request listed', async ({ page }) => {
   // GET /tasks/access/me — on first render tabs is empty and nothing below renders at all. Wait
   // for the "My leave" tab itself first, so we're not racing that permissions fetch.
   await expect(page.getByRole('button', { name: 'My leave' })).toBeVisible({ timeout: 15_000 });
-
-  // Capture what the browser's own GET /tasks/leave/types actually returned, so a mismatch
-  // with what the setup script sees (checked server-side already) is diagnosable from the
-  // error message alone — a previous run proved the backend genuinely has a type while the
-  // UI's dropdown stayed empty, source unknown.
-  let typesApiDebug = '(no /leave/types response observed)';
-  page.on('response', async (r) => {
-    if (r.url().includes('/leave/types') && r.request().method() === 'GET') {
-      try {
-        const body = await r.text();
-        typesApiDebug = `GET ${r.url()} -> ${r.status()} cache-control=${r.headers()['cache-control'] || '(none)'} cf-cache-status=${r.headers()['cf-cache-status'] || '(none)'} body=${body}`;
-      } catch (e) { typesApiDebug = `GET /leave/types response read failed: ${e.message}`; }
-    }
-  });
 
   const leaveTypeSelect = page.getByLabel('Leave type');
   await expect(leaveTypeSelect).toBeVisible({ timeout: 10_000 });
