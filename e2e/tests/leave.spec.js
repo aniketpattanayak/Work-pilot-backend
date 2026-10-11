@@ -47,7 +47,16 @@ test('apply for leave and see the request listed', async ({ page }) => {
   const reasonText = `Playwright automated test ${Date.now()}`;
   await page.getByLabel('Reason').fill(reasonText);
 
-  await page.getByRole('button', { name: /Send for approval/i }).click();
+  // Capture the actual API response so a failure here is diagnosable from the error
+  // message alone (no video/screenshot access in this environment).
+  const [response] = await Promise.all([
+    page.waitForResponse((r) => r.url().includes('/leave/requests') && r.request().method() === 'POST'),
+    page.getByRole('button', { name: /Send for approval/i }).click(),
+  ]);
+  if (!response.ok()) {
+    const body = await response.text();
+    throw new Error(`POST /leave/requests returned ${response.status()}: ${body}`);
+  }
 
   // Success path shows a dialog.alert with "Sent" title and a message like
   // "Your request for N day(s) was sent for approval." — match on the stable substring.
