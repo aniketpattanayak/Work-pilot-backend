@@ -6,6 +6,12 @@ name: E2E live UI test (PRODUCTION)
 # PROD_SUPERADMIN_PASS repo secrets to be set first.
 on:
   workflow_dispatch: {}
+  # workflow_dispatch only works via the API/UI once this file exists on the default
+  # branch, which it deliberately doesn't yet — so also trigger on push to a dedicated
+  # path/branch, used only to fire this run on demand.
+  push:
+    branches: ['test/e2e-playwright-ci']
+    paths: ['.github/workflows/e2e-prod.yml', 'e2e/RUN_PROD_TRIGGER']
 
 permissions:
   contents: write
