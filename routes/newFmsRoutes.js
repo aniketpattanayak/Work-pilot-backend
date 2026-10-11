@@ -38,7 +38,7 @@ router.get('/coordinator-completed/:coordinatorId', authMiddleware, subscription
 router.get('/my-tasks/:employeeId',            authMiddleware, subscriptionGuard, tenantDbMiddleware, c.getMyTasks);
 router.post('/repair-assignees/:tenantId',  authMiddleware, c.repairAssignees);
 router.post('/fix-assignees/:tenantId',     authMiddleware, c.fixInstanceAssignee);
-router.post('/instance/:instanceId/reassign', authMiddleware, c.reassignInstance);
+router.post('/instance/:instanceId/reassign', authMiddleware, subscriptionGuard, tenantDbMiddleware, c.reassignInstance);
 router.get('/my-tasks-full/:employeeId',       authMiddleware, subscriptionGuard, tenantDbMiddleware, c.getMyTasksWithNodes);
 
 module.exports = router;

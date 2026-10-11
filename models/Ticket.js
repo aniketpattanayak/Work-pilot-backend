@@ -45,4 +45,8 @@ const TicketSchema = new mongoose.Schema({
   }]
 }, { timestamps: true });
 
+// Indexes
+TicketSchema.index({ tenantId: 1, status: 1 });
+TicketSchema.index({ tenantId: 1, reporterId: 1 });
+
 module.exports = mongoose.model('SupportTicket', TicketSchema);
