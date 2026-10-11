@@ -25,8 +25,13 @@ test('apply for leave and see the request listed', async ({ page }) => {
   // The page header banner also says "Leave", so scope to the main content heading.
   await expect(page.getByRole('main').getByRole('heading', { name: 'Leave' })).toBeVisible();
 
+  // LeavePage.jsx computes its tabs from usePermissions(), which only resolves after an async
+  // GET /tasks/access/me — on first render tabs is empty and nothing below renders at all. Wait
+  // for the "My leave" tab itself first, so we're not racing that permissions fetch.
+  await expect(page.getByRole('button', { name: 'My leave' })).toBeVisible({ timeout: 15_000 });
+
   const leaveTypeSelect = page.getByLabel('Leave type');
-  await expect(leaveTypeSelect).toBeVisible({ timeout: 8000 });
+  await expect(leaveTypeSelect).toBeVisible({ timeout: 10_000 });
 
   // Need at least one real leave type configured to pick from (option[1], since option[0] is "Choose...").
   const optionCount = await leaveTypeSelect.locator('option').count();
