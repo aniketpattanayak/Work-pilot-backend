@@ -8,10 +8,10 @@ module.exports = defineConfig({
   fullyParallel: false,
   retries: 1,
   workers: 1,
-  reporter: process.env.CI ? [['list'], ['html', { open: 'never' }]] : [['list'], ['html', { open: 'never' }]],
+  reporter: [['list'], ['html', { open: 'never' }], ['json', { outputFile: 'playwright-report/results.json' }]],
   use: {
     baseURL: 'http://wp-qa-test.localhost:5173',
-    headless: true,
+    headless: !!process.env.CI,
     screenshot: 'on',
     video: 'retain-on-failure',
     trace: 'retain-on-failure',

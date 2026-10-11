@@ -66,6 +66,7 @@ jobs:
       - name: Run live UI tests
         working-directory: e2e
         run: npx playwright test
+        continue-on-error: true
         env:
           E2E_API_BASE: http://127.0.0.1:5001/api
 
@@ -77,11 +78,74 @@ jobs:
           path: e2e/playwright-report/
           retention-days: 14
 
-      - name: Upload server logs on failure
-        if: failure()
+      - name: Upload server logs
+        if: always()
         uses: actions/upload-artifact@v4
         with:
           name: server-logs
           path: |
             backend.log
             frontend.log
+
+      # The results-receiver / blob-storage hosts that serve raw logs and artifacts aren't
+      # reachable from Claude's sandbox, so post a plain-text summary as a commit comment
+      # instead — that goes through api.github.com, which Claude can read directly.
+      - name: Post results summary as a commit comment
+        if: always()
+        working-directory: e2e
+        run: |
+          node -e "
+            const fs = require('fs');
+            let body = '## E2E live UI test results\n\n';
+            let failed = false;
+            try {
+              const r = JSON.parse(fs.readFileSync('playwright-report/results.json', 'utf8'));
+              const lines = [];
+              const walk = (suite, prefix) => {
+                (suite.suites || []).forEach(s => walk(s, prefix));
+                (suite.specs || []).forEach(spec => {
+                  spec.tests.forEach(t => {
+                    const res = t.results[t.results.length - 1];
+                    const ok = res.status === 'passed';
+                    if (!ok) failed = true;
+                    lines.push((ok ? '✅' : '❌') + ' ' + spec.title + (ok ? '' : ' — ' + (res.error ? res.error.message.split('\n')[0] : res.status)));
+                  });
+                });
+              };
+              walk(r, '');
+              body += lines.join('\n') + '\n';
+            } catch (e) {
+              failed = true;
+              body += 'Could not read results.json: ' + e.message + '\n';
+            }
+            body += '\nBackend log tail:\n```\n' + (fs.existsSync('../backend.log') ? fs.readFileSync('../backend.log','utf8').split('\n').slice(-40).join('\n') : 'n/a') + '\n```\n';
+            body += '\nFrontend log tail:\n```\n' + (fs.existsSync('../frontend.log') ? fs.readFileSync('../frontend.log','utf8').split('\n').slice(-20).join('\n') : 'n/a') + '\n```\n';
+            fs.writeFileSync('../summary.md', body);
+            console.log(body);
+            if (failed) process.exitCode = 0; // never fail this step itself
+          "
+        continue-on-error: true
+
+      - name: Publish commit comment
+        if: always()
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: gh api repos/${{ github.repository }}/commits/${{ github.sha }}/comments -f body=@summary.md
+
+      - name: Fail the job if any test failed
+        if: always()
+        working-directory: e2e
+        run: |
+          node -e "
+            const fs = require('fs');
+            const r = JSON.parse(fs.readFileSync('playwright-report/results.json', 'utf8'));
+            let failed = false;
+            const walk = (suite) => {
+              (suite.suites || []).forEach(walk);
+              (suite.specs || []).forEach(spec => spec.tests.forEach(t => {
+                if (t.results[t.results.length - 1].status !== 'passed') failed = true;
+              }));
+            };
+            walk(r);
+            process.exit(failed ? 1 : 0);
+          "
