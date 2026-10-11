@@ -29,10 +29,18 @@ test('punch in records a punch for today', async ({ page }) => {
 
   // send() shows a success notice with role="status" ("Punched in." / similar), or if the
   // backend asks for a reason (409 NEEDS_REASON) an inline "A manager needs to check this
-  // punch" panel appears instead. Either is a real, verifiable outcome — assert one of them.
+  // punch" panel appears instead. Any other failure (e.g. a minimum-gap-between-punches
+  // rule) surfaces as a role="dialog" alert instead — surface its message directly rather
+  // than timing out blind.
   const notice = page.getByRole('status');
   const reasonPanel = page.getByText('A manager needs to check this punch');
-  await expect(notice.or(reasonPanel)).toBeVisible({ timeout: 8000 });
+  const errorDialog = page.getByRole('dialog');
+  await expect(notice.or(reasonPanel).or(errorDialog)).toBeVisible({ timeout: 8000 });
+
+  if (await errorDialog.isVisible()) {
+    const message = await errorDialog.innerText();
+    throw new Error(`Punch failed: ${message}`);
+  }
 
   if (await reasonPanel.isVisible()) {
     await page.getByLabel('Reason').fill('Playwright automated test punch');

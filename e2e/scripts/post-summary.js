@@ -46,6 +46,7 @@ const logTail = (file, n) => {
 body += '\nConnectivity diagnostics:\n' + fence + '\n' + logTail('diag.log', 60) + '\n' + fence + '\n';
 body += '\nBackend log tail:\n' + fence + '\n' + logTail('backend.log', 40) + '\n' + fence + '\n';
 body += '\nFrontend log tail:\n' + fence + '\n' + logTail('frontend.log', 20) + '\n' + fence + '\n';
+body += '\nProd setup trace:\n' + fence + '\n' + logTail('e2e/setup-prod.log', 60) + '\n' + fence + '\n';
 
 fs.writeFileSync(path.join('..', 'summary.md'), body);
 console.log(body);
