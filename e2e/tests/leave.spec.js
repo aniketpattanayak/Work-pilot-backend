@@ -25,15 +25,21 @@ test('apply for leave and see the request listed', async ({ page }) => {
   // UI's dropdown stayed empty, source unknown. Attached before navigating, since
   // LeavePage.jsx fires this request immediately on mount.
   let typesApiDebug = '(no /leave/types request observed)';
-  await page.route('**/leave/types**', async (route) => {
-    const response = await route.fetch();
-    if (route.request().method() === 'GET') {
+  const allRequests = [];
+  page.on('request', (r) => { allRequests.push(`${r.method()} ${r.url()}`); });
+  page.on('requestfinished', async (r) => {
+    if (r.url().includes('leave/types') || r.url().includes('leave%2Ftypes')) {
       try {
-        const body = await response.text();
-        typesApiDebug = `GET ${route.request().url()} -> ${response.status()} cache-control=${response.headers()['cache-control'] || '(none)'} cf-cache-status=${response.headers()['cf-cache-status'] || '(none)'} body=${body}`;
-      } catch (e) { typesApiDebug = `GET /leave/types response read failed: ${e.message}`; }
+        const res = await r.response();
+        const body = res ? await res.text() : '(no response object)';
+        typesApiDebug = `${r.method()} ${r.url()} -> ${res ? res.status() : '?'} body=${body}`;
+      } catch (e) { typesApiDebug = `leave/types requestfinished read failed: ${e.message}`; }
     }
-    await route.fulfill({ response });
+  });
+  page.on('requestfailed', (r) => {
+    if (r.url().includes('leave/types')) {
+      typesApiDebug = `${r.method()} ${r.url()} FAILED: ${r.failure()?.errorText}`;
+    }
   });
 
   await login(page);
@@ -53,7 +59,8 @@ test('apply for leave and see the request listed', async ({ page }) => {
   // Need at least one real leave type configured to pick from (option[1], since option[0] is "Choose...").
   const optionCount = await leaveTypeSelect.locator('option').count();
   if (optionCount < 2) {
-    throw new Error(`No leave types are configured for this tenant — set up a leave type first (Leave > Setup) before this test can apply for one. Browser's own API call: ${typesApiDebug}`);
+    const requestDump = allRequests.filter((u) => u.includes('/tasks/') || u.includes('/api/')).join('\n');
+    throw new Error(`No leave types are configured for this tenant — set up a leave type first (Leave > Setup) before this test can apply for one. Browser's own API call: ${typesApiDebug}\nAll /tasks or /api requests made so far:\n${requestDump || '(none)'}`);
   }
   await leaveTypeSelect.selectOption({ index: 1 });
 
