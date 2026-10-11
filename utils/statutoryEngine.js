@@ -19,7 +19,8 @@ const cleanStr = (v, max) => String(v == null ? '' : v).replace(/\s+/g, ' ').tri
 const DEFAULTS = {
   pf: { enabled: false, capWages: true, wageCeiling: 15000, employeePct: 12, employerPct: 12, epsPct: 8.33, epsCeiling: 15000, adminPct: 0.5, edliPct: 0.5 },
   esi: { enabled: false, grossLimit: 21000, employeePct: 0.75, employerPct: 3.25 },
-  pt: { enabled: false, state: '', slabs: [] }
+  pt: { enabled: false, state: '', slabs: [] },
+  tds: { enabled: false, defaultRegime: 'new' }
 };
 
 // Starting slab tables. The company must check them against the current state notification before use.
@@ -40,16 +41,18 @@ function withDefaults(saved) {
   return {
     pf: { ...DEFAULTS.pf, ...(s.pf || {}) },
     esi: { ...DEFAULTS.esi, ...(s.esi || {}) },
-    pt: { ...DEFAULTS.pt, ...(s.pt || {}), slabs: ((s.pt && s.pt.slabs) || []).map((x) => ({ from: x.from, amount: x.amount, ...(x.febAmount != null ? { febAmount: x.febAmount } : {}) })) }
+    pt: { ...DEFAULTS.pt, ...(s.pt || {}), slabs: ((s.pt && s.pt.slabs) || []).map((x) => ({ from: x.from, amount: x.amount, ...(x.febAmount != null ? { febAmount: x.febAmount } : {}) })) },
+    tds: { ...DEFAULTS.tds, ...(s.tds || {}) }
   };
 }
-const anyOn = (cfg) => !!(cfg && ((cfg.pf && cfg.pf.enabled) || (cfg.esi && cfg.esi.enabled) || (cfg.pt && cfg.pt.enabled)));
+const anyOn = (cfg) => !!(cfg && ((cfg.pf && cfg.pf.enabled) || (cfg.esi && cfg.esi.enabled) || (cfg.pt && cfg.pt.enabled) || (cfg.tds && cfg.tds.enabled)));
 
 // Checks what the setup screen sends and returns the clean settings
 function sanitizeStatutory(body) {
   const b = body || {};
   const out = withDefaults(null);
-  const pf = b.pf || {}, esi = b.esi || {}, pt = b.pt || {};
+  const pf = b.pf || {}, esi = b.esi || {}, pt = b.pt || {}, tds = b.tds || {};
+  out.tds.enabled = !!tds.enabled; out.tds.defaultRegime = tds.defaultRegime === 'old' ? 'old' : 'new';
   out.pf.enabled = !!pf.enabled; out.pf.capWages = pf.capWages === undefined ? true : !!pf.capWages;
   const pick = (obj, key, label, min, max, into) => { const v = num(obj[key], min, max); if (v === null) return `Enter a valid ${label}.`; into[key] = r2(v); return null; };
   for (const [k, label, max] of [['wageCeiling', 'PF wage ceiling', MAX_MONEY], ['employeePct', 'employee PF percentage', 50], ['employerPct', 'employer PF percentage', 50], ['epsPct', 'pension (EPS) percentage', 50], ['epsCeiling', 'pension wage ceiling', MAX_MONEY], ['adminPct', 'PF admin charge percentage', 10], ['edliPct', 'EDLI percentage', 10]]) {
@@ -144,6 +147,6 @@ function compute({ cfg, earnings, pfKeys, month, exempt, esiCovered }) {
 }
 
 // A manual salary deduction that looks like a statutory one would be cut twice
-const looksStatutory = (name) => /provident|\bpf\b|\besi\b|employee state|professional tax|\bp\.?\s?tax\b/i.test(String(name || ''));
+const looksStatutory = (name) => /provident|\bpf\b|\besi\b|employee state|professional tax|\bp\.?\s?tax\b|\btds\b|income tax/i.test(String(name || ''));
 
 module.exports = { DEFAULTS, PT_PRESETS, withDefaults, anyOn, sanitizeStatutory, esiPeriodStart, compute, looksStatutory };

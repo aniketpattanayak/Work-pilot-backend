@@ -5,6 +5,7 @@
 const mongoose = require('mongoose');
 const P = require('../utils/payrollEngine');
 const SE = require('../utils/statutoryEngine');
+const TDS = require('../utils/tdsEngine');
 const AE = require('../utils/attendanceEngine');
 const att = require('./attendanceController');
 const { loadPermissions } = require('../middleware/permission');
@@ -170,6 +171,45 @@ exports.setSalary = async (req, res) => {
   } catch (e) { res.status(500).json({ message: 'Could not save the salary.' }); }
 };
 
+// ---- income tax declarations -----------------------------------------------------------------------------------------------
+const currentFy = () => TDS.fyOf(AE.istDate(Date.now()).slice(0, 7)).fy;
+const declView = (d) => ({ regime: (d && d.regime) || '', section80C: (d && d.section80C) || 0, section80D: (d && d.section80D) || 0, nps80CCD1B: (d && d.nps80CCD1B) || 0, homeLoanInterest: (d && d.homeLoanInterest) || 0, hraExemption: (d && d.hraExemption) || 0, otherDeductions: (d && d.otherDeductions) || 0, prevIncome: (d && d.prevIncome) || 0, prevTds: (d && d.prevTds) || 0 });
+
+exports.getDeclaration = async (req, res) => {
+  try {
+    const empId = req.params.employeeId;
+    if (!isId(empId)) return res.status(400).json({ message: 'Invalid person.' });
+    const reach = await reachIds(req, 'payroll.viewSalary');
+    if (!inReach(reach, empId)) return res.status(403).json({ message: 'You cannot see this person\'s tax declaration.' });
+    const fy = req.query.fy || currentFy();
+    if (!TDS.validFy(fy)) return res.status(400).json({ message: 'Choose a valid financial year, for example 2026-27.' });
+    const emp = await empModel(req).findOne({ _id: empId, tenantId: tenantId(req) }).select('name').lean();
+    if (!emp) return res.status(404).json({ message: 'Person not found.' });
+    const d = await model(req, 'PayrollDeclaration').findOne({ tenantId: tenantId(req), employeeId: empId, fy }).lean();
+    const { config } = await loadConfig(req);
+    res.json({ fy, declaration: declView(d), defaultRegime: config.statutory.tds.defaultRegime, tdsOn: !!config.statutory.tds.enabled });
+  } catch (e) { res.status(500).json({ message: 'Could not load the tax declaration.' }); }
+};
+
+exports.setDeclaration = async (req, res) => {
+  try {
+    const empId = req.params.employeeId;
+    if (!isId(empId)) return res.status(400).json({ message: 'Invalid person.' });
+    const fy = (req.body && req.body.fy) || currentFy();
+    if (!TDS.validFy(fy)) return res.status(400).json({ message: 'Choose a valid financial year, for example 2026-27.' });
+    const emp = await empModel(req).findOne({ _id: empId, tenantId: tenantId(req) }).select('name').lean();
+    if (!emp) return res.status(404).json({ message: 'Person not found.' });
+    const r = TDS.sanitizeDeclaration(req.body);
+    if (r.error) return res.status(400).json({ message: r.error });
+    const D = model(req, 'PayrollDeclaration');
+    const existing = await D.findOne({ tenantId: tenantId(req), employeeId: empId, fy }).lean();
+    if (existing) await D.updateOne({ _id: existing._id }, { $set: { ...r.declaration, updatedBy: req.user.id } });
+    else await D.create({ tenantId: tenantId(req), employeeId: empId, fy, ...r.declaration, updatedBy: req.user.id });
+    await audit(req, 'payroll_declaration_saved', `${existing ? 'Changed' : 'Saved'} the tax declaration of ${emp.name} for ${fy}`, { employeeId: empId, fy, regime: r.declaration.regime || 'default' });
+    res.json({ ok: true, declaration: declView(r.declaration) });
+  } catch (e) { res.status(500).json({ message: 'Could not save the tax declaration.' }); }
+};
+
 // ---- building a run -----------------------------------------------------------------------------------------------
 async function paidLeaveMaps(req, empIds, from, to) {
   const out = new Map();
@@ -203,6 +243,21 @@ async function buildLines(req, month, config, keep) {
   const sBy = new Map();
   structs.forEach((s) => { (sBy.get(oid(s.employeeId)) || sBy.set(oid(s.employeeId), []).get(oid(s.employeeId))).push(s); });
   const comps = config.components.filter((c) => c.active !== false);
+  // Income tax needs each person's declaration and what the payroll has already taken this financial year
+  const tdsOn = !!config.statutory.tds.enabled;
+  const fy = TDS.fyOf(month);
+  const declBy = new Map(), ytdBy = new Map();
+  if (tdsOn) {
+    (await model(req, 'PayrollDeclaration').find({ tenantId: tenantId(req), employeeId: { $in: ids }, fy: fy.fy }).lean()).forEach((d) => declBy.set(oid(d.employeeId), d));
+    const prior = await model(req, 'PayrollRun').find({ tenantId: tenantId(req), status: { $ne: 'Cancelled' }, month: { $gte: fy.startMonth, $lt: month } }).lean();
+    const sumOf = (rows, k) => (rows || []).filter((x) => x.key === k).reduce((s, x) => s + (x.amount || 0), 0);
+    for (const run of prior) for (const l of run.lines || []) {
+      if (l.noStructure) continue;
+      const y = ytdBy.get(oid(l.employeeId)) || { gross: 0, pf: 0, pt: 0, tds: 0, count: 0 };
+      y.gross += l.gross || 0; y.pf += sumOf(l.deductions, 'pf'); y.pt += sumOf(l.deductions, 'pt'); y.tds += sumOf(l.deductions, 'tds'); y.count += 1;
+      ytdBy.set(oid(l.employeeId), y);
+    }
+  }
   const lines = [];
   for (const e of emps) {
     const id = oid(e._id);
@@ -212,7 +267,7 @@ async function buildLines(req, month, config, keep) {
     if (!st) { lines.push({ ...base, structureFrom: '', days: {}, earnings: [], deductions: [], adjustments: [], gross: 0, totalDeductions: 0, rounding: 0, net: 0, warnings: [], noStructure: true, bank: {} }); continue; }
     const counts = P.dayCounts({ month, days: dayMap.get(id), paidLeave: leaves.get(id), joined: joinDateOf(e), dayBasis: config.dayBasis });
     const esiCovered = config.statutory.esi.enabled ? esiCoverage(sBy.get(id) || [], month, comps, config.statutory.esi.grossLimit) : false;
-    const line = P.computeLine({ structure: st, components: comps, counts, adjustments: k.adjustments || [], roundNet: config.roundNet, statutory: { cfg: config.statutory, month, esiCovered } });
+    const line = P.computeLine({ structure: st, components: comps, counts, adjustments: k.adjustments || [], roundNet: config.roundNet, statutory: { cfg: config.statutory, month, esiCovered, tds: tdsOn ? { regime: (declBy.get(id) && declBy.get(id).regime) || config.statutory.tds.defaultRegime, ytd: ytdBy.get(id) || { gross: 0, pf: 0, pt: 0, tds: 0, count: 0 }, monthlyGross: P.monthlyAmounts(st, comps).gross, decl: declBy.get(id) || {}, hasPan: !!st.pan } : null } });
     lines.push({ ...base, structureFrom: st.effectiveFrom, ...line, noStructure: false, bank: st.bank || {}, ids: { uan: st.uan || '', esiNumber: st.esiNumber || '', pan: st.pan || '' } });
   }
   return lines;
@@ -378,12 +433,71 @@ exports.releaseRun = async (req, res) => {
 };
 
 // ---- files ---------------------------------------------------------------------------------------------------------------
+// Statutory files. Everyone with a salary in the run is included, also those whose payment is on hold (the liability exists either way).
+const amt = (rows, k) => (rows || []).filter((x) => x.key === k).reduce((s, x) => s + (x.amount || 0), 0);
+function statutoryFile(kind, run) {
+  const lines = (run.lines || []).filter((l) => !l.noStructure);
+  const notes = [];
+  const info = (l) => l.statutoryInfo || {};
+  if (kind === 'pf') {
+    // EPFO ECR text file: one line per member, fields separated by #~#
+    const out = [];
+    for (const l of lines) {
+      const ee = amt(l.deductions, 'pf');
+      if (ee <= 0) continue;
+      const uan = l.ids && l.ids.uan;
+      if (!uan) { notes.push(`${l.name} has no UAN, so is left out of the file.`); continue; }
+      const i = info(l);
+      out.push([uan, String(l.name).replace(/#~#/g, ' '), Math.round(l.gross), Math.round(i.pfContribWages || 0), Math.round(i.epsWages || 0), Math.round(Math.min(i.pfContribWages || 0, 15000)), ee, amt(l.employer, 'pf_er_eps'), amt(l.employer, 'pf_er_epf'), Math.round((l.days && l.days.unpaidDays) || 0), 0].join('#~#'));
+    }
+    if (!out.length) notes.push('No one has PF in this payroll.');
+    return { title: 'PF return file (ECR)', filename: `ecr-${run.month}.txt`, content: out.join('\r\n') + (out.length ? '\r\n' : ''), plain: true, notes };
+  }
+  if (kind === 'esi') {
+    const rows = [['IP Number', 'IP Name', 'No of Days for which wages paid/payable during the month', 'Total Monthly Wages', 'Reason Code for Zero workings days(numeric only; provide 0 for all other reasons)', 'Last Working Day']];
+    for (const l of lines) {
+      if (amt(l.deductions, 'esi') <= 0) continue;
+      const no = l.ids && l.ids.esiNumber;
+      if (!no) { notes.push(`${l.name} has no ESI number, so is left out of the file.`); continue; }
+      rows.push([no, l.name, Math.round((l.days && l.days.payableDays) || 0), Math.round(info(l).esiWages || 0), 0, '']);
+    }
+    if (rows.length === 1) notes.push('No one has ESI in this payroll.');
+    return { title: 'ESI contribution file', filename: `esi-${run.month}.csv`, content: P.csv(rows), notes };
+  }
+  if (kind === 'pt') {
+    const rows = [['Employee', 'Gross earned', 'Professional tax']];
+    let total = 0;
+    for (const l of lines) { const v = amt(l.deductions, 'pt'); if (v <= 0) continue; rows.push([l.name, l.gross, v]); total += v; }
+    rows.push(['TOTAL', '', P.r2(total)]);
+    if (rows.length === 2) notes.push('No professional tax in this payroll.');
+    return { title: 'professional tax summary', filename: `professional-tax-${run.month}.csv`, content: P.csv(rows), notes };
+  }
+  const rows = [['Employee', 'PAN', 'Tax regime', 'Gross this month', 'TDS this month', 'Projected income for the year', 'Tax for the year', 'Already deducted before this month']];
+  let total = 0;
+  for (const l of lines) {
+    const t = info(l).tds; const v = amt(l.deductions, 'tds');
+    if (!t && v <= 0) continue;
+    if (v > 0 && !(l.ids && l.ids.pan)) notes.push(`${l.name} has no PAN saved.`);
+    rows.push([l.name, (l.ids && l.ids.pan) || '', t ? t.regime : '', l.gross, v, t ? t.projectedIncome : '', t ? t.annualTax : '', t ? t.alreadyDeducted : '']);
+    total += v;
+  }
+  rows.push(['TOTAL', '', '', '', P.r2(total), '', '', '']);
+  if (rows.length === 2) notes.push('No income tax was worked out in this payroll.');
+  return { title: 'income tax (TDS) summary', filename: `tds-${run.month}.csv`, content: P.csv(rows), notes };
+}
+
 exports.exportRun = async (req, res) => {
   try {
     const run = await getRun(req, res); if (!run) return;
-    const kind = req.query.kind === 'bank' ? 'bank' : 'register';
+    const kind = ['bank', 'pf', 'esi', 'pt', 'tds'].includes(req.query.kind) ? req.query.kind : 'register';
     const paid = (run.lines || []).filter((l) => !l.noStructure && !l.hold);
     let rows, filename;
+    if (['pf', 'esi', 'pt', 'tds'].includes(kind)) {
+      if (!['Approved', 'Released'].includes(run.status)) return res.status(409).json({ message: 'Statutory files are available after the payroll is approved.' });
+      const f = statutoryFile(kind, run);
+      await audit(req, 'payroll_exported', `Downloaded the ${f.title} for ${run.month}`, { runId: oid(run._id), kind });
+      return res.json({ filename: f.filename, csv: f.content, plain: !!f.plain, notes: f.notes });
+    }
     if (kind === 'bank') {
       if (!['Approved', 'Released'].includes(run.status)) return res.status(409).json({ message: 'The bank file is available after the payroll is approved.' });
       rows = [['Employee', 'Account holder', 'Bank', 'Account number', 'IFSC', 'Amount', 'Narration']];

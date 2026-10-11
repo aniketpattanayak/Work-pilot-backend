@@ -24,6 +24,7 @@ const daysInMonth = (month) => { const [y, m] = month.split('-').map(Number); re
 const lastDayOf = (month) => `${month}-${String(daysInMonth(month)).padStart(2, '0')}`;
 
 const SE = require('./statutoryEngine');
+const TDS = require('./tdsEngine');
 const DAY_BASIS = ['calendar', '30'];
 
 // ---- salary components (made by the company: HRA, Conveyance, Professional tax ...) -----------------
@@ -168,6 +169,18 @@ function computeLine({ structure, components, counts, adjustments = [], roundNet
       exempt: { pf: structure.pfExempt, esi: structure.esiExempt, pt: structure.ptExempt }, esiCovered: !!statutory.esiCovered
     });
     if (!noPay) { deductions.push(...st.deductions); employer = st.employer; statutoryInfo = st.info; }
+    // Income tax on salary: needs the year so far (statutory.tds = { regime, ytd, monthlyGross, decl, hasPan })
+    if (!noPay && statutory.cfg.tds.enabled && statutory.tds) {
+      const t = statutory.tds;
+      const amt = (k) => (st.deductions.find((x) => x.key === k) || { amount: 0 }).amount;
+      const bonus = adjustments.filter((a) => a.type !== 'deduction' && money(Number(a.amount))).reduce((s, a) => s + Number(a.amount), 0);
+      const earned = r2(earnings.reduce((s, x) => s + x.amount, 0) + bonus);
+      const res = TDS.monthlyTds({ month: statutory.month, regime: t.regime, ytd: t.ytd, current: { gross: earned, pf: amt('pf'), pt: amt('pt') }, monthlyGross: Math.max(t.monthlyGross || 0, 0), decl: t.decl });
+      if (res.tds > 0) deductions.push({ key: 'tds', name: 'Income tax (TDS)', full: res.tds, amount: res.tds, statutory: true });
+      statutoryInfo = { ...(statutoryInfo || {}), tds: res.info };
+      if (!t.hasPan && res.tds > 0) warnings.push('No PAN is saved for this person. Tax may have to be deducted at a higher rate.');
+      if (t.ytd && t.ytd.count === 0 && TDS.monthsDone(statutory.month) > 0 && (res.info.annualTax > 0 || (t.monthlyGross || 0) * 12 > 600000) && !(t.decl && (t.decl.prevIncome || t.decl.prevTds))) warnings.push('No payroll was found for the earlier months of this financial year. If this person was paid then, enter that income and tax under the tax declaration, or the tax for this month will be too low.');
+    }
     if (!noPay && statutory.cfg.pf.enabled && !structure.pfExempt && !structure.uan && st.info.pfContribWages > 0) warnings.push('No UAN is saved for this person (needed for the PF return).');
     if (!noPay && statutory.cfg.esi.enabled && !structure.esiExempt && statutory.esiCovered && !structure.esiNumber) warnings.push('No ESI number is saved for this person (needed for the ESI return).');
     for (const d of full.deductions) if (SE.looksStatutory(d.name)) warnings.push(`"${d.name}" is also a salary deduction, so it may be cut twice. Remove it from the salary if the company now deducts it automatically.`);
@@ -209,5 +222,5 @@ const maskAccount = (n) => (n ? '•'.repeat(Math.max(0, String(n).length - 4)) 
 
 module.exports = {
   r2, MAX_MONEY, DAY_BASIS, validMonth, validDate, daysInMonth, lastDayOf, cleanStr,
-  sanitizeComponents, sanitizeStructure, structureForMonth, monthlyAmounts, dayCounts, computeLine, runTotals, csv, maskAccount
+  TDS, sanitizeComponents, sanitizeStructure, structureForMonth, monthlyAmounts, dayCounts, computeLine, runTotals, csv, maskAccount
 };

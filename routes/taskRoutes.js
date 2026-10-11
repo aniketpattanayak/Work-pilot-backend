@@ -169,6 +169,8 @@ router.put('/payroll/config', ...payBase, requirePermission('payroll.configure')
 router.get('/payroll/salaries', ...payBase, requirePermission('payroll.viewSalary'), payrollController.listSalaries);
 router.get('/payroll/salaries/:employeeId', ...payBase, requirePermission('payroll.viewSalary'), payrollController.getSalary);
 router.put('/payroll/salaries/:employeeId', ...payBase, requirePermission('payroll.configure'), payrollController.setSalary);
+router.get('/payroll/declarations/:employeeId', ...payBase, requirePermission('payroll.viewSalary'), payrollController.getDeclaration);
+router.put('/payroll/declarations/:employeeId', ...payBase, requirePermission('payroll.configure'), payrollController.setDeclaration);
 router.get('/payroll/runs', ...payBase, payRuns, payrollController.listRuns);
 router.post('/payroll/runs', ...payBase, requirePermission('payroll.prepare', 'company'), payrollController.createRun);
 router.get('/payroll/runs/:id', ...payBase, payRuns, payrollController.getRun);
