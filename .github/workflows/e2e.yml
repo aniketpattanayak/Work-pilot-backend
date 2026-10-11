@@ -5,6 +5,9 @@ on:
     branches: [main, 'test/**']
   workflow_dispatch: {}
 
+permissions:
+  contents: write
+
 jobs:
   e2e:
     runs-on: ubuntu-latest
