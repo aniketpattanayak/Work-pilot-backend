@@ -22,8 +22,8 @@ router.get ('/instances/:tenantId',      authMiddleware, subscriptionGuard, same
 router.get('/sync/:templateId',          authMiddleware, subscriptionGuard, fmsController.syncFmsOrders);
 
 // History — specific route MUST come before generic
-router.get('/history/flow/:templateId',  fmsController.getFlowHistory);
-router.get('/history/:instanceId',       fmsController.getInstanceHistory);
+router.get('/history/flow/:templateId',  authMiddleware, subscriptionGuard, fmsController.getFlowHistory);
+router.get('/history/:instanceId',       authMiddleware, subscriptionGuard, fmsController.getInstanceHistory);
 
 // Missions
 router.get('/my-missions/:email',        authMiddleware, subscriptionGuard, fmsController.getMyMissions);

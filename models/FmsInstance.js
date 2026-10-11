@@ -106,4 +106,9 @@ const FmsInstanceSchema = new mongoose.Schema({
   }
 }, { timestamps: true });
 
+// Indexes
+FmsInstanceSchema.index({ tenantId: 1, isFullyCompleted: 1 });
+FmsInstanceSchema.index({ tenantId: 1, orderIdentifier: 1 });
+FmsInstanceSchema.index({ orderIdentifier: 1, tenantId: 1 });
+
 module.exports = mongoose.model('FmsInstance', FmsInstanceSchema);
