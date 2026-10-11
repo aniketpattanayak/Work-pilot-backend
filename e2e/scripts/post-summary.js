@@ -21,8 +21,10 @@ try {
         const res = t.results[t.results.length - 1];
         const ok = res.status === 'passed';
         if (!ok) failed = true;
-        const errMsg = res.error ? stripAnsi(res.error.message).split('\n')[0] : res.status;
-        lines.push((ok ? '[PASS] ' : '[FAIL] ') + spec.title + (ok ? '' : ' - ' + errMsg));
+        // Keep the first ~8 lines of the error, not just the first line — Playwright puts
+        // the actual "Locator:" / "Expected:" / "Received:" / call-log detail after line 1.
+        const errMsg = res.error ? stripAnsi(res.error.message).split('\n').slice(0, 8).join('\n') : res.status;
+        lines.push((ok ? '[PASS] ' : '[FAIL] ') + spec.title + (ok ? '' : '\n' + fence + '\n' + errMsg + '\n' + fence));
       });
     });
   };
