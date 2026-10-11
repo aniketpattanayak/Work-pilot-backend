@@ -9,7 +9,8 @@
 //   - Basic and every "prorate" earning are multiplied by the pay factor. Other earnings and all deductions are
 //     taken as they are. One-off adjustments (bonus, advance recovery ...) are added after that, unchanged.
 //   - Net pay = earnings - deductions, optionally rounded to the whole rupee.
-// Overtime, comp-off, notice pay, arrears and statutory deductions are NOT part of this phase.
+// PF, ESI and professional tax (utils/statutoryEngine.js) are added when the company switches them on.
+// Overtime, comp-off, notice pay, arrears and income tax (TDS) are NOT part of this phase.
 const r2 = (n) => Math.round((Number(n) + Number.EPSILON) * 100) / 100;
 const MAX_MONEY = 100000000; // 10 crore a month is far beyond any real salary: protects against typing errors
 const MAX_COMPONENTS = 30;
@@ -22,6 +23,7 @@ const validDate = (s) => typeof s === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(s) 
 const daysInMonth = (month) => { const [y, m] = month.split('-').map(Number); return new Date(Date.UTC(y, m, 0)).getUTCDate(); };
 const lastDayOf = (month) => `${month}-${String(daysInMonth(month)).padStart(2, '0')}`;
 
+const SE = require('./statutoryEngine');
 const DAY_BASIS = ['calendar', '30'];
 
 // ---- salary components (made by the company: HRA, Conveyance, Professional tax ...) -----------------
@@ -48,7 +50,7 @@ function sanitizeComponents(list) {
     if (key === 'basic' || key === 'adjustment') return { error: `"${name}" is a reserved name. Choose another.` };
     if (keys.has(key)) return { error: `"${name}" clashes with another component. Rename one.` };
     keys.add(key);
-    out.push({ key, name, type, calc, value: r2(value), prorate: c.prorate === undefined ? type === 'earning' : !!c.prorate, active: c.active !== false });
+    out.push({ key, name, type, calc, value: r2(value), prorate: c.prorate === undefined ? type === 'earning' : !!c.prorate, active: c.active !== false, pf: type === 'earning' && !!c.pf });
   }
   return { components: out };
 }
@@ -81,7 +83,12 @@ function sanitizeStructure(body, components) {
   };
   if (bank.accountNumber && !/^[0-9A-Za-z-]{6,30}$/.test(bank.accountNumber)) return { error: 'The bank account number looks wrong.' };
   if (bank.ifsc && !/^[A-Z]{4}0[A-Z0-9]{6}$/.test(bank.ifsc)) return { error: 'The IFSC code looks wrong (for example HDFC0001234).' };
-  return { structure: { effectiveFrom, basic: r2(basic), items, bank, note: cleanStr(body.note, 200) } };
+  // Statutory identity and exemptions (used when PF, ESI or professional tax is switched on for the company)
+  const uan = cleanStr(body.uan, 20).replace(/\s/g, ''), esiNumber = cleanStr(body.esiNumber, 20).replace(/\s/g, ''), pan = cleanStr(body.pan, 12).toUpperCase().replace(/\s/g, '');
+  if (uan && !/^\d{12}$/.test(uan)) return { error: 'The UAN must be 12 digits.' };
+  if (esiNumber && !/^\d{10,17}$/.test(esiNumber)) return { error: 'The ESI number must be 10 to 17 digits.' };
+  if (pan && !/^[A-Z]{5}[0-9]{4}[A-Z]$/.test(pan)) return { error: 'The PAN looks wrong (for example ABCDE1234F).' };
+  return { structure: { effectiveFrom, basic: r2(basic), items, bank, note: cleanStr(body.note, 200), uan, esiNumber, pan, pfExempt: !!body.pfExempt, esiExempt: !!body.esiExempt, ptExempt: !!body.ptExempt } };
 }
 
 // The structure that applies to a month: the latest one that starts on or before the last day of that month.
@@ -145,13 +152,26 @@ function dayCounts({ month, days, paidLeave, joined, dayBasis }) {
  * adjustments: [{ label, type: 'earning'|'deduction', amount, note }]
  * roundNet: round the net pay to the whole rupee
  */
-function computeLine({ structure, components, counts, adjustments = [], roundNet = true }) {
+function computeLine({ structure, components, counts, adjustments = [], roundNet = true, statutory = null }) {
   const warnings = [];
   const full = monthlyAmounts(structure, components);
   const factor = counts.basisDays > 0 ? Math.max(0, Math.min(1, counts.payableDays / counts.basisDays)) : 0;
   const earnings = full.earnings.map((e) => ({ key: e.key, name: e.name, full: e.amount, amount: e.prorate ? r2(e.amount * factor) : e.amount }));
   const noPay = counts.payableDays <= 0; // nothing earned this month: nothing is deducted either
   const deductions = full.deductions.map((d) => ({ key: d.key, name: d.name, full: d.amount, amount: noPay ? 0 : d.prorate ? r2(d.amount * factor) : d.amount }));
+  // Statutory deductions (PF, ESI, professional tax) on what was earned this month; nothing earned, nothing deducted
+  let employer = [], statutoryInfo = null;
+  if (statutory && statutory.cfg && SE.anyOn(statutory.cfg)) {
+    const st = SE.compute({
+      cfg: statutory.cfg, earnings: earnings.map((e) => ({ key: e.key, amount: e.amount })), month: statutory.month,
+      pfKeys: new Set((components || []).filter((c) => c.pf).map((c) => c.key)),
+      exempt: { pf: structure.pfExempt, esi: structure.esiExempt, pt: structure.ptExempt }, esiCovered: !!statutory.esiCovered
+    });
+    if (!noPay) { deductions.push(...st.deductions); employer = st.employer; statutoryInfo = st.info; }
+    if (!noPay && statutory.cfg.pf.enabled && !structure.pfExempt && !structure.uan && st.info.pfContribWages > 0) warnings.push('No UAN is saved for this person (needed for the PF return).');
+    if (!noPay && statutory.cfg.esi.enabled && !structure.esiExempt && statutory.esiCovered && !structure.esiNumber) warnings.push('No ESI number is saved for this person (needed for the ESI return).');
+    for (const d of full.deductions) if (SE.looksStatutory(d.name)) warnings.push(`"${d.name}" is also a salary deduction, so it may be cut twice. Remove it from the salary if the company now deducts it automatically.`);
+  }
   const adj = [];
   for (const a of adjustments) {
     const amount = Number(a.amount);
@@ -167,18 +187,19 @@ function computeLine({ structure, components, counts, adjustments = [], roundNet
   if (net < 0) warnings.push('Net pay is below zero. Reduce the deductions or recoveries.');
   if (counts.missingOutDays) warnings.push(`${counts.missingOutDays} day(s) with a missing punch-out are counted as absent. Correct them in Attendance and recalculate.`);
   if (counts.flaggedDays) warnings.push(`${counts.flaggedDays} day(s) include punches still waiting for review in Attendance.`);
-  return { days: counts, earnings, deductions, adjustments: adj, gross, totalDeductions, rounding, net, warnings };
+  const employerTotal = r2(employer.reduce((s, x) => s + x.amount, 0));
+  return { days: counts, earnings, deductions, employer, employerTotal, statutoryInfo, adjustments: adj, gross, totalDeductions, rounding, net, warnings };
 }
 
 // Totals of a run. Lines on hold are left out of what is paid.
 function runTotals(lines) {
-  const t = { count: 0, held: 0, gross: 0, deductions: 0, net: 0 };
+  const t = { count: 0, held: 0, gross: 0, deductions: 0, net: 0, employer: 0 };
   for (const l of lines) {
     if (l.noStructure) continue;
     if (l.hold) { t.held += 1; continue; }
-    t.count += 1; t.gross += l.gross; t.deductions += l.totalDeductions; t.net += l.net;
+    t.count += 1; t.gross += l.gross; t.deductions += l.totalDeductions; t.net += l.net; t.employer += l.employerTotal || 0;
   }
-  t.gross = r2(t.gross); t.deductions = r2(t.deductions); t.net = r2(t.net);
+  t.gross = r2(t.gross); t.deductions = r2(t.deductions); t.net = r2(t.net); t.employer = r2(t.employer);
   return t;
 }
 

@@ -78,8 +78,11 @@ const TenantSchema = new mongoose.Schema({
       calc:   { type: String, enum: ['fixed', 'percentBasic'], default: 'fixed' },
       value:  { type: Number, default: 0 },
       prorate:{ type: Boolean, default: true },
-      active: { type: Boolean, default: true }
-    }]
+      active: { type: Boolean, default: true },
+      pf:     { type: Boolean, default: false }   // earning counts as PF wages (Basic always does)
+    }],
+    // PF, ESI and professional tax settings (checked by utils/statutoryEngine.js); null = all off
+    statutory: { type: mongoose.Schema.Types.Mixed, default: null }
   },
 
   // Review Meeting settings (all optional; defaults apply when nothing is saved)

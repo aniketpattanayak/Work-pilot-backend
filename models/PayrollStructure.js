@@ -10,6 +10,12 @@ const PayrollStructureSchema = new mongoose.Schema({
   items:         [{ _id: false, key: String, amount: Number }], // company components given to this person, with the amount
   bank:          { accountName: { type: String, default: '' }, bankName: { type: String, default: '' }, accountNumber: { type: String, default: '' }, ifsc: { type: String, default: '' } },
   note:          { type: String, default: '', maxlength: 200 },
+  uan:           { type: String, default: '' },               // Universal Account Number (PF)
+  esiNumber:     { type: String, default: '' },
+  pan:           { type: String, default: '' },
+  pfExempt:      { type: Boolean, default: false },           // left out of PF / ESI / professional tax even when the company has them on
+  esiExempt:     { type: Boolean, default: false },
+  ptExempt:      { type: Boolean, default: false },
   createdBy:     { type: mongoose.Schema.Types.ObjectId, ref: 'Employee' },
 }, { timestamps: true });
 

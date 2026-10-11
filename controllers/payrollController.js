@@ -4,6 +4,7 @@
 // payroll module to be switched on for the company. Rules live in utils/payrollEngine.js.
 const mongoose = require('mongoose');
 const P = require('../utils/payrollEngine');
+const SE = require('../utils/statutoryEngine');
 const AE = require('../utils/attendanceEngine');
 const att = require('./attendanceController');
 const { loadPermissions } = require('../middleware/permission');
@@ -30,12 +31,11 @@ async function audit(req, action, description, extra) {
 }
 
 const DEFAULT_CONFIG = { dayBasis: 'calendar', roundNet: true, allowSelfApproval: false, employerName: '', employerAddress: '', components: [] };
-// Starting points offered in the setup screen. Statutory deductions (PF, ESI, tax) come in a later phase.
+// Starting points offered in the setup screen. PF, ESI and professional tax are switched on under Statutory, not added here.
 const SUGGESTED = [
   { name: 'House Rent Allowance', type: 'earning', calc: 'percentBasic', value: 40, prorate: true },
   { name: 'Conveyance Allowance', type: 'earning', calc: 'fixed', value: 1600, prorate: true },
-  { name: 'Special Allowance', type: 'earning', calc: 'fixed', value: 0, prorate: true },
-  { name: 'Professional Tax', type: 'deduction', calc: 'fixed', value: 200, prorate: false }
+  { name: 'Special Allowance', type: 'earning', calc: 'fixed', value: 0, prorate: true }
 ];
 
 async function loadConfig(req) {
@@ -43,6 +43,7 @@ async function loadConfig(req) {
   const t = await Tenant.findById(tenantId(req)).select('payrollConfig companyName').lean();
   const c = { ...DEFAULT_CONFIG, ...((t && t.payrollConfig) || {}) };
   c.components = ((t && t.payrollConfig && t.payrollConfig.components) || []).map((x) => ({ ...x }));
+  c.statutory = SE.withDefaults(t && t.payrollConfig && t.payrollConfig.statutory);
   return { config: c, companyName: (t && t.companyName) || '' };
 }
 const can = (req, key, scope = 'self') => { const p = (req.permissions || {})[key]; return !!p && atLeast(p, scope); };
@@ -65,14 +66,14 @@ const inReach = (set, id) => set === null || set.has(oid(id));
 const joinDateOf = (emp) => { const d = emp.joiningDate || emp.createdAt; return d ? AE.istDate(new Date(d).getTime()) : null; };
 const maskBank = (b) => ({ accountName: (b && b.accountName) || '', bankName: (b && b.bankName) || '', ifsc: (b && b.ifsc) || '', accountNumber: P.maskAccount(b && b.accountNumber) });
 const lineView = (l) => ({ ...l, bank: maskBank(l.bank) });
-const structureView = (s) => ({ _id: s._id, effectiveFrom: s.effectiveFrom, basic: s.basic, items: s.items || [], bank: s.bank || {}, note: s.note || '' });
+const structureView = (s) => ({ _id: s._id, effectiveFrom: s.effectiveFrom, basic: s.basic, items: s.items || [], bank: s.bank || {}, note: s.note || '', uan: s.uan || '', esiNumber: s.esiNumber || '', pan: s.pan || '', pfExempt: !!s.pfExempt, esiExempt: !!s.esiExempt, ptExempt: !!s.ptExempt });
 
 // ---- settings ---------------------------------------------------------------------------------------------------
 exports.getConfig = async (req, res) => {
   try {
     const { config } = await loadConfig(req);
     // Employer address is printed on payslips; only the salary people need the rest.
-    res.json({ config, suggested: SUGGESTED, dayBasisOptions: P.DAY_BASIS });
+    res.json({ config, suggested: SUGGESTED, dayBasisOptions: P.DAY_BASIS, ptPresets: SE.PT_PRESETS });
   } catch (e) { res.status(500).json({ message: 'Could not load payroll settings.' }); }
 };
 
@@ -89,6 +90,11 @@ exports.setConfig = async (req, res) => {
       const c = P.sanitizeComponents(b.components);
       if (c.error) return res.status(400).json({ message: c.error });
       set['payrollConfig.components'] = c.components;
+    }
+    if (b.statutory !== undefined) {
+      const r = SE.sanitizeStatutory(b.statutory);
+      if (r.error) return res.status(400).json({ message: r.error });
+      set['payrollConfig.statutory'] = r.statutory;
     }
     if (!Object.keys(set).length) return res.status(400).json({ message: 'Nothing to save.' });
     const Tenant = require('../models/Tenant');
@@ -177,6 +183,12 @@ async function paidLeaveMaps(req, empIds, from, to) {
   return out;
 }
 
+// ESI cover for the month: whoever was within the salary limit at the start of the contribution period stays covered until it ends
+function esiCoverage(structures, month, comps, limit) {
+  const st = P.structureForMonth(structures, SE.esiPeriodStart(month)) || P.structureForMonth(structures, month);
+  return !!st && P.monthlyAmounts(st, comps).gross <= limit;
+}
+
 // Works out every person's line for the month. `keep` maps employeeId -> { adjustments, hold, holdNote } from an earlier draft.
 async function buildLines(req, month, config, keep) {
   const emps = await empModel(req).find({ tenantId: tenantId(req) }).select('name department workOnSunday joiningDate createdAt').sort({ name: 1 }).lean();
@@ -199,8 +211,9 @@ async function buildLines(req, month, config, keep) {
     const base = { employeeId: e._id, name: e.name, department: e.department || '', hold: !!k.hold, holdNote: k.holdNote || '' };
     if (!st) { lines.push({ ...base, structureFrom: '', days: {}, earnings: [], deductions: [], adjustments: [], gross: 0, totalDeductions: 0, rounding: 0, net: 0, warnings: [], noStructure: true, bank: {} }); continue; }
     const counts = P.dayCounts({ month, days: dayMap.get(id), paidLeave: leaves.get(id), joined: joinDateOf(e), dayBasis: config.dayBasis });
-    const line = P.computeLine({ structure: st, components: comps, counts, adjustments: k.adjustments || [], roundNet: config.roundNet });
-    lines.push({ ...base, structureFrom: st.effectiveFrom, ...line, noStructure: false, bank: st.bank || {} });
+    const esiCovered = config.statutory.esi.enabled ? esiCoverage(sBy.get(id) || [], month, comps, config.statutory.esi.grossLimit) : false;
+    const line = P.computeLine({ structure: st, components: comps, counts, adjustments: k.adjustments || [], roundNet: config.roundNet, statutory: { cfg: config.statutory, month, esiCovered } });
+    lines.push({ ...base, structureFrom: st.effectiveFrom, ...line, noStructure: false, bank: st.bank || {}, ids: { uan: st.uan || '', esiNumber: st.esiNumber || '', pan: st.pan || '' } });
   }
   return lines;
 }
@@ -234,7 +247,7 @@ exports.createRun = async (req, res) => {
     if (!lines.some((l) => !l.noStructure)) return res.status(400).json({ message: 'No one has a salary set yet. Set salaries first (Salaries tab).' });
     const run = await R.create({
       tenantId: tenantId(req), month, status: 'Draft', dayBasis: config.dayBasis, roundNet: config.roundNet, components: config.components,
-      lines, totals: P.runTotals(lines), preparedBy: req.user.id, preparedAt: new Date(), history: [hist(req, 'created', '')]
+      lines, totals: P.runTotals(lines), statutory: config.statutory, preparedBy: req.user.id, preparedAt: new Date(), history: [hist(req, 'created', '')]
     });
     await audit(req, 'payroll_run_created', `Prepared the payroll for ${month}`, { runId: oid(run._id), month });
     res.status(201).json({ runId: oid(run._id) });
@@ -265,7 +278,7 @@ exports.recalculate = async (req, res) => {
     const { config } = await loadConfig(req);
     const keep = new Map((run.lines || []).map((l) => [oid(l.employeeId), { adjustments: l.adjustments, hold: l.hold, holdNote: l.holdNote }]));
     const lines = await buildLines(req, run.month, config, keep);
-    const r = await model(req, 'PayrollRun').updateOne({ _id: run._id, tenantId: tenantId(req), status: 'Draft' }, { $set: { lines, totals: P.runTotals(lines), dayBasis: config.dayBasis, roundNet: config.roundNet, components: config.components }, $push: { history: hist(req, 'recalculated', '') } });
+    const r = await model(req, 'PayrollRun').updateOne({ _id: run._id, tenantId: tenantId(req), status: 'Draft' }, { $set: { lines, totals: P.runTotals(lines), dayBasis: config.dayBasis, roundNet: config.roundNet, components: config.components, statutory: config.statutory }, $push: { history: hist(req, 'recalculated', '') } });
     if (r && r.matchedCount === 0) return res.status(409).json({ message: 'This payroll changed. Reload and try again.' });
     await audit(req, 'payroll_run_recalculated', `Recalculated the payroll for ${run.month}`, { runId: oid(run._id) });
     res.json({ ok: true });
@@ -382,16 +395,16 @@ exports.exportRun = async (req, res) => {
       paid.forEach((l) => { addName(l.earnings.filter((x) => !x.adjustment)); });
       const dedNames = [];
       paid.forEach((l) => l.deductions.filter((x) => !x.adjustment).forEach((x) => { if (!dedNames.includes(x.name)) dedNames.push(x.name); }));
-      rows = [['Employee', 'Department', 'Days in month', 'Paid days', 'Unpaid days', ...names, 'Additions', 'Gross', ...dedNames, 'Recoveries', 'Total deductions', 'Rounding', 'Net pay']];
+      rows = [['Employee', 'Department', 'Days in month', 'Paid days', 'Unpaid days', ...names, 'Additions', 'Gross', ...dedNames, 'Recoveries', 'Total deductions', 'Rounding', 'Net pay', 'Employer PF/ESI cost']];
       paid.forEach((l) => {
         const get = (arr, n) => (arr.find((x) => x.name === n && !x.adjustment) || { amount: 0 }).amount;
         const adds = l.earnings.filter((x) => x.adjustment).reduce((s, x) => s + x.amount, 0);
         const recs = l.deductions.filter((x) => x.adjustment).reduce((s, x) => s + x.amount, 0);
         const d = l.days || {};
-        rows.push([l.name, l.department, d.daysInMonth, d.payableDays, d.unpaidDays, ...names.map((n) => get(l.earnings, n)), P.r2(adds), l.gross, ...dedNames.map((n) => get(l.deductions, n)), P.r2(recs), l.totalDeductions, l.rounding, l.net]);
+        rows.push([l.name, l.department, d.daysInMonth, d.payableDays, d.unpaidDays, ...names.map((n) => get(l.earnings, n)), P.r2(adds), l.gross, ...dedNames.map((n) => get(l.deductions, n)), P.r2(recs), l.totalDeductions, l.rounding, l.net, l.employerTotal || 0]);
       });
       const t = run.totals || {};
-      rows.push(['TOTAL', '', '', '', '', ...names.map(() => ''), '', t.gross, ...dedNames.map(() => ''), '', t.deductions, '', t.net]);
+      rows.push(['TOTAL', '', '', '', '', ...names.map(() => ''), '', t.gross, ...dedNames.map(() => ''), '', t.deductions, '', t.net, t.employer || 0]);
       filename = `payroll-register-${run.month}.csv`;
     }
     await audit(req, 'payroll_exported', `Downloaded the ${kind === 'bank' ? 'bank file' : 'payroll register'} for ${run.month}`, { runId: oid(run._id), kind });
@@ -451,3 +464,4 @@ exports.personPayslips = async (req, res) => {
     res.json({ payslips: runs.map((r) => { const l = r.lines.find((x) => oid(x.employeeId) === empId && !x.hold && !x.noStructure); return l ? { runId: r._id, month: r.month, gross: l.gross, net: l.net } : null; }).filter(Boolean) });
   } catch (e) { res.status(500).json({ message: 'Could not load payslips.' }); }
 };
+exports.__esiCoverage = esiCoverage; // exported for tests
