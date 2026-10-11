@@ -16,7 +16,7 @@ const empModel = (req) => (req.db ? req.db.model('Employee') : require('../model
 const clean = (v, max) => String(v == null ? '' : v).trim().slice(0, max);
 
 const FACE_CONSENT = 'I agree that my face template (a set of numbers made from my face, not a photo) may be stored by my employer and used only to check my identity when I punch in or out. I can withdraw this at any time and it will be deleted.';
-const DEFAULTS = { requireLocation: false, allowOutsideSite: true, faceMode: 'off', faceThreshold: 0.5, defaultShiftId: null, fullDayMinutes: 480, halfDayMinutes: 240, regularizeDays: 31 };
+const DEFAULTS = { requireLocation: false, allowOutsideSite: true, faceMode: 'off', faceThreshold: 0.5, defaultShiftId: null, fullDayMinutes: 480, halfDayMinutes: 240, regularizeDays: 31, graceMinutes: 10 };
 
 async function audit(req, action, description, extra) {
   try {
@@ -30,12 +30,13 @@ async function audit(req, action, description, extra) {
 
 async function loadTenant(req) {
   const Tenant = require('../models/Tenant');
-  const t = await Tenant.findById(tenantId(req)).select('weekends holidays attendanceConfig').lean();
+  const t = await Tenant.findById(tenantId(req)).select('weekends holidays attendanceConfig officeHours').lean();
   const c = { ...DEFAULTS, ...((t && t.attendanceConfig) || {}) };
   return {
     config: c,
     weekends: Array.isArray(t && t.weekends) ? t.weekends : [0],
-    holidays: new Set(((t && t.holidays) || []).filter((h) => h && h.date).map((h) => new Date(h.date).toISOString().slice(0, 10)))
+    holidays: new Set(((t && t.holidays) || []).filter((h) => h && h.date).map((h) => new Date(h.date).toISOString().slice(0, 10))),
+    officeHours: (t && t.officeHours) || {}
   };
 }
 const offKind = (date, cal, emp) => {
@@ -82,10 +83,19 @@ async function assignmentMaps(req) {
     assignByEmp: new Map(assigns.map((a) => [oid(a.employeeId), a]))
   };
 }
-function shiftForEmp(maps, cfg, empId) {
+// A person's working hours: their own shift, else the company default shift, else the company's
+// Operational Hours (Settings), so most companies never need to create a shift at all.
+function shiftForEmp(maps, cal, empId) {
+  const cfg = cal.config;
   const a = maps.assignByEmp.get(oid(empId));
   const id = (a && a.shiftId) || cfg.defaultShiftId;
-  return id ? shiftView(maps.shiftById.get(oid(id))) : null;
+  const own = id ? shiftView(maps.shiftById.get(oid(id))) : null;
+  if (own) return own;
+  const o = cal.officeHours || {};
+  if (E.validHhmm(o.opening) && E.validHhmm(o.closing) && E.hhmmToMin(o.closing) > E.hhmmToMin(o.opening)) {
+    return { _id: null, name: 'Company hours', start: o.opening, end: o.closing, startMin: E.hhmmToMin(o.opening), endMin: E.hhmmToMin(o.closing), graceMin: cfg.graceMinutes, halfDayMinutes: cfg.halfDayMinutes, fullDayMinutes: cfg.fullDayMinutes };
+  }
+  return null;
 }
 function sitesForEmp(maps, empId) {
   const a = maps.assignByEmp.get(oid(empId));
@@ -114,7 +124,7 @@ async function buildDays(req, emps, dates, cal, maps) {
   const nowMs = Date.now(), today = E.istDate(nowMs);
   const result = new Map();
   for (const emp of emps) {
-    const id = oid(emp._id), joined = joinDateOf(emp), shift = shiftForEmp(maps, cal.config, id);
+    const id = oid(emp._id), joined = joinDateOf(emp), shift = shiftForEmp(maps, cal, id);
     const lm = leaves.get(id);
     result.set(id, dates.map((date) => {
       if (joined && date < joined) return emptyDay(date);
@@ -155,7 +165,7 @@ exports.setConfig = async (req, res) => {
       if (!Number.isFinite(n) || n < min || n > max) return `${label} must be between ${min} and ${max}.`;
       next[k] = n; return null;
     };
-    const err = num('faceThreshold', 0.3, 0.7, 'Face strictness') || num('fullDayMinutes', 60, 1440, 'Full day minutes') || num('halfDayMinutes', 30, 1440, 'Half day minutes') || num('regularizeDays', 1, 365, 'Correction window days');
+    const err = num('faceThreshold', 0.3, 0.7, 'Face strictness') || num('fullDayMinutes', 60, 1440, 'Full day minutes') || num('halfDayMinutes', 30, 1440, 'Half day minutes') || num('regularizeDays', 1, 365, 'Correction window days') || num('graceMinutes', 0, 180, 'Late allowance');
     if (err) return res.status(400).json({ message: err });
     if (b.defaultShiftId !== undefined) {
       if (b.defaultShiftId === null || b.defaultShiftId === '') next.defaultShiftId = null;
@@ -321,7 +331,7 @@ exports.today = async (req, res) => {
     const sites = sitesForEmp(maps, req.user.id);
     res.json({
       myId: oid(req.user.id), date, nextAction: E.nextAction(punches), day: days.get(oid(req.user.id))[0], punches: punches.map(punchView),
-      shift: shiftForEmp(maps, cal.config, req.user.id),
+      shift: shiftForEmp(maps, cal, req.user.id),
       sites: sites.map((s) => ({ _id: s._id, name: s.name, radiusM: s.radiusM })),
       settings: { requireLocation: cal.config.requireLocation, allowOutsideSite: cal.config.allowOutsideSite, faceMode: cal.config.faceMode },
       face: await faceStateOf(req, req.user.id), consentText: FACE_CONSENT

@@ -61,7 +61,8 @@ const TenantSchema = new mongoose.Schema({
     defaultShiftId:   { type: mongoose.Schema.Types.ObjectId, default: null },
     fullDayMinutes:   { type: Number, default: 480 },
     halfDayMinutes:   { type: Number, default: 240 },
-    regularizeDays:   { type: Number, default: 31 }
+    regularizeDays:   { type: Number, default: 31 },
+    graceMinutes:     { type: Number, default: 10 }
   },
 
   // Review Meeting settings (all optional; defaults apply when nothing is saved)
