@@ -60,28 +60,43 @@ module.exports = async () => {
     });
   }
 
-  await fetch(`${API_BASE}/tenants/access/modules/${tenantId}`, {
+  const modulesRes = await fetch(`${API_BASE}/tenants/access/modules/${tenantId}`, {
     method: 'PUT',
     headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${superToken}` },
     body: JSON.stringify({ modules: { attendance: true, leave: true } }),
   });
+  if (!modulesRes.ok) {
+    const body = await modulesRes.text();
+    throw new Error(`[global-setup.prod] Enabling attendance/leave modules failed (${modulesRes.status}): ${body}`);
+  }
 
   const loginRes = await fetch(`${API_BASE}/tasks/login-employee`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ email: ADMIN_EMAIL, password: ADMIN_PASSWORD, subdomain: SUBDOMAIN }),
   });
-  if (!loginRes.ok) throw new Error(`[global-setup.prod] Tenant admin login failed (${loginRes.status}).`);
+  if (!loginRes.ok) {
+    const body = await loginRes.text();
+    throw new Error(`[global-setup.prod] Tenant admin login failed (${loginRes.status}): ${body}`);
+  }
   const { token: adminToken } = await json(loginRes);
 
   const typesRes = await fetch(`${API_BASE}/tasks/leave/types`, { headers: { Authorization: `Bearer ${adminToken}` } });
+  if (!typesRes.ok) {
+    const body = await typesRes.text();
+    throw new Error(`[global-setup.prod] Fetching existing leave types failed (${typesRes.status}): ${body}`);
+  }
   const typesData = await json(typesRes);
   const hasType = Array.isArray(typesData.types) && typesData.types.length > 0;
   if (!hasType) {
-    await fetch(`${API_BASE}/tasks/leave/types`, {
+    const createTypeRes = await fetch(`${API_BASE}/tasks/leave/types`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${adminToken}` },
       body: JSON.stringify({ name: 'Casual Leave', paid: true, annualQuota: 12 }),
     });
+    if (!createTypeRes.ok) {
+      const body = await createTypeRes.text();
+      throw new Error(`[global-setup.prod] Creating "Casual Leave" leave type failed (${createTypeRes.status}): ${body}`);
+    }
   }
 };
