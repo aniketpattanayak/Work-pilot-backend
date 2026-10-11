@@ -58,6 +58,17 @@ jobs:
       - name: Wait for frontend
         run: npx --yes wait-on tcp:127.0.0.1:5173 -t 60000 || (cat frontend.log && exit 1)
 
+      - name: Diagnose connectivity before running tests
+        run: |
+          echo "--- /etc/hosts ---" | tee diag.log
+          cat /etc/hosts | tee -a diag.log
+          echo "--- curl backend root ---" | tee -a diag.log
+          curl -sS -m 5 -i http://127.0.0.1:5001/ 2>&1 | tee -a diag.log || true
+          echo "--- curl frontend via plain localhost ---" | tee -a diag.log
+          curl -sS -m 5 -i http://127.0.0.1:5173/ 2>&1 | tee -a diag.log || true
+          echo "--- curl frontend via wp-qa-test.localhost ---" | tee -a diag.log
+          curl -sS -m 5 -i http://wp-qa-test.localhost:5173/ 2>&1 | tee -a diag.log || true
+
       - name: Install e2e deps
         working-directory: e2e
         run: npm install
@@ -93,40 +104,12 @@ jobs:
       # The results-receiver / blob-storage hosts that serve raw logs and artifacts aren't
       # reachable from Claude's sandbox, so post a plain-text summary as a commit comment
       # instead — that goes through api.github.com, which Claude can read directly.
+      # (Kept as a real .js file, not an inline `node -e "..."`: backticks used for the
+      # markdown code fences were being eaten by the shell inside a double-quoted string.)
       - name: Post results summary as a commit comment
         if: always()
         working-directory: e2e
-        run: |
-          node -e "
-            const fs = require('fs');
-            let body = '## E2E live UI test results\n\n';
-            let failed = false;
-            try {
-              const r = JSON.parse(fs.readFileSync('playwright-report/results.json', 'utf8'));
-              const lines = [];
-              const walk = (suite, prefix) => {
-                (suite.suites || []).forEach(s => walk(s, prefix));
-                (suite.specs || []).forEach(spec => {
-                  spec.tests.forEach(t => {
-                    const res = t.results[t.results.length - 1];
-                    const ok = res.status === 'passed';
-                    if (!ok) failed = true;
-                    lines.push((ok ? '✅' : '❌') + ' ' + spec.title + (ok ? '' : ' — ' + (res.error ? res.error.message.split('\n')[0] : res.status)));
-                  });
-                });
-              };
-              walk(r, '');
-              body += lines.join('\n') + '\n';
-            } catch (e) {
-              failed = true;
-              body += 'Could not read results.json: ' + e.message + '\n';
-            }
-            body += '\nBackend log tail:\n```\n' + (fs.existsSync('../backend.log') ? fs.readFileSync('../backend.log','utf8').split('\n').slice(-40).join('\n') : 'n/a') + '\n```\n';
-            body += '\nFrontend log tail:\n```\n' + (fs.existsSync('../frontend.log') ? fs.readFileSync('../frontend.log','utf8').split('\n').slice(-20).join('\n') : 'n/a') + '\n```\n';
-            fs.writeFileSync('../summary.md', body);
-            console.log(body);
-            if (failed) process.exitCode = 0; // never fail this step itself
-          "
+        run: node scripts/post-summary.js
         continue-on-error: true
 
       - name: Publish commit comment
