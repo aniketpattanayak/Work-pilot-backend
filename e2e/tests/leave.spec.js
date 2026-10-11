@@ -24,14 +24,16 @@ test('apply for leave and see the request listed', async ({ page }) => {
   // error message alone — a previous run proved the backend genuinely has a type while the
   // UI's dropdown stayed empty, source unknown. Attached before navigating, since
   // LeavePage.jsx fires this request immediately on mount.
-  let typesApiDebug = '(no /leave/types response observed)';
-  page.on('response', async (r) => {
-    if (r.url().includes('/leave/types') && r.request().method() === 'GET') {
+  let typesApiDebug = '(no /leave/types request observed)';
+  await page.route('**/leave/types**', async (route) => {
+    const response = await route.fetch();
+    if (route.request().method() === 'GET') {
       try {
-        const body = await r.text();
-        typesApiDebug = `GET ${r.url()} -> ${r.status()} cache-control=${r.headers()['cache-control'] || '(none)'} cf-cache-status=${r.headers()['cf-cache-status'] || '(none)'} body=${body}`;
+        const body = await response.text();
+        typesApiDebug = `GET ${route.request().url()} -> ${response.status()} cache-control=${response.headers()['cache-control'] || '(none)'} cf-cache-status=${response.headers()['cf-cache-status'] || '(none)'} body=${body}`;
       } catch (e) { typesApiDebug = `GET /leave/types response read failed: ${e.message}`; }
     }
+    await route.fulfill({ response });
   });
 
   await login(page);
