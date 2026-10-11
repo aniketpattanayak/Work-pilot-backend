@@ -19,29 +19,6 @@ async function login(page) {
 // that permission, the form won't exist — this test will fail clearly at the first `expect`,
 // rather than silently skip, so a real permission/setup gap gets surfaced.
 test('apply for leave and see the request listed', async ({ page }) => {
-  // Capture what the browser's own GET /tasks/leave/types actually returns, so a mismatch
-  // with what the setup script sees (checked server-side already) is diagnosable from the
-  // error message alone — a previous run proved the backend genuinely has a type while the
-  // UI's dropdown stayed empty, source unknown. Attached before navigating, since
-  // LeavePage.jsx fires this request immediately on mount.
-  let typesApiDebug = '(no /leave/types request observed)';
-  const allRequests = [];
-  page.on('request', (r) => { allRequests.push(`${r.method()} ${r.url()}`); });
-  page.on('requestfinished', async (r) => {
-    if (r.url().includes('leave/types') || r.url().includes('leave%2Ftypes')) {
-      try {
-        const res = await r.response();
-        const body = res ? await res.text() : '(no response object)';
-        typesApiDebug = `${r.method()} ${r.url()} -> ${res ? res.status() : '?'} body=${body}`;
-      } catch (e) { typesApiDebug = `leave/types requestfinished read failed: ${e.message}`; }
-    }
-  });
-  page.on('requestfailed', (r) => {
-    if (r.url().includes('leave/types')) {
-      typesApiDebug = `${r.method()} ${r.url()} FAILED: ${r.failure()?.errorText}`;
-    }
-  });
-
   await login(page);
   await page.goto('/dashboard/leave');
 
@@ -56,12 +33,15 @@ test('apply for leave and see the request listed', async ({ page }) => {
   const leaveTypeSelect = page.getByLabel('Leave type');
   await expect(leaveTypeSelect).toBeVisible({ timeout: 10_000 });
 
-  // Need at least one real leave type configured to pick from (option[1], since option[0] is "Choose...").
-  const optionCount = await leaveTypeSelect.locator('option').count();
-  if (optionCount < 2) {
-    const requestDump = allRequests.filter((u) => u.includes('/tasks/') || u.includes('/api/')).join('\n');
-    throw new Error(`No leave types are configured for this tenant — set up a leave type first (Leave > Setup) before this test can apply for one. Browser's own API call: ${typesApiDebug}\nAll /tasks or /api requests made so far:\n${requestDump || '(none)'}`);
-  }
+  // The select itself renders immediately with just a "Choose..." placeholder option; the
+  // real options are added once LeavePage's own GET /tasks/leave/types resolves, which is
+  // async and not tied to the select becoming visible — a prior run proved this by showing
+  // the real leave type existed server-side while the select still had only the placeholder
+  // a moment later. Poll for the option count instead of checking it once.
+  await expect(async () => {
+    const optionCount = await leaveTypeSelect.locator('option').count();
+    expect(optionCount).toBeGreaterThanOrEqual(2);
+  }).toPass({ timeout: 15_000 });
   await leaveTypeSelect.selectOption({ index: 1 });
 
   // Pick the next Monday–Friday date, not just "today" — a prior run proved the backend
