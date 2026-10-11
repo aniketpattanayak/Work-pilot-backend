@@ -69,7 +69,6 @@ test('apply for leave and see the request listed', async ({ page }) => {
     // the backend correctly rejects that, which proves applying for leave already works, so
     // treat it as an acceptable skip rather than a real failure.
     if (response.status() === 400 && /already have leave/i.test(body)) {
-      await page.getByRole('button', { name: 'Cancel' }).click().catch(() => {});
       test.skip(true, `A previous CI run already applied for leave on ${fromDate}: ${body}`);
     }
     throw new Error(`POST /leave/requests returned ${response.status()}: ${body}`);
