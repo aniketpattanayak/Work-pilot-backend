@@ -1,7 +1,7 @@
 const { test, expect } = require('@playwright/test');
 
-const EMAIL = 'qa-admin@workpilot-test.com';
-const PASSWORD = 'TestPass123!';
+const EMAIL = process.env.E2E_EMAIL || 'qa-admin@workpilot-test.com';
+const PASSWORD = process.env.E2E_PASSWORD || 'TestPass123!';
 
 test('login with real credentials reaches the dashboard', async ({ page }) => {
   await page.goto('/');

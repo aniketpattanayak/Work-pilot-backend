@@ -1,0 +1,92 @@
+name: E2E live UI test (PRODUCTION)
+
+# Manual only — this never runs on a push. It creates real data on the real lrbcloud.ai
+# site using a clearly-labelled test company ("ZZZ AUTOMATED TEST - DO NOT USE"), tests
+# against it, then pauses it again. Requires PROD_API_BASE, PROD_SUPERADMIN_USER,
+# PROD_SUPERADMIN_PASS repo secrets to be set first.
+on:
+  workflow_dispatch: {}
+
+permissions:
+  contents: write
+
+jobs:
+  e2e-prod:
+    runs-on: ubuntu-latest
+    env:
+      PROD_API_BASE: ${{ secrets.PROD_API_BASE }}
+      PROD_SUPERADMIN_USER: ${{ secrets.PROD_SUPERADMIN_USER }}
+      PROD_SUPERADMIN_PASS: ${{ secrets.PROD_SUPERADMIN_PASS }}
+      E2E_EMAIL: zzz-autotest@workpilot-test.invalid
+      E2E_PASSWORD: AutoTestProd!2026
+    steps:
+      - name: Checkout backend
+        uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: Check required secrets are set
+        run: |
+          if [ -z "$PROD_API_BASE" ] || [ -z "$PROD_SUPERADMIN_USER" ] || [ -z "$PROD_SUPERADMIN_PASS" ]; then
+            echo "Missing one or more of PROD_API_BASE / PROD_SUPERADMIN_USER / PROD_SUPERADMIN_PASS repo secrets."
+            exit 1
+          fi
+
+      - name: Install e2e deps
+        working-directory: e2e
+        run: npm install
+
+      - name: Install Playwright browsers
+        working-directory: e2e
+        run: npx playwright install --with-deps chromium
+
+      - name: Run live UI tests against production
+        working-directory: e2e
+        run: npx playwright test --config=playwright.config.prod.js
+        continue-on-error: true
+
+      - name: Pause the test tenant again
+        if: always()
+        working-directory: e2e
+        run: node scripts/teardown-prod.js
+
+      - name: Upload Playwright report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: playwright-report-prod
+          path: e2e/playwright-report/
+          retention-days: 14
+
+      - name: Post results summary as a commit comment
+        if: always()
+        working-directory: e2e
+        run: node scripts/post-summary.js
+        continue-on-error: true
+
+      - name: Publish commit comment
+        if: always()
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh api repos/${{ github.repository }}/commits/${{ github.sha }}/comments -f body="$(cat summary.md)"
+
+      - name: Fail the job if any test failed
+        if: always()
+        working-directory: e2e
+        run: |
+          node -e "
+            const fs = require('fs');
+            const r = JSON.parse(fs.readFileSync('playwright-report/results.json', 'utf8'));
+            let failed = false;
+            const walk = (suite) => {
+              (suite.suites || []).forEach(walk);
+              (suite.specs || []).forEach(spec => spec.tests.forEach(t => {
+                if (t.results[t.results.length - 1].status !== 'passed') failed = true;
+              }));
+            };
+            walk(r);
+            process.exit(failed ? 1 : 0);
+          "

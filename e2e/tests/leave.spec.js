@@ -1,7 +1,7 @@
 const { test, expect } = require('@playwright/test');
 
-const EMAIL = 'qa-admin@workpilot-test.com';
-const PASSWORD = 'TestPass123!';
+const EMAIL = process.env.E2E_EMAIL || 'qa-admin@workpilot-test.com';
+const PASSWORD = process.env.E2E_PASSWORD || 'TestPass123!';
 
 async function login(page) {
   await page.goto('/');
@@ -40,8 +40,13 @@ test('apply for leave and see the request listed', async ({ page }) => {
   }
   await leaveTypeSelect.selectOption({ index: 1 });
 
-  const today = new Date();
-  const fromDate = today.toISOString().slice(0, 10);
+  // Pick the next Monday–Friday date, not just "today" — a prior run proved the backend
+  // correctly rejects a weekly-off/holiday date ("These dates are all weekly offs or
+  // holidays, so no leave is needed."), and today can land on a weekend.
+  const d = new Date();
+  d.setDate(d.getDate() + 1);
+  while (d.getUTCDay() === 0 || d.getUTCDay() === 6) d.setDate(d.getDate() + 1);
+  const fromDate = d.toISOString().slice(0, 10);
   await page.getByLabel('From date').fill(fromDate);
 
   const reasonText = `Playwright automated test ${Date.now()}`;
