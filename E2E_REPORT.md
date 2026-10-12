@@ -123,6 +123,49 @@ This is one scale point (200 people, one month of attendance, a single sequentia
 each route) - not the full Section F ask (query-count profiling, finding and fixing the
 cause of anything slow, re-running after each fix).
 
+## Section D: module on/off combinations (all 8, live)
+
+All 8 combinations of attendance/leave/payroll on-off were set via the real superadmin
+API and checked against a live route per module. **27/32 checks pass; the other 5 are one
+correct, deliberate product rule, not a bug:** `setModules` refuses to turn payroll on
+unless attendance AND leave are turned on in the *same* call (`"Payroll needs Attendance
+and Leave to be on first."`, HTTP 400), and when it refuses, it changes nothing -
+confirmed atomic, no partial activation. My first test script wrongly treated the 3
+module flags as independent and expected attendance/leave to switch on even when bundled
+with a rejected payroll=true in the same request; once I accounted for the dependency
+rule, all 5 "failures" are exactly that one rule firing as designed. The remaining 5
+genuinely independent combinations (every combination that doesn't try to turn payroll on
+without its prerequisites) all behave correctly: the view route for an off module is
+refused (403) and for an on module is allowed (200), with no crashes either way.
+
+This covers all 8 combinations as asked, but only one view route per module, not every
+route in that module, and not the UI-hides-the-menu-item half of the requirement (only
+that the API refuses it was checked).
+
+## Section G: browser walk (partial, real browser + screenshots)
+
+A fresh throwaway tenant was seeded (HR, Finance, and a plain employee role, salary set,
+payroll module on) and walked with a real headless Chromium:
+
+| # | Check | Result |
+|---|---|---|
+| 1 | HR, desktop (1440px), light theme: reach the Payroll page | Reached, no console/page errors |
+| 2 | HR, phone width (390px): dashboard loads | No console/page errors |
+| 3 | HR, phone width (390px): Payroll reachable via the nav/hamburger | **Inconclusive** - see correction below |
+| 4 | Finance, desktop, **dark theme**: reach the Payroll page | Reached cleanly |
+| 5 | Rahul (plain employee, no custom payroll role): what does the "Payroll" nav item do? | Leads to "My Payslips" (his own, empty since none released yet) - **no 4xx, no admin data, no crash**. My first pass scored this a FAIL on a wrong assumption ("he shouldn't see a Payroll link at all"); the real, correct behavior (already established in this session's permission-matrix testing) is that the Payroll module surfaces a self-service payslip view to everyone once the module is on, independent of having an admin payroll role - this is not a security issue, just a shared nav label. |
+| 6 | Double-click guard on the create-run button | **Not meaningfully tested** - the heuristic button selector didn't match the real UI, so this did not run. The stronger version of this check (two simultaneous `approve` calls at the API level, exactly one succeeds) was already verified live in the prior payroll-only testing round. |
+
+**Honest correction:** check #3's pass condition (`!page.url().includes('/login')`) is true
+after any successful login regardless of whether the Payroll nav click actually worked -
+it does not prove the hamburger menu was found or that Payroll was reached on phone
+width. Screenshot `03-hr-phone-payroll.png` shows the actual resulting screen for manual
+review; the test's own PASS verdict for that one line should not be trusted as written.
+
+Not done: walking every key role (not just HR/Finance/plain employee), checking **light**
+theme on top of dark (only dark was exercised for Finance), and a trustworthy double-click
+check against the real Save/Approve/Release buttons by their actual selectors.
+
 ## What else from the Phase 1 brief was planned but not run this session
 
 Given the size of the remaining ask relative to what one session can verify honestly,
@@ -137,7 +180,8 @@ these were **not executed**, not "passed by reading code":
   not run this session. A closely related check (two simultaneous approve calls racing
   on the same run) was verified in the *prior* payroll-only test round
   (`PAYROLL_LIVE_TEST_REPORT.md`) and is not repeated here.
-- **Section D** (every Settings/module on-off combination) - not run.
+- **Section D** - all 8 module combinations done at the API level only (see above); the
+  "disappears from the menu" half of the requirement was not checked in the UI.
 - **Section E** - only a small slice run (8 checks, see above): cross-tenant IDOR on
   employee update/delete, a malformed id, an oversized id, an HTML-ish name, a unicode
   name, and a formula-looking name, plus a code read confirming CSV formula-injection
@@ -146,9 +190,10 @@ these were **not executed**, not "passed by reading code":
 - **Section F** - only a single scale point run (see above): 200 people, one month of
   attendance, four routes timed once each, no query-count profiling, no root-causing or
   fixing of the slowest route, no re-run after a fix.
-- **Section G** (browser walk per role, phone width, dark/light, double-click guard) -
-  not run this session. (A prior, narrower Playwright pass exists from the earlier
-  payroll-only testing round and is not repeated here.)
+- **Section G** - a partial, real-browser pass done (see above: 3 roles, phone width,
+  dark theme, one inconclusive check honestly flagged). Not done: every key role, light
+  theme side-by-side with dark, and a trustworthy double-click test against the real
+  buttons.
 - `joiningDate` fix: the **frontend form change was written but not exercised in a real
   browser** this session - only the backend API was tested live. Call this *not verified
   end to end* rather than passed.
