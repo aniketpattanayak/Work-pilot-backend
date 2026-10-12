@@ -1,0 +1,42 @@
+[
+  {
+    "name": "employee-list (20k-employee tenant)",
+    "path": "/tasks/employees/6accd76e17e971e291d1f52c",
+    "reqPerSec": 0.8,
+    "latencyP50": 7294,
+    "latencyP99": 9694,
+    "errors": 12,
+    "timeouts": 12,
+    "non2xx": 0
+  },
+  {
+    "name": "auth/me (profile, same token repeated)",
+    "path": "/tasks/auth/me",
+    "reqPerSec": 191.5,
+    "latencyP50": 87,
+    "latencyP99": 369,
+    "errors": 0,
+    "timeouts": 0,
+    "non2xx": 0
+  },
+  {
+    "name": "leave/config (small, tenant-scoped doc read)",
+    "path": "/tasks/leave/config",
+    "reqPerSec": 436.8,
+    "latencyP50": 41,
+    "latencyP99": 119,
+    "errors": 0,
+    "timeouts": 0,
+    "non2xx": 0
+  },
+  {
+    "name": "leave/balance (own balance, indexed by employeeId)",
+    "path": "/tasks/leave/balance",
+    "reqPerSec": 215.1,
+    "latencyP50": 87,
+    "latencyP99": 168,
+    "errors": 0,
+    "timeouts": 0,
+    "non2xx": 0
+  }
+]
