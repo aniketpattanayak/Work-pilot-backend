@@ -3,6 +3,7 @@ const Employee    = require('../models/Employee');
 const ActivityLog = require('../models/ActivityLog');
 const Billing     = require('../models/Billing');
 const bcrypt      = require('bcryptjs');
+const { getModels: getTenantModels } = require('../utils/getModels');
 
 // ─── GET ALL TENANTS OVERVIEW ─────────────────────────────────────────────────
 /**
@@ -315,6 +316,14 @@ exports.updateBilling = async (req, res) => {
 };
 
 // ─── RESET ADMIN PASSWORD ─────────────────────────────────────────────────────
+// FIX (Phase 3 superadmin pass): this previously wrote the new hash to
+// Tenant.password, a field loginEmployee() never reads - employee login
+// checks Employee.password instead - so "reset admin password" silently
+// did nothing usable: it returned 200, but the admin's real login
+// credential was untouched and the "new" password could never be used to
+// log in. Now finds the tenant's Admin employee record (checking the
+// tenant's own dedicated DB first, same lookup pattern loginEmployee()
+// uses for customMongoUri tenants, then the shared DB) and updates that.
 exports.resetAdminPassword = async (req, res) => {
   try {
     const { tenantId } = req.params;
@@ -324,10 +333,28 @@ exports.resetAdminPassword = async (req, res) => {
       return res.status(400).json({ message: 'Password must be at least 6 characters' });
     }
 
-    const hashed = await bcrypt.hash(newPassword, 10);
+    const tenant = await Tenant.findById(tenantId).lean();
+    if (!tenant) return res.status(404).json({ message: 'Tenant not found' });
 
-    // Update the tenant admin password (stored in Tenant model)
-    await Tenant.findByIdAndUpdate(tenantId, { $set: { password: hashed } });
+    const hashed = await bcrypt.hash(newPassword, 10);
+    const customUri = tenant.superAdmin?.customMongoUri || null;
+
+    let adminEmployee = null;
+    try {
+      const { Employee: TenantEmployee } = await getTenantModels(tenantId, customUri);
+      adminEmployee = await TenantEmployee.findOne({ tenantId, roles: 'Admin' }).sort({ createdAt: 1 });
+    } catch (e) {
+      console.error('[resetAdminPassword] Tenant DB admin lookup failed:', e.message);
+    }
+    if (!adminEmployee) {
+      adminEmployee = await Employee.findOne({ tenantId, roles: 'Admin' }).sort({ createdAt: 1 });
+    }
+    if (!adminEmployee) {
+      return res.status(404).json({ message: 'No Admin employee found for this tenant' });
+    }
+
+    adminEmployee.password = hashed;
+    await adminEmployee.save();
 
     res.json({ message: 'Admin password reset successfully' });
   } catch (err) {
