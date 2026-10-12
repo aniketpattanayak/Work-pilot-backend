@@ -11,7 +11,7 @@ const runFmsSync = () => {
 
       for (const template of templates) {
         await fmsController.syncFmsOrders(
-          { params: { templateId: template._id } },
+          { params: { templateId: template._id }, user: { isSuperAdmin: true, system: true } },
           {
             status: () => ({ json: () => {} })
           }
