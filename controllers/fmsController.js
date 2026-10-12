@@ -794,6 +794,16 @@ exports.getInstanceHistory = async (req, res) => {
       return res.status(400).json({ message: 'Invalid instance ID' });
     }
 
+    // FmsHistory rows carry no tenantId of their own (legacy model), so tenant
+    // ownership has to be checked via the instance they belong to, or anyone -
+    // logged in or not, from any company - could read another tenant's flow
+    // history just by knowing/guessing an id. This route previously had no
+    // authMiddleware at all, compounding the gap.
+    const instance = await FmsInstance.findById(instanceId).select('tenantId').lean();
+    if (!instance || String(instance.tenantId) !== String(req.user.tenantId)) {
+      return res.status(404).json({ message: 'Instance not found.' });
+    }
+
     const history = await FmsHistory.find({ instanceId })
       .sort({ timestamp: 1 });
 
@@ -813,11 +823,20 @@ exports.getFlowHistory = async (req, res) => {
   try {
     const { templateId } = req.params;
 
+    // Same tenant-ownership gap as getInstanceHistory above - check via the template.
+    const template = await FmsTemplate.findById(templateId).select('tenantId').lean();
+    if (!template || String(template.tenantId) !== String(req.user.tenantId)) {
+      return res.status(404).json({ message: 'Template not found.' });
+    }
+
     const history = await FmsHistory.find({ templateId })
       .sort({ timestamp: 1 });
 
     res.json(history);
   } catch (err) {
+    if (err.name === 'CastError') {
+      return res.status(400).json({ message: 'Invalid template ID format' });
+    }
     res.status(500).json({ message: "Flow history fetch failed" });
   }
 };

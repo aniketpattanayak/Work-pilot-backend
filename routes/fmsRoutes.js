@@ -22,8 +22,13 @@ router.get ('/instances/:tenantId',      authMiddleware, subscriptionGuard, same
 router.get('/sync/:templateId',          authMiddleware, subscriptionGuard, fmsController.syncFmsOrders);
 
 // History — specific route MUST come before generic
-router.get('/history/flow/:templateId',  fmsController.getFlowHistory);
-router.get('/history/:instanceId',       fmsController.getInstanceHistory);
+// FIX (Phase 1 security pass): these two had no authMiddleware/subscriptionGuard at all -
+// unlike every sibling route in this file - so anyone, logged in or not, from any
+// company, could read another tenant's flow/instance history just by knowing or
+// guessing an id. Tenant ownership is now also checked inside the controller, since
+// FmsHistory rows don't carry their own tenantId.
+router.get('/history/flow/:templateId',  authMiddleware, subscriptionGuard, fmsController.getFlowHistory);
+router.get('/history/:instanceId',       authMiddleware, subscriptionGuard, fmsController.getInstanceHistory);
 
 // Missions
 router.get('/my-missions/:email',        authMiddleware, subscriptionGuard, fmsController.getMyMissions);
