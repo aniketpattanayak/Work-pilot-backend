@@ -370,18 +370,34 @@ exports.assignToCoordinator = async (req, res) => {
 };
 
 
+// A joining date typed by HR must be a real calendar date and not in the future
+// (payroll and leave both read this field to work out tenure, so garbage in here
+// silently breaks pro-ration and leave accrual).
+function isValidJoiningDateInput(s) {
+  if (typeof s !== 'string' || !/^\d{4}-\d{2}-\d{2}$/.test(s)) return false;
+  const d = new Date(s + 'T00:00:00.000Z');
+  if (Number.isNaN(d.getTime())) return false;
+  if (d.toISOString().slice(0, 10) !== s) return false; // rejects e.g. 2026-02-31
+  return d.getTime() <= Date.now();
+}
+
 exports.addEmployee = async (req, res) => {
   try {
     const { Tenant, Employee, DelegationTask, ChecklistTask } = getModels(req);
     const {
       tenantId, name, email, department, whatsappNumber,
-      roles, password, managedDoers, managedAssigners, workOnSunday, location,
+      roles, password, managedDoers, managedAssigners, workOnSunday, location, joiningDate,
     } = req.body;
 
     // 0. Check email uniqueness within this tenant
     const existingEmployee = await Employee.findOne({ email, tenantId });
     if (existingEmployee) {
       return res.status(400).json({ message: 'This email is already taken by another employee in your company. Please use a different email.' });
+    }
+
+    // 0b. Joining date is optional on this endpoint, but if given it must be real and not in the future.
+    if (joiningDate !== undefined && joiningDate !== null && joiningDate !== '' && !isValidJoiningDateInput(joiningDate)) {
+      return res.status(400).json({ message: 'Please choose a valid joining date (not in the future).' });
     }
 
     // 1. Password Hashing (Preserved)
@@ -396,7 +412,8 @@ exports.addEmployee = async (req, res) => {
       roles: (Array.isArray(roles) && roles.length > 0) ? roles : ['Doer'],
       password: hashedPassword,
       managedDoers: managedDoers || [],
-      managedAssigners: managedAssigners || []
+      managedAssigners: managedAssigners || [],
+      ...(joiningDate ? { joiningDate: new Date(joiningDate + 'T00:00:00.000Z') } : {})
     });
 
     let savedEmployee = await newEmployee.save();
@@ -1027,13 +1044,18 @@ exports.updateEmployee = async (req, res) => {
   try {
     const { Tenant, Employee, DelegationTask, ChecklistTask } = getModels(req);
     const { id } = req.params;
-    const { name, email, whatsappNumber, department, location, roles, managedDoers, managedAssigners, password, workOnSunday, leaveStatus } = req.body;
+    const { name, email, whatsappNumber, department, location, roles, managedDoers, managedAssigners, password, workOnSunday, leaveStatus, joiningDate } = req.body;
+
+    if (joiningDate !== undefined && joiningDate !== null && joiningDate !== '' && !isValidJoiningDateInput(joiningDate)) {
+      return res.status(400).json({ message: 'Please choose a valid joining date (not in the future).' });
+    }
 
     const updateData = {
       name, email, department, roles, whatsappNumber, workOnSunday, leaveStatus,
       location: typeof location === 'string' ? location.trim().slice(0, 60) : undefined,
       managedDoers: Array.isArray(managedDoers) ? managedDoers.map(d => d._id || d) : [],
-      managedAssigners: Array.isArray(managedAssigners) ? managedAssigners.map(a => a._id || a) : []
+      managedAssigners: Array.isArray(managedAssigners) ? managedAssigners.map(a => a._id || a) : [],
+      ...(joiningDate === '' ? { joiningDate: undefined } : joiningDate ? { joiningDate: new Date(joiningDate + 'T00:00:00.000Z') } : {})
     };
 
     if (password && password.trim() !== "") {
