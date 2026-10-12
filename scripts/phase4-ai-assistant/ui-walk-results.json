@@ -1,0 +1,55 @@
+[
+  {
+    "name": "Desktop: login reached the dashboard (no console errors from the new component breaking the page)",
+    "pass": true,
+    "note": {
+      "url": "http://zzz-aiui-1791809034947.localhost:5173/dashboard",
+      "errors": []
+    }
+  },
+  {
+    "name": "Desktop: the AI assistant launcher button renders",
+    "pass": true,
+    "note": {}
+  },
+  {
+    "name": "Desktop: clicking the launcher opens the chat panel",
+    "pass": true,
+    "note": {}
+  },
+  {
+    "name": "Desktop: sending a message with no model configured shows the graceful-degradation message in the UI, not a crash",
+    "pass": true,
+    "note": {}
+  },
+  {
+    "name": "Desktop: a mic control (active or a visible \"not supported\" fallback) is always present, never missing entirely",
+    "pass": true,
+    "note": {}
+  },
+  {
+    "name": "Desktop: English/Hindi language selector is present",
+    "pass": true,
+    "note": {}
+  },
+  {
+    "name": "Phone (390px): the AI assistant launcher is visible",
+    "pass": true,
+    "note": {}
+  },
+  {
+    "name": "Phone (390px): the panel opens (full-screen takeover expected at this width per the component's responsive classes)",
+    "pass": true,
+    "note": {}
+  },
+  {
+    "name": "Phone (390px): no horizontal overflow with the panel open",
+    "pass": true,
+    "note": {}
+  },
+  {
+    "name": "Dark mode: panel opens and renders without crashing",
+    "pass": true,
+    "note": {}
+  }
+]
