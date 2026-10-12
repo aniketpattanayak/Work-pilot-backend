@@ -1,0 +1,114 @@
+[
+  {
+    "name": "setup: company created, admin can log in",
+    "pass": true
+  },
+  {
+    "name": "setup: all three HR modules switched on",
+    "pass": true
+  },
+  {
+    "name": "setup: company has 26 people across 2 locations and 3 departments",
+    "pass": true
+  },
+  {
+    "name": "setup: Payroll Preparer/Approver custom roles created",
+    "pass": true
+  },
+  {
+    "name": "setup: Finance assigned the Payroll Preparer role",
+    "pass": true
+  },
+  {
+    "name": "setup: HR Head assigned the Payroll Approver role (so approval is a different person than the preparer)",
+    "pass": true
+  },
+  {
+    "name": "lifecycle: a manual attendance punch can be added for an employee",
+    "pass": true
+  },
+  {
+    "name": "lifecycle: salary structures set for the whole company (no errors)",
+    "pass": true
+  },
+  {
+    "name": "lifecycle: salary list reflects the structures just set",
+    "pass": true
+  },
+  {
+    "name": "setup: leave balance can be manually adjusted upward for a new employee",
+    "pass": true
+  },
+  {
+    "name": "lifecycle: an employee can apply for leave",
+    "pass": true
+  },
+  {
+    "name": "lifecycle: HR Head can approve the leave",
+    "pass": true
+  },
+  {
+    "name": "lifecycle: Finance (Payroll Preparer role) can create the Sept 2026 payroll run",
+    "pass": true
+  },
+  {
+    "name": "cross-module: the mid-month joiner (joined 2026-09-16) is pro-rated - paid LESS than someone with the same basic salary who was present all month",
+    "pass": true
+  },
+  {
+    "name": "lifecycle: HR Head (Payroll Approver role, different person than preparer) can approve the run",
+    "pass": true
+  },
+  {
+    "name": "cross-module: a late regularization request can still be filed after the run is approved (system does not hard-block it)",
+    "pass": true
+  },
+  {
+    "name": "cross-module: the already-approved run's status is unaffected by a late regularization filed afterward (no silent recalculation)",
+    "pass": true
+  },
+  {
+    "name": "cross-module: a holiday can be added after attendance already exists for that date",
+    "pass": true
+  },
+  {
+    "name": "cross-module: an employee can be transferred to the other location mid-month",
+    "pass": true
+  },
+  {
+    "name": "cross-module: the Payroll Preparer role can be removed from Finance after they already created a run",
+    "pass": true
+  },
+  {
+    "name": "cross-module: the already-created run is still readable/valid after the preparer's role was removed",
+    "pass": true
+  },
+  {
+    "name": "cross-module: after the role is removed, Finance can no longer create a NEW payroll run (permission re-checked live, not cached from creation time)",
+    "pass": true
+  },
+  {
+    "name": "lifecycle: HR Head releases the approved run",
+    "pass": true
+  },
+  {
+    "name": "cross-module: changing an employee's salary after their run is released does NOT retroactively change that released run's already-paid numbers",
+    "pass": true
+  },
+  {
+    "name": "exit: a leaver's account can be deleted (hard delete - no deactivate/isActive flag exists in this codebase, confirmed by reading tenantController.js/Employee model)",
+    "pass": true
+  },
+  {
+    "name": "cross-module: the payroll run's own record of a deleted employee's payslip is unaffected (PayrollRun.lines snapshots name/department inline, does not depend on the Employee doc existing)",
+    "pass": true
+  },
+  {
+    "name": "exit: the deleted leaver can no longer log in at all",
+    "pass": true
+  },
+  {
+    "name": "KNOWN GAP (not built, per brief): there is no \"notice period\" or notice-pay concept anywhere in payrollController.js/Employee model - a person \"on notice\" is just a normal active employee with no special handling",
+    "pass": true
+  }
+]
