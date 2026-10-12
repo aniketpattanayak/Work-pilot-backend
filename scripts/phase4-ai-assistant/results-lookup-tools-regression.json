@@ -36,6 +36,10 @@
     "pass": true
   },
   {
+    "name": "...and carries structured `choices` (Part 6 chip UI) naming both candidates",
+    "pass": true
+  },
+  {
     "name": "setup: a real \"Sick Leave\" leave type exists",
     "pass": true
   },

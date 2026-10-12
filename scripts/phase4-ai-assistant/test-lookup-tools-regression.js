@@ -119,6 +119,12 @@ function firstUserText(messages) {
   check('the task really was created for the correctly-resolved Priya Sharma (not the other Priya)', countAfter === countBefore + 1, { countBefore, countAfter });
 
   // --- B. Ambiguous name ("Priya") -> the loop must ask, never guess ---
+  // Part 6 (UI): an ambiguous find_colleague result is now answered directly
+  // by the controller with a structured `choices` array (one per candidate,
+  // for the panel's choice-chip UI), short-circuiting BEFORE looping back
+  // to the model - so the fake model's own "did you mean X or Y" text
+  // branch below is now dead code for this specific case; it's kept only
+  // as a guard (if it ever fires, the short-circuit broke).
   global.__AI_ASSISTANT_FAKE_MODEL__ = async ({ messages }) => {
     const text = firstUserText(messages);
     if (/LOOKUP_CREATE_TASK_FOR_PRIYA/.test(text)) {
@@ -127,7 +133,6 @@ function firstUserText(messages) {
         return { toolUse: { id: 't1', name: 'find_colleague', input: { query: 'Priya' } }, text: '' };
       }
       if (toolResult.matchCount > 1) {
-        // Correct behavior per SYSTEM_PROMPT rule 5: ask, don't guess.
         const names = toolResult.matches.map((m) => m.name).join(' or ');
         return { toolUse: null, text: `I found more than one match — did you mean ${names}?` };
       }
@@ -137,7 +142,10 @@ function firstUserText(messages) {
   };
   r = await j(BASE, 'POST', '/ai-assistant/chat', { message: 'LOOKUP_CREATE_TASK_FOR_PRIYA' }, adminToken);
   check('an ambiguous name (2 matches) gets a disambiguating question back, not a staged action',
-    r.status === 200 && !r.data.needsConfirmation && /Priya Sharma/.test(r.data.reply || '') && /Priya Verma/.test(r.data.reply || ''), r);
+    r.status === 200 && !r.data.needsConfirmation && /which one did you mean/.test(r.data.reply || ''), r);
+  check('...and carries structured `choices` (Part 6 chip UI) naming both candidates',
+    Array.isArray(r.data.choices) && r.data.choices.some((c) => c.label === 'Priya Sharma') && r.data.choices.some((c) => c.label === 'Priya Verma'),
+    r.data);
 
   // --- C. find_colleague itself never leaks a raw id to anything outside the DATA wrapper ---
   // (already covered by check A's "shows name not id" assertion against the confirmation summary)

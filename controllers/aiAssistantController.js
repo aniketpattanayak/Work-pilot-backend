@@ -402,6 +402,20 @@ exports.chat = async (req, res) => {
         return finish({ reply: modelResult.text || 'Here you go.', result }, sessionLib.summariseToolCallForStorage(name, input));
       }
 
+      // Part 6 (UI): find_colleague coming back "ambiguous" is answered
+      // directly here, with structured `choices` the panel can render as
+      // clickable chips (one per candidate name) - rather than looping back
+      // to the model to phrase a plain-text question. The model still gets
+      // the same information if the user types a name instead of clicking a
+      // chip (the loop below is unchanged for every other case).
+      if (name === 'find_colleague' && result?.data?.decision === 'ambiguous') {
+        const choices = (result.data.matches || []).map((m) => ({ label: m.name, value: m.name }));
+        return finish(
+          { reply: `I found more than one match for "${result.data.query}" — which one did you mean?`, choices },
+          sessionLib.summariseToolCallForStorage(name, input),
+        );
+      }
+
       // A lookup tool: feed its result back to the model as DATA, never an
       // instruction, in proper Anthropic tool-use/tool-result turn shape, and
       // loop so the model can continue (pick the resolved id, ask the user to
