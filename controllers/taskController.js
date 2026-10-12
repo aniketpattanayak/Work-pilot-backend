@@ -470,6 +470,55 @@ exports.updateTask = async (req, res) => {
   }
 };
 
+// Part 3 (AI-layer-v2): a single-task read, added specifically so the
+// task_details tool has a real route instead of none (it was a confirmed
+// gap in the earlier report). Mirrors updateTask/deleteTask's own
+// tenant-isolation check, plus a visibility check: a task is visible only to
+// its assigner, its doer (and helper doers / buddy cover), its coordinator,
+// anyone in its forwardChain, or an Admin/superAdmin of the same tenant -
+// the same set of people the existing getDoerTasks/getAssignerTasks views
+// already show this task to. Everyone else gets 404, not 403, so this never
+// confirms a task id exists to someone outside its reach.
+exports.getTaskById = async (req, res) => {
+  try {
+    const { DelegationTask } = getModels(req);
+    const { taskId } = req.params;
+    if (!mongoose.Types.ObjectId.isValid(taskId)) {
+      return res.status(400).json({ message: "Invalid task ID." });
+    }
+    const task = await DelegationTask.findById(taskId)
+      .populate('assignerId', 'name email shadowName')
+      .populate('doerId', 'name department')
+      .populate('coordinatorId', 'name')
+      .populate('helperDoers.helperId', 'name')
+      .populate('forwardChain.employeeId', 'name')
+      .populate('history.performedBy', 'name');
+    if (!task) return res.status(404).json({ message: "Task not found." });
+
+    if (!req.user?.isSuperAdmin && String(task.tenantId) !== String(req.user?.tenantId)) {
+      return res.status(404).json({ message: "Task not found." });
+    }
+
+    const roles = Array.isArray(req.user?.roles) ? req.user.roles : [];
+    const uid = String(req.user?.id);
+    const isAdmin = req.user?.isSuperAdmin || roles.includes('Admin');
+    const isAssigner = String(task.assignerId?._id || task.assignerId) === uid;
+    const isDoer = String(task.doerId?._id || task.doerId) === uid;
+    const isCoordinator = task.coordinatorId && String(task.coordinatorId?._id || task.coordinatorId) === uid;
+    const isHelper = (task.helperDoers || []).some((h) => String(h.helperId?._id || h.helperId) === uid);
+    const isInForwardChain = (task.forwardChain || []).some((f) => String(f.employeeId?._id || f.employeeId) === uid);
+
+    if (!isAdmin && !isAssigner && !isDoer && !isCoordinator && !isHelper && !isInForwardChain) {
+      return res.status(404).json({ message: "Task not found." });
+    }
+
+    res.status(200).json({ task });
+  } catch (error) {
+    console.error("❌ getTaskById error:", error.message);
+    res.status(500).json({ message: "Failed to load task", error: error.message });
+  }
+};
+
 exports.deleteTask = async (req, res) => {
   try {
     const { DelegationTask, Employee, Tenant, ChecklistTask, FlowInstance } = getModels(req);

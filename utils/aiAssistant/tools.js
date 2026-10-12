@@ -125,6 +125,19 @@ const TOOLS = [
     path: () => '/api/tasks/payroll/my-payslips',
     inputSchema: { type: 'object', properties: {}, additionalProperties: false },
   },
+  {
+    name: 'task_details',
+    description: "View the full detail of a single task (title, description, status, deadline, history) — only works for a task the current user is the assigner, doer, a helper doer, the coordinator, or in the forward chain of; the route returns 'not found' for anything outside that, same as the other task views.",
+    needsConfirmation: false,
+    method: 'GET',
+    path: (u, args) => `/api/tasks/${args.taskId}`,
+    inputSchema: {
+      type: 'object',
+      required: ['taskId'],
+      properties: { taskId: { type: 'string' } },
+      additionalProperties: false,
+    },
+  },
 
   // --- Part 3 (AI-layer-v2): WRITE tools (each needsConfirmation) ---------
   {

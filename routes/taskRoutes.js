@@ -226,6 +226,12 @@ router.post('/create-task', authMiddleware, subscriptionGuard, tenantDbMiddlewar
   },
   taskController.createTask
 );
+// Single-task read (Part 3, AI-layer-v2: added so task_details has a real
+// route - was a confirmed gap before). Placed alongside the existing
+// PUT/DELETE '/:taskId' routes; every single-segment GET route this router
+// already serves (/employees, /auth/me, etc.) is declared earlier above, so
+// this generic param route can never shadow one of those.
+router.get('/:taskId', authMiddleware, subscriptionGuard, tenantDbMiddleware, taskController.getTaskById);
 router.delete('/:taskId', authMiddleware, subscriptionGuard, tenantDbMiddleware, taskController.deleteTask);
 router.post('/handle-revision', authMiddleware, subscriptionGuard, tenantDbMiddleware, taskController.handleRevision);
 router.post('/assign-onward', authMiddleware, subscriptionGuard, tenantDbMiddleware, taskController.assignOnward);
