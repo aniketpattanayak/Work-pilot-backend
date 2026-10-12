@@ -1,0 +1,74 @@
+[
+  {
+    "name": "setup: superadmin login works on the second instance",
+    "pass": true
+  },
+  {
+    "name": "setup: tenant created, admin can log in",
+    "pass": true
+  },
+  {
+    "name": "setup: plain Doer employee created and can log in",
+    "pass": true
+  },
+  {
+    "name": "AI assistant is OFF by default for a new tenant (403 AI_ASSISTANT_DISABLED)",
+    "pass": true
+  },
+  {
+    "name": "superadmin can enable the AI assistant for a tenant and set a monthly limit",
+    "pass": true
+  },
+  {
+    "name": "a normal tenant admin token cannot flip the AI assistant switch (superadmin-only)",
+    "pass": true
+  },
+  {
+    "name": "with no model configured (no API key, no fake model), the assistant degrades gracefully (503) instead of crashing",
+    "pass": true
+  },
+  {
+    "name": "create_task via the assistant returns needsConfirmation with a plain-language summary, and does NOT execute yet",
+    "pass": true
+  },
+  {
+    "name": "confirming the staged create_task actually runs it (200)",
+    "pass": true
+  },
+  {
+    "name": "the task really was created after confirmation (doer task count went up by exactly 1)",
+    "pass": true
+  },
+  {
+    "name": "created task is assigned to the doer the user actually named, not a guessed one",
+    "pass": true
+  },
+  {
+    "name": "a confirmId cannot be replayed a second time (expired/invalid)",
+    "pass": true
+  },
+  {
+    "name": "approve_payroll is refused outright and the user is told which screen to open, even though the model tried to call it",
+    "pass": true
+  },
+  {
+    "name": "even when the model is fooled by injected text into trying a forbidden action, the executor still blocks it unconditionally (not relying on the model behaving)",
+    "pass": true
+  },
+  {
+    "name": "an ambiguous write request (no explicit date given) gets a clarifying question back, not a guessed write",
+    "pass": true
+  },
+  {
+    "name": "list_my_tasks as the Doer succeeds and only returns their own tasks (the assistant used their token, not an admin one)",
+    "pass": true
+  },
+  {
+    "name": "per-user rate limiting kicks in after enough rapid requests",
+    "pass": true
+  },
+  {
+    "name": "a tiny monthly usage cap is enforced once exceeded",
+    "pass": true
+  }
+]

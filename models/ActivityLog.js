@@ -41,6 +41,8 @@ const ActivityLogSchema = new mongoose.Schema({
       'tenant_paused', 'tenant_resumed', 'plan_changed', 'limit_changed',
       // System
       'whatsapp_sent', 'file_uploaded',
+      // AI Assistant (Phase 4)
+      'ai_assistant_action', 'ai_assistant_blocked',
     ],
     required: true,
   },

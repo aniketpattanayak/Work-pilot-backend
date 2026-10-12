@@ -19,6 +19,7 @@ const orderFormRoutes = require('./routes/orderFormRoutes');
 const ticketRoutes = require('./routes/ticketRoutes');
 const taskRoutes = require('./routes/taskRoutes');
 const reportRoutes = require('./routes/reportRoutes');
+const aiAssistantRoutes = require('./routes/aiAssistantRoutes');
 
 // --- 2. IMPORT SERVICES & SCHEDULERS ---
 const initReportScheduler = require('./jobs/cronScheduler');
@@ -80,6 +81,7 @@ app.use('/api/fms2', orderFormRoutes);     // form-based order entry
 app.use('/api/tickets', ticketRoutes);
 app.use('/api/reports', reportRoutes);
 app.use('/api/tasks', taskRoutes);
+app.use('/api/ai-assistant', aiAssistantRoutes); // Phase 4 AI assistant (default OFF per-tenant)
 
 // Catch-all 404
 app.use((req, res) => {
