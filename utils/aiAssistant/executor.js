@@ -22,6 +22,9 @@ async function executeTool(toolName, args, userToken, currentUser) {
   const method = tool.method;
   const headers = { Authorization: `Bearer ${userToken}` };
   const outArgs = { ...(args || {}), ...(tool.autoFields ? tool.autoFields(currentUser || {}) : {}) };
+  if (Array.isArray(tool.stripFromBody)) {
+    for (const k of tool.stripFromBody) delete outArgs[k];
+  }
   let body;
   if (method !== 'GET' && method !== 'HEAD') {
     headers['Content-Type'] = 'application/json';

@@ -121,10 +121,27 @@ async function j(base, method, p, body, token) {
   check('...but the owner can still open it fine (not actually deleted)', r.status === 200, r);
 
   // --- D. Pending confirmation is a real Mongo document, not memory -------
+  // (Part 3 finding: completing against a taskId that doesn't exist must be
+  // reported honestly as a failure, not "Done." - see aiAssistantController's
+  // confirm path, which now shows the route's own error text on a non-2xx
+  // result. So this needs a REAL task to prove the single-use/Mongo claims.)
+  r = await j(BASE, 'POST', '/tasks/add-employee', {
+    tenantId, name: 'Task Doer', email: `taskdoer-${Date.now()}@${sub}.test`, department: 'Ops',
+    whatsappNumber: '9999999995', roles: ['Doer'], password: 'TestPass123!',
+  }, adminToken);
+  const taskDoerId = r.data?.employee?._id;
+  const adminId = JSON.parse(Buffer.from(adminToken.split('.')[1], 'base64').toString()).id;
+  r = await j(BASE, 'POST', '/tasks/create-task', {
+    tenantId, assignerId: adminId, title: 'Pending confirm test task',
+    doerId: taskDoerId, deadline: new Date(Date.now() + 86400000).toISOString(), priority: 'Medium',
+  }, adminToken);
+  const realTaskId = r.data?.task?._id;
+  check('setup: a real task exists to complete', !!realTaskId, r.data);
+
   global.__AI_ASSISTANT_FAKE_MODEL__ = async ({ messages }) => {
     const lastUserText = messages.filter((m) => typeof m.content === 'string').pop()?.content || '';
     if (/STAGE_A_TASK/.test(lastUserText)) {
-      return { toolUse: { id: 't1', name: 'complete_task', input: { taskId: '000000000000000000000001' } }, text: '' };
+      return { toolUse: { id: 't1', name: 'complete_task', input: { taskId: realTaskId } }, text: '' };
     }
     return { toolUse: null, text: 'unhandled' };
   };

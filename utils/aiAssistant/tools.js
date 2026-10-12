@@ -15,19 +15,204 @@
 // that voice/chat must never perform those - the assistant responds to a request
 // for one of those by naming the screen to open instead (see controller).
 
+
 const TOOLS = [
+  // --- Part 3 (AI-layer-v2): READ-ONLY tools -------------------------------
   {
-    name: 'list_my_tasks',
-    description: "List the current user's own delegated tasks (as doer or assigner).",
+    name: 'my_tasks',
+    description: "List the current user's own delegated tasks (as doer, helper, or buddy cover).",
     needsConfirmation: false,
     method: 'GET',
     path: (u) => `/api/tasks/doer/${u.id}`,
     inputSchema: { type: 'object', properties: {}, additionalProperties: false },
   },
   {
+    name: 'team_tasks',
+    description: "List tasks the current user assigned to others (their team's work). Only returns what the user's own role/reach already permits.",
+    needsConfirmation: false,
+    method: 'GET',
+    path: (u) => `/api/tasks/assigner/${u.id}`,
+    inputSchema: { type: 'object', properties: {}, additionalProperties: false },
+  },
+  {
+    name: 'my_attendance',
+    description: "View the current user's own attendance punches for a calendar month (whole-month only — this route has no arbitrary from/to range).",
+    needsConfirmation: false,
+    method: 'GET',
+    path: (u, args) => `/api/tasks/attendance/my${args && args.month ? `?month=${encodeURIComponent(args.month)}` : ''}`,
+    inputSchema: {
+      type: 'object',
+      properties: { month: { type: 'string', description: 'YYYY-MM, defaults to the current month if omitted' } },
+      additionalProperties: false,
+    },
+  },
+  {
+    name: 'team_attendance_today',
+    description: "View today's attendance status for everyone in the current user's reach (who's in, who's late, who's flagged).",
+    needsConfirmation: false,
+    method: 'GET',
+    path: () => '/api/tasks/attendance/live',
+    inputSchema: { type: 'object', properties: {}, additionalProperties: false },
+  },
+  {
+    name: 'my_shift',
+    description: "View the current user's own assigned shift, allowed punch sites, and the company's location/face punch rules, plus today's punches and what the next punch action would be.",
+    needsConfirmation: false,
+    method: 'GET',
+    path: () => '/api/tasks/attendance/today',
+    inputSchema: { type: 'object', properties: {}, additionalProperties: false },
+  },
+  {
+    name: 'who_is_on_leave',
+    description: 'List who is on approved/pending leave within an explicit date range (at most 62 days), scoped to the people the current user can see.',
+    needsConfirmation: false,
+    dateFields: ['from', 'to'],
+    method: 'GET',
+    path: (u, args) => `/api/tasks/leave/calendar?from=${encodeURIComponent(args.from)}&to=${encodeURIComponent(args.to)}`,
+    inputSchema: {
+      type: 'object',
+      required: ['from', 'to'],
+      properties: {
+        from: { type: 'string', description: 'ISO date YYYY-MM-DD, resolved from whatever the user said' },
+        to: { type: 'string', description: 'ISO date YYYY-MM-DD, resolved from whatever the user said' },
+      },
+      additionalProperties: false,
+    },
+  },
+  {
+    name: 'my_leave_requests',
+    description: "List the current user's own leave requests (optionally filtered by status).",
+    needsConfirmation: false,
+    method: 'GET',
+    path: (u, args) => `/api/tasks/leave/requests${args && args.status ? `?status=${encodeURIComponent(args.status)}` : ''}`,
+    inputSchema: {
+      type: 'object',
+      properties: { status: { type: 'string', enum: ['Pending', 'Approved', 'Rejected', 'Cancelled'] } },
+      additionalProperties: false,
+    },
+  },
+  {
+    name: 'list_departments',
+    description: 'List the distinct department names used in this company (no dedicated Department model exists — this derives the list from the employee roster).',
+    needsConfirmation: false,
+    isLookup: true,
+    method: 'GET',
+    path: () => '/api/tasks/employees',
+    inputSchema: { type: 'object', properties: {}, additionalProperties: false },
+    postProcess: (data) => {
+      const all = Array.isArray(data?.employees) ? data.employees : (Array.isArray(data) ? data : []);
+      const set = new Set(all.map((e) => (e.department || '').trim()).filter(Boolean));
+      return { departments: Array.from(set).sort() };
+    },
+  },
+  {
+    name: 'holiday_list',
+    description: "List this company's configured holidays and weekly off-days.",
+    needsConfirmation: false,
+    method: 'GET',
+    path: (u) => `/api/tasks/settings/${u.tenantId}`,
+    inputSchema: { type: 'object', properties: {}, additionalProperties: false },
+    // The underlying route returns almost the whole Tenant document (minus
+    // secrets, already stripped server-side) - narrow what the model sees to
+    // just the two fields this tool is actually for.
+    postProcess: (data) => ({ holidays: data?.holidays || [], weekends: data?.weekends || [] }),
+  },
+  {
+    name: 'my_payslip',
+    description: "View the current user's own past payslips list. Does not expose any other employee's salary data.",
+    needsConfirmation: false,
+    method: 'GET',
+    path: () => '/api/tasks/payroll/my-payslips',
+    inputSchema: { type: 'object', properties: {}, additionalProperties: false },
+  },
+
+  // --- Part 3 (AI-layer-v2): WRITE tools (each needsConfirmation) ---------
+  {
+    name: 'punch_in',
+    description: "Punch the current user in for today. The backend decides in/out by whatever the user's last punch today was — it does NOT trust a requested direction. If the company requires location or a face check, this tool cannot supply either (chat has no camera/GPS access), so the backend will reject it with the real reason, which must be shown to the user as-is, never bypassed or faked.",
+    needsConfirmation: true,
+    method: 'POST',
+    path: () => '/api/tasks/attendance/punch',
+    inputSchema: {
+      type: 'object',
+      properties: { note: { type: 'string', maxLength: 300, description: 'optional short note' } },
+      additionalProperties: false,
+    },
+    postProcess: (data) => ({ ...data, expectedDirection: 'in' }),
+  },
+  {
+    name: 'punch_out',
+    description: "Punch the current user out for today. The backend decides in/out by whatever the user's last punch today was — it does NOT trust a requested direction. If the company requires location or a face check, this tool cannot supply either (chat has no camera/GPS access), so the backend will reject it with the real reason, which must be shown to the user as-is, never bypassed or faked.",
+    needsConfirmation: true,
+    method: 'POST',
+    path: () => '/api/tasks/attendance/punch',
+    inputSchema: {
+      type: 'object',
+      properties: { note: { type: 'string', maxLength: 300, description: 'optional short note' } },
+      additionalProperties: false,
+    },
+    postProcess: (data) => ({ ...data, expectedDirection: 'out' }),
+  },
+  {
+    name: 'cancel_my_leave',
+    description: "Cancel one of the current user's own pending or approved-but-not-yet-started leave requests.",
+    needsConfirmation: true,
+    method: 'PUT',
+    path: (u, args) => `/api/tasks/leave/requests/${args.leaveRequestId}/cancel`,
+    inputSchema: {
+      type: 'object',
+      required: ['leaveRequestId'],
+      properties: {
+        leaveRequestId: { type: 'string' },
+        note: { type: 'string', maxLength: 300 },
+      },
+      additionalProperties: false,
+    },
+  },
+  {
+    name: 'update_task',
+    description: "Edit one of the current user's own tasks' title, description, deadline, or priority. Does NOT reassign the task to someone else — use reassign_task for that.",
+    needsConfirmation: true,
+    dateFields: ['deadline'],
+    method: 'PUT',
+    path: (u, args) => `/api/tasks/${args.taskId}`,
+    inputSchema: {
+      type: 'object',
+      required: ['taskId'],
+      properties: {
+        taskId: { type: 'string' },
+        title: { type: 'string', minLength: 1, maxLength: 200 },
+        description: { type: 'string', maxLength: 5000 },
+        deadline: { type: 'string', description: 'ISO date, must be a real date the user explicitly stated' },
+        priority: { type: 'string', enum: ['Low', 'Medium', 'High', 'Urgent'] },
+      },
+      additionalProperties: false,
+    },
+    // taskId is a path param, never part of the JSON body sent to the route.
+    stripFromBody: ['taskId'],
+  },
+  {
+    name: 'reassign_task',
+    description: "Reassign one of the current user's own tasks to a different colleague. Resolve the colleague's name to an id with find_colleague first — never guess an id.",
+    needsConfirmation: true,
+    method: 'PUT',
+    path: (u, args) => `/api/tasks/${args.taskId}`,
+    inputSchema: {
+      type: 'object',
+      required: ['taskId', 'doerId'],
+      properties: {
+        taskId: { type: 'string' },
+        doerId: { type: 'string', description: "MongoDB id of the colleague to reassign to, from find_colleague's result" },
+      },
+      additionalProperties: false,
+    },
+    stripFromBody: ['taskId'],
+  },
+  {
     name: 'create_task',
     description: 'Create a new delegated task assigned to a specific doer with a deadline.',
     needsConfirmation: true,
+    dateFields: ['deadline'],
     method: 'POST',
     path: () => '/api/tasks/create-task',
     // assignerId/tenantId are never something the model should supply - the
@@ -41,7 +226,7 @@ const TOOLS = [
         title: { type: 'string', minLength: 1, maxLength: 200 },
         doerId: { type: 'string', description: 'MongoDB id of the employee this task is assigned to' },
         deadline: { type: 'string', description: 'ISO date, must be a real calendar date the user stated explicitly' },
-        priority: { type: 'string', enum: ['Low', 'Medium', 'High'] },
+        priority: { type: 'string', enum: ['Low', 'Medium', 'High', 'Urgent'] },
       },
       additionalProperties: false,
     },
@@ -63,7 +248,7 @@ const TOOLS = [
     },
   },
   {
-    name: 'view_leave_balance',
+    name: 'my_leave_balance',
     description: "View the current user's own leave balance.",
     needsConfirmation: false,
     method: 'GET',
@@ -74,6 +259,7 @@ const TOOLS = [
     name: 'apply_leave',
     description: 'Apply for leave for the current user, for an explicit date range the user stated.',
     needsConfirmation: true,
+    dateFields: ['fromDate', 'toDate'],
     method: 'POST',
     path: () => '/api/tasks/leave/requests',
     inputSchema: {
@@ -96,23 +282,6 @@ const TOOLS = [
     path: () => '/api/tasks/leave/requests?status=Pending',
     inputSchema: { type: 'object', properties: {}, additionalProperties: false },
   },
-  {
-    name: 'view_my_payslips',
-    description: "View the current user's own past payslips list. Does not expose any other employee's salary data.",
-    needsConfirmation: false,
-    method: 'GET',
-    path: () => '/api/tasks/payroll/my-payslips',
-    inputSchema: { type: 'object', properties: {}, additionalProperties: false },
-  },
-  {
-    name: 'view_attendance_today',
-    description: "View the current user's own attendance punch status for today.",
-    needsConfirmation: false,
-    method: 'GET',
-    path: () => '/api/tasks/attendance/today',
-    inputSchema: { type: 'object', properties: {}, additionalProperties: false },
-  },
-
   // --- Read-only LOOKUP tools -------------------------------------------------
   // These exist only to resolve a name the user said in words into the real id
   // a write tool (create_task, apply_leave) needs - the model can never know a
