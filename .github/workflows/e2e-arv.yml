@@ -1,0 +1,93 @@
+name: E2E permission check (ARV Companies — REAL tenant)
+
+# Tests Aniket's real "Developer" role on the real ARV Companies tenant (arv.lrbcloud.ai).
+# Unlike e2e-prod.yml, this is NOT a throwaway test tenant — there is no pause/teardown
+# step, because it's a real, ongoing company. This creates real, permanent records (a real
+# attendance punch, a real leave request) as the only way to prove the granted permissions
+# actually work, not just that a page renders. Requires PROD_API_BASE,
+# PROD_SUPERADMIN_USER, PROD_SUPERADMIN_PASS, ARV_ADMIN_EMAIL, ARV_ADMIN_PASSWORD repo
+# secrets.
+on:
+  workflow_dispatch: {}
+  push:
+    branches: ['test/e2e-playwright-ci']
+    paths: ['.github/workflows/e2e-arv.yml', 'e2e/RUN_ARV_TRIGGER']
+
+permissions:
+  contents: write
+
+jobs:
+  e2e-arv:
+    runs-on: ubuntu-latest
+    env:
+      PROD_API_BASE: ${{ secrets.PROD_API_BASE }}
+      PROD_SUPERADMIN_USER: ${{ secrets.PROD_SUPERADMIN_USER }}
+      PROD_SUPERADMIN_PASS: ${{ secrets.PROD_SUPERADMIN_PASS }}
+      ARV_ADMIN_EMAIL: ${{ secrets.ARV_ADMIN_EMAIL }}
+      ARV_ADMIN_PASSWORD: ${{ secrets.ARV_ADMIN_PASSWORD }}
+    steps:
+      - name: Checkout backend
+        uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: Check required secrets are set
+        run: |
+          if [ -z "$PROD_API_BASE" ] || [ -z "$PROD_SUPERADMIN_USER" ] || [ -z "$PROD_SUPERADMIN_PASS" ] || [ -z "$ARV_ADMIN_EMAIL" ] || [ -z "$ARV_ADMIN_PASSWORD" ]; then
+            echo "Missing one or more required secrets (PROD_API_BASE, PROD_SUPERADMIN_USER, PROD_SUPERADMIN_PASS, ARV_ADMIN_EMAIL, ARV_ADMIN_PASSWORD)."
+            exit 1
+          fi
+
+      - name: Install e2e deps
+        working-directory: e2e
+        run: npm install
+
+      - name: Install Playwright browsers
+        working-directory: e2e
+        run: npx playwright install --with-deps chromium
+
+      - name: Run permission checks against ARV Companies
+        working-directory: e2e
+        run: npx playwright test --config=playwright.config.arv.js
+        continue-on-error: true
+
+      - name: Upload Playwright report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: playwright-report-arv
+          path: e2e/playwright-report/
+          retention-days: 14
+
+      - name: Post results summary as a commit comment
+        if: always()
+        working-directory: e2e
+        run: node scripts/post-summary.js
+        continue-on-error: true
+
+      - name: Publish commit comment
+        if: always()
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh api repos/${{ github.repository }}/commits/${{ github.sha }}/comments -f body="$(cat summary.md)"
+
+      - name: Fail the job if any test failed
+        if: always()
+        working-directory: e2e
+        run: |
+          node -e "
+            const fs = require('fs');
+            const r = JSON.parse(fs.readFileSync('playwright-report/results.json', 'utf8'));
+            let failed = false;
+            const walk = (suite) => {
+              (suite.suites || []).forEach(walk);
+              (suite.specs || []).forEach(spec => spec.tests.forEach(t => {
+                const s = t.results[t.results.length - 1].status; if (s !== 'passed' && s !== 'skipped') failed = true;
+              }));
+            };
+            walk(r);
+            process.exit(failed ? 1 : 0);
+          "

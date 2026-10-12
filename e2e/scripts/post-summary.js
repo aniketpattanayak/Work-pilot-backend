@@ -26,7 +26,8 @@ try {
         // the actual "Locator:" / "Expected:" / "Received:" / call-log detail after line 1.
         const errMsg = res.error ? stripAnsi(res.error.message).split('\n').slice(0, 8).join('\n') : res.status;
         const tag = skipped ? '[SKIP] ' : ok ? '[PASS] ' : '[FAIL] ';
-        lines.push(tag + spec.title + (ok ? '' : '\n' + fence + '\n' + errMsg + '\n' + fence));
+        const notes = (t.annotations || []).filter((a) => a.type === 'note').map((a) => 'NOTE: ' + a.description).join('\n');
+        lines.push(tag + spec.title + (ok ? '' : '\n' + fence + '\n' + errMsg + '\n' + fence) + (notes ? '\n' + fence + '\n' + notes + '\n' + fence : ''));
       });
     });
   };
@@ -49,6 +50,7 @@ body += '\nConnectivity diagnostics:\n' + fence + '\n' + logTail('diag.log', 60)
 body += '\nBackend log tail:\n' + fence + '\n' + logTail('backend.log', 40) + '\n' + fence + '\n';
 body += '\nFrontend log tail:\n' + fence + '\n' + logTail('frontend.log', 20) + '\n' + fence + '\n';
 body += '\nProd setup trace:\n' + fence + '\n' + logTail('e2e/setup-prod.log', 60) + '\n' + fence + '\n';
+body += '\nARV setup trace:\n' + fence + '\n' + logTail('e2e/setup-arv.log', 60) + '\n' + fence + '\n';
 
 fs.writeFileSync(path.join('..', 'summary.md'), body);
 console.log(body);
