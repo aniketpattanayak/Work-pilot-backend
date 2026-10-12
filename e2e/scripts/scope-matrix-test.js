@@ -198,8 +198,12 @@ const check = (label, cond, detail) => {
   log('\n=== Payroll ===');
   log('Skipped: no payroll API route exists anywhere in the backend (confirmed by source search) — the permission is saved on a role but nothing in this app reads or enforces it yet.');
 
-  const summary = results.join('\n');
-  require('fs').writeFileSync(require('path').join(__dirname, '..', 'scope-matrix-report.log'), summary);
-  if (failed) { console.error('\nSCOPE MATRIX: one or more mismatches found.'); process.exit(1); }
-  console.log('\nSCOPE MATRIX: all checks passed.');
-})().catch((e) => { console.error('Scope matrix test crashed:', e.stack || e.message); process.exit(1); });
+  if (failed) { console.error('\nSCOPE MATRIX: one or more mismatches found.'); process.exitCode = 1; }
+  else console.log('\nSCOPE MATRIX: all checks passed.');
+})().catch((e) => {
+  log('\nCRASHED:', e.stack || e.message);
+  process.exitCode = 1;
+}).finally(() => {
+  const reportPath = require('path').join(__dirname, '..', 'scope-matrix-report.log');
+  require('fs').writeFileSync(reportPath, results.join('\n'));
+});
