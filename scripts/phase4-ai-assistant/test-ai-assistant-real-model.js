@@ -44,6 +44,12 @@ async function j(base, method, p, body, token) {
     process.exit(1);
   }
 
+  // Log the ACTUAL model this run talks to - read from AI_ASSISTANT_MODEL via
+  // provider.js, never hardcoded here, so this line is always honest about
+  // what was really tested even if that env var is changed later.
+  const { MODEL } = require('../../utils/aiAssistant/provider');
+  console.log('REAL MODEL under test this run (AI_ASSISTANT_MODEL, or provider.js default if unset):', MODEL);
+
   require('../../index.js');
   await new Promise((r) => setTimeout(r, 2500));
   const BASE = `http://localhost:${process.env.PORT}/api`;

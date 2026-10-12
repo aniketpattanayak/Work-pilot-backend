@@ -1,0 +1,42 @@
+[
+  {
+    "name": "setup: superadmin login works",
+    "pass": true
+  },
+  {
+    "name": "setup: tenant created, admin can log in",
+    "pass": true
+  },
+  {
+    "name": "setup: 20 distinct employees created and logged in",
+    "pass": true
+  },
+  {
+    "name": "exactly 5 of 20 concurrent requests (from 20 different users) succeed under a monthlyLimit of 5 (atomic $inc, no lost updates letting extra through)",
+    "pass": true
+  },
+  {
+    "name": "all remaining concurrent requests are correctly capped, not errored or silently dropped",
+    "pass": true
+  },
+  {
+    "name": "a request after the concurrent burst (new user, so not rate-limited) is still capped",
+    "pass": true
+  },
+  {
+    "name": "sweepIdleRateBuckets is exposed for this test (and for the production interval) to call",
+    "pass": true
+  },
+  {
+    "name": "setup: both an idle and an active bucket exist before sweeping",
+    "pass": true
+  },
+  {
+    "name": "the idle user's entry is actually deleted from the map, not just left with an empty array",
+    "pass": true
+  },
+  {
+    "name": "the active user's entry survives the sweep",
+    "pass": true
+  }
+]

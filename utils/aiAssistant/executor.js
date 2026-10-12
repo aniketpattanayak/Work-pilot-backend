@@ -4,7 +4,7 @@
 // than by a separate copy of the permission logic that could drift out of sync.
 const { getToolByName, FORBIDDEN_ACTIONS } = require('./tools');
 
-const SELF_BASE = process.env.AI_ASSISTANT_SELF_BASE || `http://localhost:${process.env.PORT || 5099}`;
+const SELF_BASE = process.env.AI_ASSISTANT_SELF_BASE || `http://localhost:${process.env.PORT || 5001}`;
 
 async function executeTool(toolName, args, userToken, currentUser) {
   if (FORBIDDEN_ACTIONS[toolName]) {
@@ -31,6 +31,9 @@ async function executeTool(toolName, args, userToken, currentUser) {
   const res = await fetch(SELF_BASE + path, { method, headers, body });
   const text = await res.text();
   let data; try { data = JSON.parse(text); } catch { data = text; }
+  if (tool.postProcess && res.ok) {
+    try { data = tool.postProcess(data, args || {}); } catch (_) { /* leave raw data if postProcess itself fails */ }
+  }
   return { status: res.status, data };
 }
 

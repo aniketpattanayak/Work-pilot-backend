@@ -1,0 +1,58 @@
+[
+  {
+    "name": "setup: superadmin login works",
+    "pass": true
+  },
+  {
+    "name": "setup: tenant created, admin can log in",
+    "pass": true
+  },
+  {
+    "name": "setup: two colleagues both named \"Priya\" created",
+    "pass": true
+  },
+  {
+    "name": "setup: leave module enabled for this tenant",
+    "pass": true
+  },
+  {
+    "name": "name-based create_task resolves through find_colleague and stages correctly",
+    "pass": true
+  },
+  {
+    "name": "confirmation summary shows the real colleague's NAME, not a raw id",
+    "pass": true
+  },
+  {
+    "name": "confirming runs it against the resolved id",
+    "pass": true
+  },
+  {
+    "name": "the task really was created for the correctly-resolved Priya Sharma (not the other Priya)",
+    "pass": true
+  },
+  {
+    "name": "an ambiguous name (2 matches) gets a disambiguating question back, not a staged action",
+    "pass": true
+  },
+  {
+    "name": "setup: a real \"Sick Leave\" leave type exists",
+    "pass": true
+  },
+  {
+    "name": "leave-type name resolves through list_leave_types and stages apply_leave with the real id",
+    "pass": true
+  },
+  {
+    "name": "the apply_leave confirmation summary names the leave type (\"Sick Leave\"), not a raw id",
+    "pass": true
+  },
+  {
+    "name": "a tool call missing a required argument is rejected server-side, not staged",
+    "pass": true
+  },
+  {
+    "name": "a tool call with an unexpected extra argument is rejected server-side, not staged",
+    "pass": true
+  }
+]

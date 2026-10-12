@@ -52,6 +52,9 @@ const TOOLS = [
     needsConfirmation: true,
     method: 'PUT',
     path: () => '/api/tasks/respond',
+    // status is fixed by what this tool IS, never something the model supplies -
+    // "complete_task" always means status: 'Completed', nothing else.
+    autoFields: () => ({ status: 'Completed' }),
     inputSchema: {
       type: 'object',
       required: ['taskId'],
@@ -108,6 +111,53 @@ const TOOLS = [
     method: 'GET',
     path: () => '/api/tasks/attendance/today',
     inputSchema: { type: 'object', properties: {}, additionalProperties: false },
+  },
+
+  // --- Read-only LOOKUP tools -------------------------------------------------
+  // These exist only to resolve a name the user said in words into the real id
+  // a write tool (create_task, apply_leave) needs - the model can never know a
+  // colleague's MongoDB id or a leave type's id on its own, and must never guess
+  // one. The controller feeds their results back to the model as DATA (never an
+  // instruction) and lets it continue reasoning in the same request - see
+  // controllers/aiAssistantController.js's multi-step loop.
+  {
+    name: 'find_colleague',
+    description: "Search the current company's employees by name (case-insensitive, partial match). Returns id, name and department for each match - use the id only to call another tool, NEVER show an id to the user, always refer to people by name. If more than one person matches, you must ask the user which one before doing anything else - never guess.",
+    needsConfirmation: false,
+    isLookup: true,
+    method: 'GET',
+    path: () => '/api/tasks/employees',
+    inputSchema: {
+      type: 'object',
+      required: ['query'],
+      properties: { query: { type: 'string', minLength: 1, maxLength: 100, description: "the name, or part of it, the user said" } },
+      additionalProperties: false,
+    },
+    // The underlying route has no server-side name filter, so it returns the
+    // whole company's list (same data the user's own "Employees" screen would
+    // show them) - this narrows it to what's relevant before the model ever
+    // sees it, and strips every field except what's safe/needed to display.
+    postProcess: (data, args) => {
+      const q = String(args?.query || '').trim().toLowerCase();
+      const all = Array.isArray(data?.employees) ? data.employees : (Array.isArray(data) ? data : []);
+      const matches = all
+        .filter((e) => (e.name || '').toLowerCase().includes(q))
+        .map((e) => ({ id: String(e._id || e.id), name: e.name, department: e.department }));
+      return { query: args?.query, matchCount: matches.length, matches };
+    },
+  },
+  {
+    name: 'list_leave_types',
+    description: "List the leave types configured for this company (id and name) - use this to resolve a leave type the user named in words (e.g. \"sick leave\") to its id before calling apply_leave. Never guess a leaveTypeId.",
+    needsConfirmation: false,
+    isLookup: true,
+    method: 'GET',
+    path: () => '/api/tasks/leave/types',
+    inputSchema: { type: 'object', properties: {}, additionalProperties: false },
+    postProcess: (data) => {
+      const all = Array.isArray(data) ? data : (Array.isArray(data?.types) ? data.types : []);
+      return all.map((t) => ({ id: String(t._id || t.id), name: t.name }));
+    },
   },
 ];
 

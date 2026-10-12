@@ -42,8 +42,12 @@ POST /api/ai-assistant/chat { confirmId }
 | `list_pending_leave_requests` | No | Requests the user is permitted to approve |
 | `view_my_payslips` | No | The user's own payslip list only |
 | `view_attendance_today` | No | The user's own punch status |
+| `find_colleague` | No (read-only, lookup) | Search employees by name — resolves a name to an id for `create_task`, never shown to the user |
+| `list_leave_types` | No (read-only, lookup) | List the company's leave types — resolves a name to an id for `apply_leave` |
 
-Every schema is `additionalProperties: false` with explicit required fields — the model cannot pass through arbitrary extra fields.
+Every schema is `additionalProperties: false` with explicit required fields, and is now validated server-side (`utils/aiAssistant/validateArgs.js`) before any tool call is run OR staged — a schema-invalid call from the model (missing required field, wrong type, an unexpected extra field) is rejected with a plain message instead of reaching a real route or a confirmation card.
+
+**Lookup tools and the multi-step loop:** `create_task` and `apply_leave` need real MongoDB ids (`doerId`, `leaveTypeId`) that the model can never know on its own and must never guess. `find_colleague` and `list_leave_types` are read-only tools marked `isLookup: true`; the controller executes them immediately (over the same real route/token as everything else) and feeds the result back to the model as `<untrusted_data>` in a proper Anthropic tool-use/tool-result turn, then loops (capped at a few steps) so the model can continue — pick the resolved id, or ask the user to disambiguate if `find_colleague` returned more than one match. The confirmation card shown to the user always names the person/leave type (e.g. "assigned to Priya Sharma"), never a raw id.
 
 **Never a tool, under any circumstance:** `approve_payroll`, `release_payroll`, `change_salary`, `approve_leave`, `reset_admin_password` (the `FORBIDDEN_ACTIONS` map in `tools.js`). If the model tries to call one of these — including as a result of a prompt-injection attempt — `executor.js` refuses it unconditionally, before any HTTP call is made, and tells the user which real screen to open instead.
 
@@ -61,13 +65,15 @@ The assistant never queries the database directly and never sees a whole table �
 
 ## Rate limiting, usage cap, and audit
 
-- **Per-user rate limit**: in-memory sliding window, 10 requests/minute/user (`controllers/aiAssistantController.js`). Documented limitation: this is per-process state, so it resets per server instance and does not share state across the multi-process/cluster deployment Phase 5 scaling plan calls for — a shared store (Redis) is the fix, not built this session (see `SCALING_PLAN.md`).
-- **Per-company monthly cap**: `Tenant.superAdmin.aiAssistant.monthlyLimit`, settable by SuperAdmin, enforced server-side and reset by calendar month.
+- **Per-user rate limit**: in-memory sliding window, 10 requests/minute/user (`controllers/aiAssistantController.js`). Documented limitation: this is per-process state, so it resets per server instance and does not share state across the multi-process/cluster deployment Phase 5 scaling plan calls for — a shared store (Redis) is the fix, not built this session (see `SCALING_PLAN.md`). Idle entries (no request from that user within the window) are swept out of the in-memory map on a periodic timer (`sweepIdleRateBuckets`), so this map does not grow without bound in a long-running process with many distinct users.
+- **Per-company monthly cap**: `Tenant.superAdmin.aiAssistant.monthlyLimit`, settable by SuperAdmin, enforced server-side and reset by calendar month, via an atomic `$inc` (the check and the increment happen in the same MongoDB query), so two concurrent requests can never both pass the check and push the count past the cap the way a read-then-save counter could.
 - **Audit**: every executed tool call and every blocked forbidden-action attempt is written to `ActivityLog` (`ai_assistant_action` / `ai_assistant_blocked`), visible to SuperAdmin via the existing per-tenant activity log endpoint.
 
 ## Model provider
 
 `utils/aiAssistant/provider.js` is the one module that knows about a model provider. Default: the Anthropic API with server-side tool use (`@anthropic-ai/sdk`, installed this session — current version verified via web search rather than relying on training-time memory, since package versions move). The API key is read from `process.env.ANTHROPIC_API_KEY` only; it is never sent to or readable by the client. If no key is configured, or the call errors or times out, the assistant degrades gracefully with a `503 AI_SERVICE_DOWN` and a plain message pointing the user back to the regular screens, instead of crashing the request.
+
+**Model name**: read at startup from `process.env.AI_ASSISTANT_MODEL`, falling back to `'claude-sonnet-4-5'` if that env var isn't set (`const MODEL = process.env.AI_ASSISTANT_MODEL || 'claude-sonnet-4-5'`). This is a single source of truth — nothing else in the codebase hardcodes a model string. **The model actually tested against a real key in this project was `claude-sonnet-4-5`** (the default — `AI_ASSISTANT_MODEL` was never set in any environment this ran in), confirmed by `MODEL` being logged at the start of `scripts/phase4-ai-assistant/test-ai-assistant-real-model.js`. If `AI_ASSISTANT_MODEL` is ever set to a different model before a future real-model run, that run's own log line is the source of truth for which model it actually exercised — this doc should not be assumed current if that changes.
 
 A test-only fake-model injection point (`global.__AI_ASSISTANT_FAKE_MODEL__`) lets test scripts script the model's responses deterministically. It is not reachable from any request parameter, so a real end user can never trigger it — see `AI_ASSISTANT_REPORT.md` for why this was necessary this session (no API key was available) and what was and wasn't therefore verified against a real model.
 

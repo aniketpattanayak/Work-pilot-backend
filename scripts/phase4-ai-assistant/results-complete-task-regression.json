@@ -1,0 +1,34 @@
+[
+  {
+    "name": "setup: superadmin login works",
+    "pass": true
+  },
+  {
+    "name": "setup: tenant created, admin can log in",
+    "pass": true
+  },
+  {
+    "name": "setup: doer created",
+    "pass": true
+  },
+  {
+    "name": "setup: a real task exists, not yet completed",
+    "pass": true
+  },
+  {
+    "name": "complete_task stages correctly",
+    "pass": true
+  },
+  {
+    "name": "confirming runs the PUT /tasks/respond call (200)",
+    "pass": true
+  },
+  {
+    "name": "the executor really sent status: \"Completed\" in the request body",
+    "pass": true
+  },
+  {
+    "name": "the task's real status in the database is now \"Completed\" (not still \"Pending\"/undefined)",
+    "pass": true
+  }
+]

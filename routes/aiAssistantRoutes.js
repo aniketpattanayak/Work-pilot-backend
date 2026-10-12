@@ -1,6 +1,7 @@
 const express = require('express');
 const router = express.Router();
-const { authMiddleware, tenantDbMiddleware } = require('../middleware/auth');
+const { authMiddleware } = require('../middleware/auth');
+const tenantDbMiddleware = require('../middleware/tenantDb');
 const subscriptionGuard = require('../middleware/subscriptionGuard');
 const c = require('../controllers/aiAssistantController');
 
