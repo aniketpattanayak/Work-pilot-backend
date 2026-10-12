@@ -137,13 +137,45 @@ const TOOLS = [
     // whole company's list (same data the user's own "Employees" screen would
     // show them) - this narrows it to what's relevant before the model ever
     // sees it, and strips every field except what's safe/needed to display.
+    //
+    // Part 1 (AI-layer-v2): matching goes through resolve.js instead of a
+    // plain substring check, so a typo or a Devanagari name still finds the
+    // right person - the list returned stays tenant-scoped exactly as before
+    // (the route itself already returned only this tenant's employees; this
+    // just ranks within that same list, it never widens the search).
     postProcess: (data, args) => {
-      const q = String(args?.query || '').trim().toLowerCase();
+      const { resolveEntity } = require('./resolve');
       const all = Array.isArray(data?.employees) ? data.employees : (Array.isArray(data) ? data : []);
-      const matches = all
-        .filter((e) => (e.name || '').toLowerCase().includes(q))
-        .map((e) => ({ id: String(e._id || e.id), name: e.name, department: e.department }));
-      return { query: args?.query, matchCount: matches.length, matches };
+      const toMatchPlain = (e) => ({ id: String(e._id || e.id), name: e.name, department: e.department });
+
+      // A blank query is a deliberate internal convention (see
+      // resolveDisplayNames in the controller: it calls this tool with
+      // query:'' purely to fetch the whole roster, then looks a known id up
+      // locally for the confirmation card) - NOT a real name search, so it
+      // must return everyone rather than going through the resolver, which
+      // correctly refuses to "match" an empty string against anything.
+      if (!String(args?.query || '').trim()) {
+        return { query: args?.query, matchCount: all.length, matches: all.map(toMatchPlain), decision: 'list-all' };
+      }
+
+      const result = resolveEntity(args?.query, all, {
+        getPrimary: (e) => e.name || '',
+        getAliases: (e) => [e.email ? String(e.email).split('@')[0] : ''],
+        label: (e) => e.name,
+      });
+      const toMatch = (s) => ({ id: String(s.item._id || s.item.id), name: s.item.name, department: s.item.department });
+      if (result.decision === 'single') {
+        return { query: args?.query, matchCount: 1, matches: [toMatch(result.top)], decision: 'single' };
+      }
+      if (result.decision === 'ambiguous') {
+        return {
+          query: args?.query,
+          matchCount: result.candidates.length,
+          matches: result.candidates.map(toMatch),
+          decision: 'ambiguous',
+        };
+      }
+      return { query: args?.query, matchCount: 0, matches: [], decision: 'none', didYouMean: result.suggestions };
     },
   },
   {
