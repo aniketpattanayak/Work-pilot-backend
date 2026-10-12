@@ -25,4 +25,7 @@ router.post('/process-schedules',             authMiddleware, superAdminOnly, c.
 router.put('/tenants/:tenantId/custom-db', authMiddleware, superAdminOnly, c.setCustomDb);
 router.put('/tenants/:tenantId/custom-whatsapp', authMiddleware, superAdminOnly, c.setCustomWhatsapp);
 
+// Phase 4: AI assistant per-company kill switch + monthly usage limit.
+router.put('/tenants/:tenantId/ai-assistant', authMiddleware, superAdminOnly, c.setAiAssistant);
+
 module.exports = router;

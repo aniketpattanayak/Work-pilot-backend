@@ -1,0 +1,46 @@
+[
+  {
+    "name": "setup: superadmin login works",
+    "pass": true
+  },
+  {
+    "name": "setup: tenant created, admin can log in",
+    "pass": true
+  },
+  {
+    "name": "setup: doer employee created",
+    "pass": true
+  },
+  {
+    "name": "turn 1 calls the tool immediately and returns needsConfirmation + confirmId (not a plain-text question)",
+    "pass": true
+  },
+  {
+    "name": "confirming (\"yes\") actually runs the staged action",
+    "pass": true
+  },
+  {
+    "name": "exactly one task was created after confirming (count +1, not +0 or +2)",
+    "pass": true
+  },
+  {
+    "name": "replaying the same confirmId after it was used is rejected, not re-run",
+    "pass": true
+  },
+  {
+    "name": "task count unchanged after the rejected replay",
+    "pass": true
+  },
+  {
+    "name": "second request also stages correctly",
+    "pass": true
+  },
+  {
+    "name": "saying \"no\" instead of confirming leaves the task count unchanged",
+    "pass": true
+  },
+  {
+    "name": "merely staging a second action (never confirming it) did not create anything by itself",
+    "pass": true
+  }
+]

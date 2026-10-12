@@ -236,6 +236,16 @@ const TenantSchema = new mongoose.Schema({
     renewalDate: { type: Date,   default: null },
     billingNote: { type: String, default: '' },
 
+    // AI Assistant (Phase 4) — per-company kill switch, default OFF, plus a
+    // SuperAdmin-settable monthly usage cap. Usage is a rolling counter reset
+    // by month key (YYYY-MM) rather than a cron, to survive the server being down.
+    aiAssistant: {
+      enabled:          { type: Boolean, default: false },
+      monthlyLimit:     { type: Number,  default: 500 },
+      usageMonth:       { type: String,  default: '' },   // 'YYYY-MM' the counter below is for
+      usageCount:       { type: Number,  default: 0 },
+    },
+
     // Notes from superadmin
     internalNote: { type: String, default: '' },
   },

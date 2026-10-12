@@ -489,3 +489,29 @@ exports.setCustomWhatsapp = async (req, res) => {
     res.status(500).json({ message: 'Failed to update WhatsApp key', error: err.message });
   }
 };
+
+// ─── AI ASSISTANT SWITCH (Phase 4) ────────────────────────────────────────────
+// PUT /api/superadmin/tenants/:tenantId/ai-assistant
+// Per-company kill switch (default OFF, set on Tenant creation by the schema
+// default) plus a settable monthly usage cap.
+exports.setAiAssistant = async (req, res) => {
+  try {
+    const { tenantId } = req.params;
+    const { enabled, monthlyLimit } = req.body;
+    const tenant = await Tenant.findById(tenantId);
+    if (!tenant) return res.status(404).json({ message: 'Tenant not found' });
+
+    if (typeof enabled === 'boolean') tenant.superAdmin.aiAssistant.enabled = enabled;
+    if (typeof monthlyLimit === 'number' && monthlyLimit > 0) tenant.superAdmin.aiAssistant.monthlyLimit = monthlyLimit;
+    await tenant.save();
+
+    await ActivityLog.create({
+      tenantId, employeeName: 'SuperAdmin', action: 'limit_changed',
+      description: `AI assistant ${typeof enabled === 'boolean' ? (enabled ? 'enabled' : 'disabled') : 'settings updated'}${typeof monthlyLimit === 'number' ? `, monthly limit set to ${monthlyLimit}` : ''}`,
+    });
+
+    res.json({ message: 'AI assistant settings updated', aiAssistant: tenant.superAdmin.aiAssistant });
+  } catch (err) {
+    res.status(500).json({ message: 'Failed to update AI assistant settings', error: err.message });
+  }
+};
