@@ -1,0 +1,98 @@
+[
+  {
+    "name": "setup: superadmin login works",
+    "pass": true
+  },
+  {
+    "name": "setup: two separate tenants (A, B) created",
+    "pass": true
+  },
+  {
+    "name": "setup: tenant A has a real FMS template",
+    "pass": true
+  },
+  {
+    "name": "setup: tenant A has a real running FMS instance",
+    "pass": true
+  },
+  {
+    "name": "1. getInstanceHistory rejects a request with no auth token at all",
+    "pass": true
+  },
+  {
+    "name": "1. getInstanceHistory denies tenant B's token for tenant A's instance (404, not a leak)",
+    "pass": true
+  },
+  {
+    "name": "1. getInstanceHistory still works for the owning tenant's own token",
+    "pass": true
+  },
+  {
+    "name": "1. getFlowHistory rejects a request with no auth token at all",
+    "pass": true
+  },
+  {
+    "name": "1. getFlowHistory denies tenant B's token for tenant A's template (404, not a leak)",
+    "pass": true
+  },
+  {
+    "name": "2. resetAdminPassword call succeeds",
+    "pass": true
+  },
+  {
+    "name": "2. the admin can log in with the NEW password after reset",
+    "pass": true
+  },
+  {
+    "name": "2. the admin can NO LONGER log in with the OLD password after reset",
+    "pass": true
+  },
+  {
+    "name": "3. a joiningDate in the future is rejected",
+    "pass": true
+  },
+  {
+    "name": "3. a garbage joiningDate string is rejected",
+    "pass": true
+  },
+  {
+    "name": "3. a valid past joiningDate is accepted and actually stored",
+    "pass": true
+  },
+  {
+    "name": "3. the stored joiningDate really is the one that was sent",
+    "pass": true
+  },
+  {
+    "name": "4a. initializeFlow: tenant B cannot start a flow against tenant A's template (404, not cross-tenant success)",
+    "pass": true
+  },
+  {
+    "name": "4b. executeStep: tenant B is forbidden from executing a step on tenant A's instance (403)",
+    "pass": true
+  },
+  {
+    "name": "4c. getMyMissions for tenant B never includes tenant A's instance/template",
+    "pass": true
+  },
+  {
+    "name": "4d. deleteFmsTemplate: tenant B cannot delete tenant A's template (404)",
+    "pass": true
+  },
+  {
+    "name": "4d. tenant A's template really does still exist after the denied cross-tenant delete attempt",
+    "pass": true
+  },
+  {
+    "name": "4e. syncFmsOrders: tenant B cannot sync tenant A's template (404)",
+    "pass": true
+  },
+  {
+    "name": "4f. newFmsController.getTemplateById denies tenant B's token for tenant A's FlowTemplate (404)",
+    "pass": true
+  },
+  {
+    "name": "4f. ...but still works for the owning tenant",
+    "pass": true
+  }
+]
