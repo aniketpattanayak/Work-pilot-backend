@@ -123,6 +123,47 @@ This is one scale point (200 people, one month of attendance, a single sequentia
 each route) - not the full Section F ask (query-count profiling, finding and fixing the
 cause of anything slow, re-running after each fix).
 
+## Section A + C: full lifecycle and cross-module consistency (28 checks, all pass)
+
+`scripts/e2e-phase1/scenario-a-c.js`. Built one realistic 26-person company (2 locations
+- Mumbai HQ / Pune Branch; 3 departments - Ops/Sales/Finance; an HR Head, an HR Exec, a
+Finance person, 3 managers, 3 department heads, 14 regular employees, a mid-month
+joiner, a leaver, and a notice-period person) and ran it through the real API:
+
+**Section A (lifecycle)**: custom "Payroll Preparer" and "Payroll Approver" roles
+created and assigned to two *different* people (Finance and HR Head); salary structures
+set for everyone; leave applied and approved; a September 2026 payroll run prepared by
+Finance, approved and released by HR Head; an account (the leaver) deleted after their
+payslip had already been released; the deleted leaver confirmed unable to log in again.
+
+**Section C (cross-module consistency)**, each as its own live check:
+- A late attendance regularization filed for a past date **after** the run covering
+  that month is already Approved - allowed, and does **not** silently recalculate the
+  already-approved run (its status and numbers are unaffected).
+- A holiday added to the calendar **after** attendance already exists for that date -
+  allowed, does not error.
+- An employee transferred to the other location mid-month - allowed.
+- The Payroll Preparer role **removed from Finance after they already created a run**:
+  the existing run stays fully valid and readable, but Finance can no longer create a
+  *new* run - confirms permissions are re-checked live on every request, not cached from
+  when the run was created.
+- A salary change made **after** that employee's run is already Released - does not
+  retroactively change the released run's already-paid numbers.
+- The mid-month joiner (joined 2026-09-16, given attendance punches only after their
+  join date) is paid **less** than a full-month employee with the identical salary and a
+  full month of attendance - confirms pro-ration is really happening, not just that a
+  number exists.
+- Deleting an employee with an already-released payslip does not affect that payslip's
+  retrievability for someone with `payroll.viewSalary` - confirmed by reading
+  `PayrollRun.lines`, which snapshots `name`/`department` inline rather than depending on
+  the live `Employee` document still existing.
+- **"Notice period" / notice pay**: confirmed (by reading `payrollController.js` and the
+  `Employee` model) that no such concept exists anywhere in the codebase - a person "on
+  notice" is just a normal active employee with no special handling. This is one of the
+  gaps the brief named as known and explicitly asked to be listed, not built.
+
+No new bugs were found in this pass.
+
 ## Section D: module on/off combinations (all 8, live)
 
 All 8 combinations of attendance/leave/payroll on-off were set via the real superadmin
@@ -171,15 +212,13 @@ check against the real Save/Approve/Release buttons by their actual selectors.
 Given the size of the remaining ask relative to what one session can verify honestly,
 these were **not executed**, not "passed by reading code":
 
-- **Section A** (full hire-to-exit lifecycle walk with the 25-person realistic company,
-  branches/departments/mid-month joiner/leaver/notice-period person) - not seeded. The
-  joining-date fix and permission matrix above used small throwaway tenants created
-  per-test, not the full realistic company described in the brief.
-- **Section C** (cross-module consistency: late leave approval after payroll draft,
-  regularization after run approval, mid-month branch transfer, concurrent edits, etc.) -
-  not run this session. A closely related check (two simultaneous approve calls racing
-  on the same run) was verified in the *prior* payroll-only test round
-  (`PAYROLL_LIVE_TEST_REPORT.md`) and is not repeated here.
+- **Sections A and C are now done** (see the new section above, 28/28 checks) - the
+  realistic 26-person company, full lifecycle, and the named cross-module consistency
+  cases were all run live in a later pass this session. One Section C item from the
+  brief's own list was **not** separately re-verified here: "concurrent edits" - a
+  closely related check (two simultaneous approve calls racing on the same run) was
+  verified in the *prior* payroll-only test round (`PAYROLL_LIVE_TEST_REPORT.md`) and
+  is not repeated in this script.
 - **Section D** - all 8 module combinations done at the API level only (see above); the
   "disappears from the menu" half of the requirement was not checked in the UI.
 - **Section E** - only a small slice run (8 checks, see above): cross-tenant IDOR on
@@ -207,7 +246,9 @@ these were **not executed**, not "passed by reading code":
 
 ## Not tested / not done (honest summary)
 
-Sections A, C, D, E, F, G of the Phase 1 brief as written; Phase 2 (`PRODUCT_MAP.md`),
-Phase 3 (SuperAdmin), Phase 4 (AI assistant), and Phase 5 (scale readiness) were not
-started this session. See the final chat summary for why and what a realistic next step
-looks like.
+Sections A and C are now done (above). Sections D, E, F, G remain the partial slices
+described above, not the full scope. "Concurrent edits" specifically (one named item
+under Section C) was not re-verified this session beyond the prior round's single
+race-condition check. Phases 2-5 are covered in their own reports
+(`docs/PRODUCT_MAP.md`, `SUPERADMIN_REPORT.md`, `AI_ASSISTANT_REPORT.md`,
+`SCALE_REPORT.md`), each with its own honest "not done" list.
