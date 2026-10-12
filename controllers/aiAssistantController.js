@@ -16,6 +16,24 @@ const { TOOLS, FORBIDDEN_ACTIONS } = require('../utils/aiAssistant/tools');
 const { executeTool } = require('../utils/aiAssistant/executor');
 const { callModel, MODEL } = require('../utils/aiAssistant/provider');
 const { validateToolArgs } = require('../utils/aiAssistant/validateArgs');
+const sessionLib = require('../utils/aiAssistant/session');
+
+// Request-scoped AiChatSession model getter, same safeModel/try-catch
+// pattern taskController.js's own getModels(req) uses (NOT the shared
+// utils/reqModels.js helper - that one's getDefaultModels() unconditionally
+// requires '../models/Chat', which does not exist anywhere in this repo and
+// has apparently never been exercised in production; discovered while
+// building this, reported in AI_V2_NOTES.md as a pre-existing bug, left
+// alone/unfixed here since it's outside this change's scope).
+function getAiModels(req) {
+  const db = req?.db || null;
+  let AiChatSession = require('../models/AiChatSession');
+  if (db) {
+    try { AiChatSession = db.models.AiChatSession || db.model('AiChatSession', AiChatSession.schema); }
+    catch (_) { /* fall back to the default-connection model */ }
+  }
+  return { AiChatSession };
+}
 
 // ---- per-user, per-process sliding-window rate limit -----------------------
 // NOTE: in-memory - fine for this single-process local test, NOT safe for the
@@ -54,11 +72,10 @@ if (process.env.NODE_ENV !== 'test') {
   if (_sweepTimer.unref) _sweepTimer.unref();
 }
 
-// In-memory pending-confirmation store, keyed by a short-lived confirmation id.
-// Holds exactly what will be sent to executeTool - nothing the model says after
-// this point can change it, so "confirm" always runs precisely what the user saw.
-const pendingConfirmations = new Map(); // confirmId -> { toolName, args, userId, expiresAt }
-const CONFIRM_TTL_MS = 5 * 60 * 1000;
+// Part 2 (AI-layer-v2): pending write-confirmations now live in the
+// AiChatSession document in Mongo (see utils/aiAssistant/session.js), not in
+// this process's memory - any server process can stage one and any server
+// process can consume it, so this works correctly behind more than one node.
 
 // `names` carries display names resolved via resolveDisplayNames() below, so
 // the confirmation card the user actually sees says "Priya Sharma", never a
@@ -180,13 +197,13 @@ exports.chat = async (req, res) => {
       return res.status(429).json({ code: 'MONTHLY_LIMIT_REACHED', message: "This month's AI assistant usage limit has been reached for your company." });
     }
 
-    const { message, confirmId, untrustedContext } = req.body;
+    const { message, confirmId, untrustedContext, sessionId: sessionIdIn } = req.body;
+    const { AiChatSession } = getAiModels(req);
 
     // --- Path 1: the user is confirming a previously-shown pending action ---
     if (confirmId) {
-      const pending = pendingConfirmations.get(confirmId);
-      pendingConfirmations.delete(confirmId);
-      if (!pending || pending.userId !== req.user.id || pending.expiresAt < Date.now()) {
+      const pending = await sessionLib.consumePendingAction(AiChatSession, { confirmId, userId: req.user.id });
+      if (!pending || !pending.expiresAt || pending.expiresAt < new Date()) {
         return res.status(400).json({ message: 'That confirmation has expired or is invalid. Please ask again.' });
       }
       const userToken = (req.headers.authorization || '').replace('Bearer ', '');
@@ -197,16 +214,42 @@ exports.chat = async (req, res) => {
         description: `AI assistant executed ${pending.toolName} after user confirmation`,
         metadata: { extra: { tool: pending.toolName, status: result.status } },
       });
-      return res.json({ reply: `Done. (${pending.toolName} → ${result.status || 'ok'})`, result });
+      const replyText = `Done. (${pending.toolName} → ${result.status || 'ok'})`;
+      if (sessionIdIn) {
+        const session = await sessionLib.getOrCreateSession(AiChatSession, { tenantId: req.user.tenantId, userId: req.user.id, sessionId: sessionIdIn });
+        await sessionLib.appendTurn(AiChatSession, session, { userText: '(confirmed)', assistantText: replyText, toolCallNote: sessionLib.summariseToolCallForStorage(pending.toolName, pending.args) });
+      }
+      return res.json({ reply: replyText, result, sessionId: sessionIdIn || undefined });
     }
 
     if (!message || typeof message !== 'string' || !message.trim()) {
       return res.status(400).json({ message: 'message is required' });
     }
 
+    // Part 2: load (or create) this user's own conversation session, scoped
+    // to (tenantId, userId) at the query level - there is no code path by
+    // which this can return anyone else's session, Admin included.
+    const session = await sessionLib.getOrCreateSession(AiChatSession, {
+      tenantId: req.user.tenantId, userId: req.user.id, sessionId: sessionIdIn,
+    });
+
     const userToken = (req.headers.authorization || '').replace('Bearer ', '');
-    const messages = [{ role: 'user', content: untrustedContext ? `${wrapAsData('context', untrustedContext)}\n\nUser: ${message}` : message }];
+    const historyMessages = sessionLib.buildHistoryMessages(session);
+    const currentMessage = { role: 'user', content: untrustedContext ? `${wrapAsData('context', untrustedContext)}\n\nUser: ${message}` : message };
+    const messages = [...historyMessages, currentMessage];
     const anthropicTools = TOOLS.map((t) => ({ name: t.name, description: t.description, input_schema: t.inputSchema }));
+
+    // Persists this turn to the session (so it survives a refresh / shows up
+    // on another device) and responds - the one place every exit from the
+    // loop below funnels through, so none of them can forget to save.
+    async function finish(payload, toolCallNote) {
+      await sessionLib.appendTurn(AiChatSession, session, {
+        userText: message,
+        assistantText: payload.reply || payload.summary || '',
+        toolCallNote: toolCallNote || '',
+      });
+      return res.json({ ...payload, sessionId: session.sessionId });
+    }
 
     // Multi-step loop: a lookup tool's result (find_colleague, list_leave_types)
     // is fed back to the model as DATA so it can resolve a name to the id a
@@ -225,7 +268,7 @@ exports.chat = async (req, res) => {
       if (!modelResult.toolUse) {
         // Plain text reply - e.g. the model asked a clarifying question, or is
         // done after resolving everything it needed via lookup tools.
-        return res.json({ reply: modelResult.text });
+        return finish({ reply: modelResult.text });
       }
 
       const { name, input } = modelResult.toolUse;
@@ -236,12 +279,12 @@ exports.chat = async (req, res) => {
           action: 'ai_assistant_blocked', description: `AI assistant refused to run forbidden action "${name}"`,
           metadata: { extra: { tool: name } },
         });
-        return res.json({ reply: `I can't do that by chat or voice. Please open: ${FORBIDDEN_ACTIONS[name]}` });
+        return finish({ reply: `I can't do that by chat or voice. Please open: ${FORBIDDEN_ACTIONS[name]}` });
       }
 
       const tool = TOOLS.find((t) => t.name === name);
       if (!tool) {
-        return res.json({ reply: "I tried to use an action that isn't available. Let's try that a different way — what exactly do you need?" });
+        return finish({ reply: "I tried to use an action that isn't available. Let's try that a different way — what exactly do you need?" });
       }
 
       // Every tool call is validated against its own schema before it's
@@ -249,16 +292,21 @@ exports.chat = async (req, res) => {
       // a write that's about to be shown to the user for confirmation.
       const argError = validateToolArgs(tool.inputSchema, input);
       if (argError) {
-        return res.json({ reply: `I couldn't do that — ${argError}. Could you rephrase?` });
+        return finish({ reply: `I couldn't do that — ${argError}. Could you rephrase?` });
       }
 
       if (tool.needsConfirmation) {
         // Needs confirmation: stage it, show names not ids, do NOT execute yet.
+        // Part 2: staged in Mongo (on this session doc) instead of an
+        // in-memory Map, so it survives a restart and works behind >1 process.
         const names = await resolveDisplayNames(name, input, userToken, req.user);
         const confirmIdOut = `${req.user.id}-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
-        pendingConfirmations.set(confirmIdOut, { toolName: name, args: input, userId: req.user.id, expiresAt: Date.now() + CONFIRM_TTL_MS });
+        await sessionLib.setPendingAction(session, { confirmId: confirmIdOut, toolName: name, args: input });
         const summary = describeToolCall(name, input, names);
-        return res.json({ needsConfirmation: true, confirmId: confirmIdOut, summary, reply: `${summary} Shall I go ahead?` });
+        return finish(
+          { needsConfirmation: true, confirmId: confirmIdOut, summary, reply: `${summary} Shall I go ahead?` },
+          sessionLib.summariseToolCallForStorage(name, input),
+        );
       }
 
       // Read-only tool: actually execute it, over the same real route/token a
@@ -273,7 +321,7 @@ exports.chat = async (req, res) => {
       if (!tool.isLookup) {
         // A terminal single-shot read (list_my_tasks, view_leave_balance, ...):
         // answer the user now, no further reasoning needed.
-        return res.json({ reply: modelResult.text || 'Here you go.', result });
+        return finish({ reply: modelResult.text || 'Here you go.', result }, sessionLib.summariseToolCallForStorage(name, input));
       }
 
       // A lookup tool: feed its result back to the model as DATA, never an
@@ -285,11 +333,70 @@ exports.chat = async (req, res) => {
       messages.push({ role: 'user', content: [{ type: 'tool_result', tool_use_id: toolUseId, content: wrapAsData(`tool_result:${name}`, JSON.stringify(result.data)) }] });
     }
 
-    return res.json({ reply: "I couldn't work out exactly what you meant after a few tries — could you give me the exact name, or try again?" });
+    return finish({ reply: "I couldn't work out exactly what you meant after a few tries — could you give me the exact name, or try again?" });
   } catch (err) {
     console.error('[AIAssistant] chat error:', err);
     res.status(500).json({ message: 'AI assistant failed', error: err.message });
   }
 };
 
-exports._internal = { describeToolCall, wrapAsData, resolveDisplayNames, pendingConfirmations, rateBuckets, sweepIdleRateBuckets, MODEL };
+// --- Part 2: conversation-session endpoints -----------------------------
+// Every one of these is scoped to (tenantId, userId) at the query level in
+// session.js - there is no "Admin" special case anywhere here, so an Admin
+// genuinely cannot read another user's chat, by construction, not by a
+// permission check that could be forgotten on one of these handlers.
+
+exports.listSessions = async (req, res) => {
+  try {
+    const { AiChatSession } = getAiModels(req);
+    const sessions = await sessionLib.listMySessions(AiChatSession, { tenantId: req.user.tenantId, userId: req.user.id });
+    res.json({ sessions });
+  } catch (err) {
+    res.status(500).json({ message: 'Failed to list sessions', error: err.message });
+  }
+};
+
+exports.createSession = async (req, res) => {
+  try {
+    const { AiChatSession } = getAiModels(req);
+    const session = await sessionLib.getOrCreateSession(AiChatSession, {
+      tenantId: req.user.tenantId, userId: req.user.id, sessionId: sessionLib.newSessionId(),
+    });
+    res.json({ sessionId: session.sessionId, title: session.title });
+  } catch (err) {
+    res.status(500).json({ message: 'Failed to create session', error: err.message });
+  }
+};
+
+exports.getSession = async (req, res) => {
+  try {
+    const { AiChatSession } = getAiModels(req);
+    const session = await sessionLib.getMySession(AiChatSession, {
+      tenantId: req.user.tenantId, userId: req.user.id, sessionId: req.params.sessionId,
+    });
+    if (!session) return res.status(404).json({ message: 'Session not found' });
+    res.json({
+      sessionId: session.sessionId,
+      title: session.title,
+      messages: session.messages,
+      updatedAt: session.updatedAt,
+    });
+  } catch (err) {
+    res.status(500).json({ message: 'Failed to open session', error: err.message });
+  }
+};
+
+exports.deleteSession = async (req, res) => {
+  try {
+    const { AiChatSession } = getAiModels(req);
+    const deleted = await sessionLib.deleteMySession(AiChatSession, {
+      tenantId: req.user.tenantId, userId: req.user.id, sessionId: req.params.sessionId,
+    });
+    if (!deleted) return res.status(404).json({ message: 'Session not found' });
+    res.json({ message: 'Session deleted' });
+  } catch (err) {
+    res.status(500).json({ message: 'Failed to delete session', error: err.message });
+  }
+};
+
+exports._internal = { describeToolCall, wrapAsData, resolveDisplayNames, rateBuckets, sweepIdleRateBuckets, MODEL };
