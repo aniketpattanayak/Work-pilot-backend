@@ -70,6 +70,7 @@ const TenantSchema = new mongoose.Schema({
     dayBasis:          { type: String, enum: ['calendar', '30'], default: 'calendar' },
     roundNet:          { type: Boolean, default: true },
     allowSelfApproval: { type: Boolean, default: false },
+    requireReview:     { type: Boolean, default: false },   // a reviewer must mark the payroll Reviewed before it can be approved
     employerName:      { type: String, default: '' },
     employerAddress:   { type: String, default: '' },
     components: [{

@@ -180,6 +180,9 @@ router.delete('/payroll/runs/:id', ...payBase, requirePermission('payroll.prepar
 router.put('/payroll/runs/:id/approve', ...payBase, requirePermission('payroll.approve'), payrollController.approveRun);
 router.put('/payroll/runs/:id/reopen', ...payBase, requirePermission('payroll.approve'), payrollController.reopenRun);
 router.put('/payroll/runs/:id/release', ...payBase, requirePermission('payroll.release'), payrollController.releaseRun);
+router.get('/payroll/runs/:id/review', ...payBase, requirePermission('payroll.viewSalary', 'company'), payrollController.reviewRun);
+router.post('/payroll/runs/:id/reviews', ...payBase, requirePermission('payroll.viewSalary', 'company'), payrollController.addReview);
+router.post('/payroll/runs/:id/compare', ...payBase, requirePermission('payroll.viewSalary', 'company'), payrollController.compareRun);
 router.get('/payroll/runs/:id/export', ...payBase, requirePermission('payroll.export'), payrollController.exportRun);
 router.get('/payroll/my-payslips', ...payBase, payrollController.myPayslips);
 router.get('/payroll/payslip/:runId/:employeeId', ...payBase, payrollController.payslip);

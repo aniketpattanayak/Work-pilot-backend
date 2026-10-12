@@ -34,7 +34,7 @@ const ActivityLogSchema = new mongoose.Schema({
       'attendance_manual_punch', 'attendance_face_enrolled', 'attendance_face_decided', 'attendance_face_deleted',
       // Payroll
       'payroll_config_saved', 'payroll_salary_saved', 'payroll_salary_viewed', 'payroll_run_created', 'payroll_run_recalculated',
-      'payroll_line_adjusted', 'payroll_run_approved', 'payroll_run_reopened', 'payroll_run_released', 'payroll_run_cancelled', 'payroll_exported', 'payroll_declaration_saved',
+      'payroll_line_adjusted', 'payroll_run_approved', 'payroll_run_reopened', 'payroll_run_released', 'payroll_run_cancelled', 'payroll_exported', 'payroll_declaration_saved', 'payroll_review_added', 'payroll_compared',
       // Chat
       'message_sent', 'announcement_created',
       // SuperAdmin

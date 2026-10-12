@@ -6,6 +6,7 @@ const mongoose = require('mongoose');
 const P = require('../utils/payrollEngine');
 const SE = require('../utils/statutoryEngine');
 const TDS = require('../utils/tdsEngine');
+const RV = require('../utils/payrollReview');
 const AE = require('../utils/attendanceEngine');
 const att = require('./attendanceController');
 const { loadPermissions } = require('../middleware/permission');
@@ -31,7 +32,7 @@ async function audit(req, action, description, extra) {
   } catch (e) { console.error('[Payroll] audit failed:', e.message); }
 }
 
-const DEFAULT_CONFIG = { dayBasis: 'calendar', roundNet: true, allowSelfApproval: false, employerName: '', employerAddress: '', components: [] };
+const DEFAULT_CONFIG = { dayBasis: 'calendar', roundNet: true, allowSelfApproval: false, requireReview: false, employerName: '', employerAddress: '', components: [] };
 // Starting points offered in the setup screen. PF, ESI and professional tax are switched on under Statutory, not added here.
 const SUGGESTED = [
   { name: 'House Rent Allowance', type: 'earning', calc: 'percentBasic', value: 40, prorate: true },
@@ -85,6 +86,7 @@ exports.setConfig = async (req, res) => {
     if (b.dayBasis !== undefined) { if (!P.DAY_BASIS.includes(b.dayBasis)) return res.status(400).json({ message: 'Choose calendar month or fixed 30 days.' }); set['payrollConfig.dayBasis'] = b.dayBasis; }
     if (b.roundNet !== undefined) set['payrollConfig.roundNet'] = !!b.roundNet;
     if (b.allowSelfApproval !== undefined) set['payrollConfig.allowSelfApproval'] = !!b.allowSelfApproval;
+    if (b.requireReview !== undefined) set['payrollConfig.requireReview'] = !!b.requireReview;
     if (b.employerName !== undefined) { const v = P.cleanStr(b.employerName, 100); set['payrollConfig.employerName'] = v; }
     if (b.employerAddress !== undefined) { const v = P.cleanStr(b.employerAddress, 250); set['payrollConfig.employerAddress'] = v; }
     if (b.components !== undefined) {
@@ -333,7 +335,7 @@ exports.recalculate = async (req, res) => {
     const { config } = await loadConfig(req);
     const keep = new Map((run.lines || []).map((l) => [oid(l.employeeId), { adjustments: l.adjustments, hold: l.hold, holdNote: l.holdNote }]));
     const lines = await buildLines(req, run.month, config, keep);
-    const r = await model(req, 'PayrollRun').updateOne({ _id: run._id, tenantId: tenantId(req), status: 'Draft' }, { $set: { lines, totals: P.runTotals(lines), dayBasis: config.dayBasis, roundNet: config.roundNet, components: config.components, statutory: config.statutory }, $push: { history: hist(req, 'recalculated', '') } });
+    const r = await model(req, 'PayrollRun').updateOne({ _id: run._id, tenantId: tenantId(req), status: 'Draft' }, { $set: { reviews: [], lines, totals: P.runTotals(lines), dayBasis: config.dayBasis, roundNet: config.roundNet, components: config.components, statutory: config.statutory }, $push: { history: hist(req, 'recalculated', '') } });
     if (r && r.matchedCount === 0) return res.status(409).json({ message: 'This payroll changed. Reload and try again.' });
     await audit(req, 'payroll_run_recalculated', `Recalculated the payroll for ${run.month}`, { runId: oid(run._id) });
     res.json({ ok: true });
@@ -372,7 +374,7 @@ exports.updateLine = async (req, res) => {
     // Only this person is recalculated; everyone else keeps the figures already in the draft
     const fresh = (await buildLines(req, run.month, config, keep)).find((l) => oid(l.employeeId) === empId);
     const lines = run.lines.slice(); lines[idx] = fresh;
-    const r = await model(req, 'PayrollRun').updateOne({ _id: run._id, tenantId: tenantId(req), status: 'Draft' }, { $set: { lines, totals: P.runTotals(lines) }, $push: { history: hist(req, 'line_changed', line.name) } });
+    const r = await model(req, 'PayrollRun').updateOne({ _id: run._id, tenantId: tenantId(req), status: 'Draft' }, { $set: { reviews: [], lines, totals: P.runTotals(lines) }, $push: { history: hist(req, 'line_changed', line.name) } });
     if (r && r.matchedCount === 0) return res.status(409).json({ message: 'This payroll changed. Reload and try again.' });
     await audit(req, 'payroll_line_adjusted', `Changed ${line.name}'s payroll for ${run.month}`, { runId: oid(run._id), employeeId: empId, adjustments: adjustments.length, hold });
     res.json({ ok: true, line: lineView(fresh) });
@@ -403,6 +405,8 @@ exports.approveRun = async (req, res) => {
     if (oid(run.preparedBy) === oid(req.user.id) && !mayDecideOwn(req, config)) return res.status(403).json({ message: 'Someone else must approve a payroll you prepared.' });
     const bad = blockers(run);
     if (bad) return res.status(400).json({ message: bad });
+    if (config.requireReview && (run.reviews || []).length && run.reviews[run.reviews.length - 1].status === 'Query') return res.status(400).json({ message: 'The latest review note is a query that is still open. Answer it and ask for a new review.' });
+    if (config.requireReview && !(run.reviews || []).some((x) => x.status === 'Reviewed')) return res.status(400).json({ message: 'This company needs a reviewer to mark the payroll as reviewed before it is approved. Open "Review and checks".' });
     const note = P.cleanStr(req.body && req.body.note, 200);
     const r = await model(req, 'PayrollRun').updateOne({ _id: run._id, tenantId: tenantId(req), status: 'Draft' }, { $set: { status: 'Approved', approvedBy: req.user.id, approvedAt: new Date() }, $push: { history: hist(req, 'approved', note) } });
     if (r && r.matchedCount === 0) return res.status(409).json({ message: 'This payroll changed. Reload and try again.' });
@@ -416,7 +420,7 @@ exports.reopenRun = async (req, res) => {
     const run = await getRun(req, res, ['Approved']); if (!run) return;
     const note = P.cleanStr(req.body && req.body.note, 200);
     if (note.length < 3) return res.status(400).json({ message: 'Write why this payroll is sent back.' });
-    await model(req, 'PayrollRun').updateOne({ _id: run._id, tenantId: tenantId(req), status: 'Approved' }, { $set: { status: 'Draft', approvedBy: null, approvedAt: null }, $push: { history: hist(req, 'reopened', note) } });
+    await model(req, 'PayrollRun').updateOne({ _id: run._id, tenantId: tenantId(req), status: 'Approved' }, { $set: { status: 'Draft', approvedBy: null, approvedAt: null, reviews: [] }, $push: { history: hist(req, 'reopened', note) } });
     await audit(req, 'payroll_run_reopened', `Sent the payroll for ${run.month} back to draft`, { runId: oid(run._id), note });
     res.json({ ok: true });
   } catch (e) { res.status(500).json({ message: 'Could not send the payroll back.' }); }
@@ -430,6 +434,55 @@ exports.releaseRun = async (req, res) => {
     await audit(req, 'payroll_run_released', `Released the payroll and payslips for ${run.month}`, { runId: oid(run._id), net: run.totals && run.totals.net, people: run.totals && run.totals.count });
     res.json({ ok: true });
   } catch (e) { res.status(500).json({ message: 'Could not release the payroll.' }); }
+};
+
+// ---- review and comparison --------------------------------------------------------------------------------------------------
+// Reviewing needs company-wide salary access (HR head, finance, the company's CA with a custom role).
+exports.reviewRun = async (req, res) => {
+  try {
+    const run = await getRun(req, res); if (!run) return;
+    const R = model(req, 'PayrollRun');
+    const prev = (await R.find({ tenantId: tenantId(req), status: { $ne: 'Cancelled' }, month: { $lt: run.month } }).sort({ month: -1 }).lean())[0] || null;
+    const { config } = await loadConfig(req);
+    res.json({
+      month: run.month, status: run.status, previousMonth: prev ? prev.month : null, requireReview: !!config.requireReview,
+      checks: RV.reviewChecks(run, prev), statutory: RV.statutoryTotals(run), totals: run.totals || {},
+      reviews: (run.reviews || []).map((x) => ({ at: x.at, byName: x.byName, status: x.status, note: x.note })), me: oid(req.user.id)
+    });
+  } catch (e) { res.status(500).json({ message: 'Could not prepare the review.' }); }
+};
+
+exports.addReview = async (req, res) => {
+  try {
+    const run = await getRun(req, res, ['Draft', 'Approved']); if (!run) return;
+    const status = req.body && req.body.status;
+    if (!['Reviewed', 'Query'].includes(status)) return res.status(400).json({ message: 'Choose Reviewed or Query.' });
+    const note = P.cleanStr(req.body && req.body.note, 500);
+    if (status === 'Query' && note.length < 3) return res.status(400).json({ message: 'Write what needs to be checked.' });
+    // A person cannot sign off a payroll they prepared
+    if (status === 'Reviewed' && oid(run.preparedBy) === oid(req.user.id) && !mayDecideOwn(req, (await loadConfig(req)).config)) return res.status(403).json({ message: 'Someone else must review a payroll you prepared.' });
+    const entry = { at: new Date(), by: req.user.id, byName: nameOf(req), status, note };
+    const r = await model(req, 'PayrollRun').updateOne({ _id: run._id, tenantId: tenantId(req), status: run.status }, { $push: { reviews: entry, history: hist(req, status === 'Reviewed' ? 'reviewed' : 'review_query', note) } });
+    if (r && r.matchedCount === 0) return res.status(409).json({ message: 'This payroll changed. Reload and try again.' });
+    await audit(req, 'payroll_review_added', `${status === 'Reviewed' ? 'Marked the payroll for ' + run.month + ' as reviewed' : 'Raised a query on the payroll for ' + run.month}`, { runId: oid(run._id), status });
+    res.status(201).json({ ok: true });
+  } catch (e) { res.status(500).json({ message: 'Could not save the review.' }); }
+};
+
+// Parallel run: compares this payroll with the CSV of the payroll in use today
+exports.compareRun = async (req, res) => {
+  try {
+    const run = await getRun(req, res); if (!run) return;
+    const text = req.body && req.body.csv;
+    if (typeof text !== 'string' || !text.trim()) return res.status(400).json({ message: 'Choose the CSV file of your current payroll.' });
+    if (text.length > 2000000) return res.status(400).json({ message: 'The file is too large (limit 2 MB).' });
+    const other = RV.readOtherPayroll(text);
+    if (other.error) return res.status(400).json({ message: other.error });
+    const tolerance = Number(req.body.tolerance);
+    const result = RV.compareRun(run, other, Number.isFinite(tolerance) && tolerance >= 0 && tolerance <= 1000 ? tolerance : 1);
+    await audit(req, 'payroll_compared', `Compared the payroll for ${run.month} with another payroll file`, { runId: oid(run._id), people: other.people.length, different: result.counts.different });
+    res.json(result);
+  } catch (e) { res.status(500).json({ message: 'Could not compare the payrolls.' }); }
 };
 
 // ---- files ---------------------------------------------------------------------------------------------------------------

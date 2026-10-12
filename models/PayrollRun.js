@@ -33,6 +33,8 @@ const PayrollRunSchema = new mongoose.Schema({
   preparedBy: { type: mongoose.Schema.Types.ObjectId, ref: 'Employee' }, preparedAt: Date,
   approvedBy: { type: mongoose.Schema.Types.ObjectId, ref: 'Employee' }, approvedAt: Date,
   releasedBy: { type: mongoose.Schema.Types.ObjectId, ref: 'Employee' }, releasedAt: Date,
+  // Reviewer sign-offs on the current figures (cleared whenever the figures change)
+  reviews: [{ _id: false, at: { type: Date, default: Date.now }, by: { type: mongoose.Schema.Types.ObjectId }, byName: String, status: { type: String, enum: ['Reviewed', 'Query'] }, note: String }],
   history: [{ _id: false, at: { type: Date, default: Date.now }, by: { type: mongoose.Schema.Types.ObjectId }, byName: String, action: String, note: String }],
 }, { timestamps: true });
 
