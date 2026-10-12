@@ -10,7 +10,7 @@ const PayrollRunSchema = new mongoose.Schema({
   status:    { type: String, enum: ['Draft', 'Approved', 'Released', 'Cancelled'], default: 'Draft' },
   dayBasis:  { type: String, default: 'calendar' },
   roundNet:  { type: Boolean, default: true },
-  components:[{ _id: false, key: String, name: String, type: String, calc: String, value: Number, prorate: Boolean, active: Boolean, pf: Boolean }],
+  components:[{ _id: false, key: String, name: String, type: { type: String }, calc: String, value: Number, prorate: Boolean, active: Boolean, pf: Boolean }],
   lines: [{
     _id: false,
     employeeId: { type: mongoose.Schema.Types.ObjectId, ref: 'Employee' },
@@ -21,7 +21,7 @@ const PayrollRunSchema = new mongoose.Schema({
     employer: [AmountRow], employerTotal: { type: Number, default: 0 },          // employer's own PF / ESI cost (not taken from the pay)
     statutoryInfo: { type: mongoose.Schema.Types.Mixed, default: null },         // wages the PF / ESI / PT figures were worked from
     ids: { uan: { type: String, default: '' }, esiNumber: { type: String, default: '' }, pan: { type: String, default: '' } },
-    adjustments: [{ _id: false, label: String, type: String, amount: Number, note: String }],
+    adjustments: [{ _id: false, label: String, type: { type: String }, amount: Number, note: String }],
     gross: { type: Number, default: 0 }, totalDeductions: { type: Number, default: 0 }, rounding: { type: Number, default: 0 }, net: { type: Number, default: 0 },
     hold: { type: Boolean, default: false }, holdNote: { type: String, default: '' },
     warnings: [String],
