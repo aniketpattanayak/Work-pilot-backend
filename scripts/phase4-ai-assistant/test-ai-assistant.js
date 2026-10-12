@@ -88,7 +88,11 @@ async function j(base, method, p, body, token) {
       return { toolUse: { name: 'complete_task', input: { taskId: m[1] } }, text: '' };
     }
     if (text.includes('LIST_MY_TASKS')) {
-      return { toolUse: { name: 'list_my_tasks', input: {} }, text: '' };
+      // Test-authoring bug fix (not a product bug): the real tool name is
+      // "my_tasks" (see utils/aiAssistant/tools.js) - "list_my_tasks" is not
+      // on the fixed tool list at all, so this always fell into the
+      // "unknown action" refusal path and the assertion below always failed.
+      return { toolUse: { name: 'my_tasks', input: {} }, text: '' };
     }
     if (text.includes('AMBIGUOUS_LEAVE')) {
       // Model correctly asks instead of guessing a date.
