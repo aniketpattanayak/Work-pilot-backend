@@ -5,6 +5,10 @@
 const { getToolByName, FORBIDDEN_ACTIONS } = require('./tools');
 
 const SELF_BASE = process.env.AI_ASSISTANT_SELF_BASE || `http://localhost:${process.env.PORT || 5001}`;
+// Part 8: this fetch had no timeout at all - a stalled self-call (backend
+// under load, a hung downstream dependency) could hang the whole chat
+// request, and whatever awaits it, indefinitely. Bound it explicitly.
+const SELF_CALL_TIMEOUT_MS = Number(process.env.AI_ASSISTANT_SELF_CALL_TIMEOUT_MS) || 15000;
 
 async function executeTool(toolName, args, userToken, currentUser) {
   if (FORBIDDEN_ACTIONS[toolName]) {
@@ -31,7 +35,19 @@ async function executeTool(toolName, args, userToken, currentUser) {
     body = JSON.stringify(outArgs);
   }
 
-  const res = await fetch(SELF_BASE + path, { method, headers, body });
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), SELF_CALL_TIMEOUT_MS);
+  let res;
+  try {
+    res = await fetch(SELF_BASE + path, { method, headers, body, signal: controller.signal });
+  } catch (err) {
+    if (err?.name === 'AbortError') {
+      return { status: 504, data: { message: 'The action timed out talking to the server. Nothing was changed - please try again.' }, timedOut: true };
+    }
+    return { status: 502, data: { message: `Couldn't reach the server for this action: ${err.message}` } };
+  } finally {
+    clearTimeout(timer);
+  }
   const text = await res.text();
   let data; try { data = JSON.parse(text); } catch { data = text; }
   if (tool.postProcess && res.ok) {

@@ -22,6 +22,28 @@ function isConfigured() {
   return !!process.env.ANTHROPIC_API_KEY;
 }
 
+// Part 8: "report the average tokens per request". In-memory only, on
+// purpose - this is an operational/cost metric, not user data, so losing it
+// on a restart is an acceptable tradeoff (same reasoning as the rate-limit
+// buckets in the controller), and it is cheap to rebuild from fresh traffic.
+let _tokenCallCount = 0;
+let _tokenInputTotal = 0;
+let _tokenOutputTotal = 0;
+function recordTokenUsage({ inputTokens, outputTokens }) {
+  _tokenCallCount += 1;
+  _tokenInputTotal += inputTokens || 0;
+  _tokenOutputTotal += outputTokens || 0;
+}
+function getTokenUsageStats() {
+  return {
+    calls: _tokenCallCount,
+    avgInputTokens: _tokenCallCount ? _tokenInputTotal / _tokenCallCount : 0,
+    avgOutputTokens: _tokenCallCount ? _tokenOutputTotal / _tokenCallCount : 0,
+    totalInputTokens: _tokenInputTotal,
+    totalOutputTokens: _tokenOutputTotal,
+  };
+}
+
 /**
  * @param {object} opts
  * @param {string} opts.system - system prompt
@@ -52,11 +74,18 @@ async function callModel({ system, messages, tools }) {
     });
     const toolUseBlock = (resp.content || []).find((b) => b.type === 'tool_use');
     const textBlock = (resp.content || []).find((b) => b.type === 'text');
+    // Part 8: surface real token usage from the SDK response so a caller can
+    // report/track cost - previously dropped on the floor entirely.
+    const usage = resp.usage
+      ? { inputTokens: resp.usage.input_tokens, outputTokens: resp.usage.output_tokens }
+      : undefined;
+    if (usage) recordTokenUsage(usage);
     return {
       stopReason: resp.stop_reason,
       content: resp.content,
       text: textBlock ? textBlock.text : '',
       toolUse: toolUseBlock ? { name: toolUseBlock.name, input: toolUseBlock.input, id: toolUseBlock.id } : null,
+      usage,
     };
   } catch (err) {
     console.error('[AIAssistant] model call failed:', err.message);
@@ -67,4 +96,4 @@ async function callModel({ system, messages, tools }) {
   }
 }
 
-module.exports = { callModel, isConfigured, MODEL };
+module.exports = { callModel, isConfigured, MODEL, getTokenUsageStats };
