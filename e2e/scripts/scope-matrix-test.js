@@ -65,6 +65,12 @@ const check = (label, cond, detail) => {
   const tenantId = verify.data.id;
   log('Tenant:', SUBDOMAIN, tenantId);
 
+  // The e2e-prod.yml suite pauses this tenant after every run (teardown-prod.js) since
+  // it's a shared throwaway tenant, not deleted it — resume it first or every call below
+  // fails with SUBSCRIPTION_PAUSED.
+  const resume = await req('POST', `/superadmin/tenants/${tenantId}/resume`, superToken);
+  log('resume:', resume.status);
+
   await req('PUT', `/tenants/access/modules/${tenantId}`, superToken, { modules: { attendance: true, leave: true, payroll: true } });
 
   // Admin login for zzz-playwright-test — this is the PRODUCTION throwaway tenant that
