@@ -18,7 +18,43 @@ Everything in this section is new this pass, run against the real local stack (n
 | `GET /tasks/leave/config` | 583.7 | 32ms | 61ms | 0 |
 | `GET /tasks/leave/balance` | 314.5 | 58ms | 132ms | 0 |
 
-**Real finding, root-caused**: the employee-list route is already paginated server-side (`controllers/tenantController.js`'s `getEmployeeList`, `limit` capped at 500, default 100) — that part is correct, and this is not the N+1 bug the brief was watching for. The slowdown is a query-plan problem that only shows up at this scale: a single uncontended request against the 20k-employee tenant takes **737ms** even though it returns only 100 docs. A direct `.explain('executionStats')` against the exact same `find({tenantId}).sort({createdAt:-1}).skip(0).limit(100)` shows `totalKeysExamined: 20001` — it is scanning **every** matching document to satisfy the sort, not just the 100 requested. The correct compound index for this (`{tenantId:1, createdAt:-1}`, which exactly matches the query's filter+sort) **already exists** on the collection (confirmed via `db.collection('employees').indexes()`), but the query planner picks `{tenantId:1,email:1}` instead and falls back to an in-memory `SORT` stage over the full result set. Explicitly `.hint()`-ing the correct index did **not** fix it either — the explain output still showed a separate in-memory `SORT` stage above the index scan instead of the index's own order being used, which is the one piece of this that's a limitation of `@lossless.org/nosqldb` (the lightweight test-DB shim this sandbox runs, not real MongoDB) rather than a confirmed bug in the application code. A real MongoDB would be expected to recognize that `{tenantId:1,createdAt:-1}` makes the in-memory sort unnecessary when hinted or when it's the planner's natural choice; this shim evidently doesn't. **This is reported honestly as what it is: a measured, reproducible slowdown at 20k employees that gets dramatically worse under concurrency (timeouts), with the root cause narrowed down to either the query planner's index choice or the shim's inability to eliminate sort via a covering index — and it should be re-verified against real MongoDB before concluding which it is.**
+**Real finding, root-caused**: the employee-list route is already paginated server-side (`controllers/tenantController.js`'s `getEmployeeList`, `limit` capped at 500, default 100) — that part is correct, and this is not the N+1 bug the brief was watching for. The slowdown is a query-plan problem that only shows up at this scale: a single uncontended request against the 20k-employee tenant takes **737ms** even though it returns only 100 docs. A direct `.explain('executionStats')` against the exact same `find({tenantId}).sort({createdAt:-1}).skip(0).limit(100)` shows `totalKeysExamined: 20000` — it is scanning **every** matching document to satisfy the sort, not just the 100 requested. The correct compound index for this (`{tenantId:1, createdAt:-1}`, which exactly matches the query's filter+sort) **already exists** on the collection (confirmed via `db.collection('employees').indexes()`), but the query planner picks `{tenantId:1,email:1}` instead and falls back to an in-memory `SORT` stage over the full result set.
+
+**Is the local DB's explain output real, or is this just a test-shim artifact?** This needed settling precisely, since it changes what can honestly be claimed. This sandbox's local database (`@lossless.org/nosqldb` v10.10.0) is **not** a mock or a stub — its own documentation (read directly from the installed package, `node_modules/@lossless.org/nosqldb/readme.md`) states plainly: *"`explain('executionStats')` uses the serving query planner and reports actual document and index-entry reads"* — i.e. the explain numbers are real measurements of its own actual execution, not fabricated. But it is also, by its own description, *"A MongoDB-compatible embedded database server... backed by a high-performance Rust engine"* — a **separate, independent reimplementation** of the MongoDB wire protocol (compiled Rust binaries bundled per-platform), not real MongoDB/WiredTiger, and its own docs are explicit that `mongodbCompatibility` is *"a compatibility statement, never a claim to [be MongoDB]."*
+
+The package's own documentation claims it **should** handle this exact case: *"Queries can use a compound index's sort prefix after equality-constrained fields"* — which is precisely `{tenantId:1,createdAt:-1}` with `tenantId` equality-filtered and `createdAt` as the sort. To test this claim directly, I re-seeded a clean 20,000-employee tenant and ran the query two ways: (A) as the app actually calls it (no hint), and (B) with `.hint('tenantId_1_createdAt_-1')` explicitly, matching the exact method-chain order shown in the shim's own documentation example. **Both produced an identical result**: `totalKeysExamined: 20000` and a separate in-memory `SORT` stage above the `IXSCAN`, even in case (B) where the correct covering index was explicitly forced. This means either the shim's own documented sort-elimination feature has a bug, or there is some subtlety in this exact query shape (e.g. the Mongoose-constructed query, or the ObjectId equality match specifically) that doesn't qualify for it even though it looks like it should by the docs' own description. **I could not fully resolve which of those it is from inside this sandbox** — that requires comparing against real MongoDB, which this sandbox does not have.
+
+**What this means in plain terms**: the slowdown itself is **real and measured**, not a shim artifact — `totalKeysExamined: 20000` for a 100-row page is a genuinely bad query plan, however it comes about. What's *unproven* is whether this specific plan choice would also happen on real MongoDB, or whether it's unique to this Rust reimplementation's planner. **Exact commands to settle this on a real MongoDB instance** (mongosh, against a throwaway test database — never production):
+
+```js
+// 1. Seed comparable data (run in mongosh or via a short script)
+use scale_explain_test
+for (let i = 0; i < 20000; i++) {
+  db.employees.insertOne({ tenantId: ObjectId("000000000000000000000001"), name: "E"+i,
+    email: "e"+i+"@test.com", createdAt: new Date(), roles: ["Doer"] });
+}
+
+// 2. Create the exact same compound index this app uses
+db.employees.createIndex({ tenantId: 1, createdAt: -1 })
+db.employees.createIndex({ tenantId: 1, email: 1 }, { unique: true })
+
+// 3. Run the exact query, unhinted, the way the app does
+db.employees.find({ tenantId: ObjectId("000000000000000000000001") })
+  .sort({ createdAt: -1 }).skip(0).limit(100)
+  .explain("executionStats")
+// Check: totalKeysExamined should be ~100 (or close to it) on real MongoDB,
+// not 20000, if its planner picks {tenantId:1,createdAt:-1} - compare
+// executionStats.totalKeysExamined and whether executionStages has a
+// separate "SORT" stage above "IXSCAN", or whether the index serves the
+// sort directly with no SORT stage.
+
+// 4. Same query, hinted, to isolate "wrong plan chosen" vs "can't eliminate sort at all"
+db.employees.find({ tenantId: ObjectId("000000000000000000000001") })
+  .hint({ tenantId: 1, createdAt: -1 })
+  .sort({ createdAt: -1 }).limit(100)
+  .explain("executionStats")
+```
+If real MongoDB shows no `SORT` stage and a low `totalKeysExamined` in command 3, the slowdown is specific to this sandbox's test-DB shim and the app's query/index are fine as-is. If real MongoDB *also* shows a full-collection `SORT` stage even when hinted (command 4), this is a genuine application-level finding that needs a real fix (e.g. restructuring the query, or accepting the pagination page can't rely on index-ordered sort at this cardinality).
 
 **pm2 cluster-mode comparison — the one the brief and the prior pass flagged as highest-leverage, now actually run**: same 4 routes, same load profile (`-c 20 -d 10`), same 20k-employee tenant, compared across three configurations:
 
