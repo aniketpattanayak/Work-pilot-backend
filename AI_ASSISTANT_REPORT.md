@@ -32,6 +32,25 @@ This went entirely undetected by the fake-model suite, because the fake model wa
 
 **This needs a real fix before the AI assistant ships**, not just a doc update: either (a) remove system-prompt rule 3's instruction to ask in plain text first, and let the model call the tool immediately so the backend's existing `confirmId` card flow runs as designed, or (b) keep the two-turn conversational design but make `/api/ai-assistant/chat` stateful (store and resend conversation history per session). (a) is the smaller change and matches what the frontend already expects (a `ConfirmCard`, not a second free-text confirmation).
 
+## Update: confirm-flow bug fixed, branch `fix/ai-confirm-flow` (off `feature/ai-assistant`)
+
+Took option (a) above. `SYSTEM_PROMPT` rule 3 in `controllers/aiAssistantController.js` now reads: *"call it immediately with the exact arguments the user gave. Do not ask the user to confirm in plain text yourself... the app shows the user its own confirmation summary and only actually runs the action after they approve it there."* No other code changed — the `needsConfirmation`/`confirmId` mechanism was already correct; only the instruction telling the model to bypass it was wrong.
+
+**New regression test**: `scripts/phase4-ai-assistant/test-confirm-flow-regression.js`. Since there's no real API key in use anymore (per the standing instruction to stop using the provided key after testing), this uses the fake-model injection point — but unlike the original suite's fake model (which always calls the tool regardless of the prompt, which is exactly what let this bug through undetected), this fake model reads the real `system` string the controller actually sends and only calls the tool immediately if that string does **not** contain the old "get the user's explicit yes" wording. That means the test is driven by the real production prompt text, not a hardcoded assumption about it — it fails against the old prompt and passes against the new one for the right reason.
+
+Verified both directions directly: with the fix in place, 11/11 checks pass. With the fix reverted (`git stash`) and the test re-run unchanged, 4/11 fail, reproducing the exact reported symptom — turn 1 returns a plain-language question with no `confirmId`, and the "confirm" call then fails with `"message is required"` (there is no confirmId to send), so zero tasks get created. Re-applying the fix (`git stash pop`) brings it back to 11/11.
+
+The 11 checks cover, end to end, with the fake model standing in for a real one that honestly follows the system prompt it's given:
+- Turn 1 calls the tool immediately and returns `needsConfirmation` + a `confirmId` + a correct plain-language summary (not a plain-text question with no tool call).
+- Confirming ("yes") runs the staged action exactly once — task count goes from N to N+1, not N or N+2.
+- The same `confirmId` cannot be replayed a second time, and the replay doesn't change the task count.
+- A second staged action is created correctly, then the user says "no" in plain chat instead of sending the `confirmId` — the task count stays unchanged (saying no, or anything other than confirming, can never cause the staged action to run).
+- Merely staging an action and never confirming it (silence) does not create anything by itself — only the explicit `confirmId` POST does.
+
+Also re-ran the full original 18-check fake-model suite (`test-ai-assistant.js`) unchanged after the fix — still 18/18, so the forbidden-action, injection-resistance, ambiguity, isolation, rate-limit and monthly-cap behavior the fix didn't touch is confirmed unaffected.
+
+**Not re-run after this fix**: the real-model suite (`test-ai-assistant-real-model.js`). Rule 3 changing is exactly what that suite would need to re-verify (checks 3–7, previously blocked by this bug), but the real API key provided earlier in this project was already removed from `.env` and is not back in use — re-running it would need a fresh key and the reviewer's explicit go-ahead, which is a decision for the reviewer, not something done unilaterally here.
+
 ## Result: 18/18 automated checks pass
 
 | # | Check | Result |
@@ -75,7 +94,7 @@ This was verified with a real Playwright browser walk against the real running b
 
 ## Decisions needed
 
-1. **New, highest priority**: fix the confirmation-flow contradiction found this pass (system prompt tells the model to ask in plain text first; backend expects an immediate tool call). Recommend removing/rewriting system-prompt rule 3 so the model calls the tool immediately and lets the backend's existing `confirmId`/`ConfirmCard` mechanism do the confirming, rather than making `/api/ai-assistant/chat` stateful. **This should block shipping** — as currently prompted, no real user can get a write action (create task, apply leave) confirmed and executed through the assistant at all.
+1. ~~New, highest priority: fix the confirmation-flow contradiction...~~ **Fixed** on branch `fix/ai-confirm-flow` (off `feature/ai-assistant`, not merged anywhere) — see "Update: confirm-flow bug fixed" above. Proven with a fake-model regression test that fails against the old prompt and passes against the new one; not yet re-verified against a real model (would need a fresh API key and the reviewer's go-ahead).
 2. Someone with push access to `Work-pilot-frontend` needs to pull commits `985123e` and `e7b722d` out of this sandbox and land them on GitHub — they cannot be pushed from here.
 3. Is the 10-requests/minute per-user rate limit (and the default 500/month company cap) the right starting point, or should these be tenant-configurable from day one rather than only the monthly cap?
 4. ~~Before enabling this for any real company, a real `ANTHROPIC_API_KEY` should be provisioned~~ — **a key was provided and used for two supervised runs** (21 real model calls total), then removed from `.env` again and is no longer in use anywhere in this sandbox. **This key was pasted in plaintext in a chat session and must be rotated/revoked in the Anthropic Console before any real use.**
@@ -83,8 +102,8 @@ This was verified with a real Playwright browser walk against the real running b
 
 ## Not tested / not done
 
-- A fix for the confirmation-flow bug found this pass (see above) — found and root-caused, not yet fixed, since it requires deciding between two different designs (decision #1 above).
-- A re-run of the full real-model suite after that bug is fixed, to confirm checks 3–7 (the ones blocked by it) actually pass once the model can get all the way to task creation.
+- ~~A fix for the confirmation-flow bug found this pass~~ — fixed, see above.
+- A re-run of the full real-model suite now that the fix is in, to confirm checks 3–7 (the ones blocked by it) actually pass against a real model, not just the fake-model regression test — needs a fresh API key and the reviewer's explicit go-ahead before using one.
 - A statistically meaningful red-team pass against the real model (many injection phrasings) — the ones tried (2, across both runs) passed, which is encouraging but not a guarantee.
 - Hindi-language behavior specifically (frontend selector exists and was verified to render; actual Hindi speech-recognition accuracy was not tested — headless Chromium has no real microphone input).
 - Load/concurrency behavior of the assistant itself under many simultaneous users (deferred to Phase 5, which covers general load testing).
