@@ -53,16 +53,15 @@ const check = (label, cond, detail) => {
 
 (async () => {
   if (!API_BASE || !SUPERADMIN_USER || !SUPERADMIN_PASS) {
-    console.error('Missing PROD_API_BASE / PROD_SUPERADMIN_USER / PROD_SUPERADMIN_PASS.');
-    process.exit(1);
+    throw new Error('Missing PROD_API_BASE / PROD_SUPERADMIN_USER / PROD_SUPERADMIN_PASS.');
   }
 
   const superLogin = await req('POST', '/tenants/master-login', null, { username: SUPERADMIN_USER, password: SUPERADMIN_PASS });
-  if (!superLogin.ok) { console.error('Super admin login failed:', superLogin.status, superLogin.data); process.exit(1); }
+  if (!superLogin.ok) throw new Error('Super admin login failed: ' + superLogin.status + ' ' + JSON.stringify(superLogin.data));
   const superToken = superLogin.data.token;
 
   const verify = await req('GET', `/tenants/verify/${SUBDOMAIN}`, null);
-  if (!verify.ok) { console.error('Could not find test tenant:', verify.data); process.exit(1); }
+  if (!verify.ok) throw new Error('Could not find test tenant: ' + JSON.stringify(verify.data));
   const tenantId = verify.data.id;
   log('Tenant:', SUBDOMAIN, tenantId);
 
@@ -70,7 +69,7 @@ const check = (label, cond, detail) => {
 
   // Admin login (seeded qa-admin, same as the rest of the e2e suite) to manage employees/roles.
   const adminLogin = await req('POST', '/tasks/login-employee', null, { email: process.env.E2E_EMAIL || 'qa-admin@workpilot-test.com', password: process.env.E2E_PASSWORD || 'TestPass123!', subdomain: SUBDOMAIN });
-  if (!adminLogin.ok) { console.error('Admin login failed:', adminLogin.data); process.exit(1); }
+  if (!adminLogin.ok) throw new Error('Admin login failed: ' + JSON.stringify(adminLogin.data));
   const adminToken = adminLogin.data.token;
 
   // --- create (or reuse) the 5 test employees ---------------------------------------
