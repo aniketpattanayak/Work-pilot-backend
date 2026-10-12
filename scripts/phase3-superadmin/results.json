@@ -1,0 +1,226 @@
+[
+  {
+    "name": "superadmin login with correct credentials succeeds",
+    "pass": true
+  },
+  {
+    "name": "superadmin login with wrong password is rejected (401/403), not 200",
+    "pass": true
+  },
+  {
+    "name": "wrong-password response does not reveal whether username or password was wrong (generic message)",
+    "pass": true
+  },
+  {
+    "name": "superadmin login with unknown username is rejected (401/403)",
+    "pass": true
+  },
+  {
+    "name": "setup: tenant A created and its admin can log in",
+    "pass": true
+  },
+  {
+    "name": "setup: tenant B created and its admin can log in",
+    "pass": true
+  },
+  {
+    "name": "GET /superadmin/dashboard rejects a normal tenant-admin token (403)",
+    "pass": true
+  },
+  {
+    "name": "GET /superadmin/dashboard rejects a completely unauthenticated request (401/403)",
+    "pass": true
+  },
+  {
+    "name": "GET /superadmin/tenants rejects a normal tenant-admin token (403)",
+    "pass": true
+  },
+  {
+    "name": "GET /superadmin/tenants rejects a completely unauthenticated request (401/403)",
+    "pass": true
+  },
+  {
+    "name": "GET /superadmin/tenants/6accca521c68e01a3df382a3 rejects a normal tenant-admin token (403)",
+    "pass": true
+  },
+  {
+    "name": "GET /superadmin/tenants/6accca521c68e01a3df382a3 rejects a completely unauthenticated request (401/403)",
+    "pass": true
+  },
+  {
+    "name": "GET /superadmin/feed rejects a normal tenant-admin token (403)",
+    "pass": true
+  },
+  {
+    "name": "GET /superadmin/feed rejects a completely unauthenticated request (401/403)",
+    "pass": true
+  },
+  {
+    "name": "POST /superadmin/tenants/6accca521c68e01a3df382a3/pause rejects a normal tenant-admin token (403)",
+    "pass": true
+  },
+  {
+    "name": "POST /superadmin/tenants/6accca521c68e01a3df382a3/pause rejects a completely unauthenticated request (401/403)",
+    "pass": true
+  },
+  {
+    "name": "POST /superadmin/tenants/6accca521c68e01a3df382a3/resume rejects a normal tenant-admin token (403)",
+    "pass": true
+  },
+  {
+    "name": "POST /superadmin/tenants/6accca521c68e01a3df382a3/resume rejects a completely unauthenticated request (401/403)",
+    "pass": true
+  },
+  {
+    "name": "PUT /superadmin/tenants/6accca521c68e01a3df382a3/limits rejects a normal tenant-admin token (403)",
+    "pass": true
+  },
+  {
+    "name": "PUT /superadmin/tenants/6accca521c68e01a3df382a3/limits rejects a completely unauthenticated request (401/403)",
+    "pass": true
+  },
+  {
+    "name": "PUT /superadmin/tenants/6accca521c68e01a3df382a3/features rejects a normal tenant-admin token (403)",
+    "pass": true
+  },
+  {
+    "name": "PUT /superadmin/tenants/6accca521c68e01a3df382a3/features rejects a completely unauthenticated request (401/403)",
+    "pass": true
+  },
+  {
+    "name": "PUT /superadmin/tenants/6accca521c68e01a3df382a3/billing rejects a normal tenant-admin token (403)",
+    "pass": true
+  },
+  {
+    "name": "PUT /superadmin/tenants/6accca521c68e01a3df382a3/billing rejects a completely unauthenticated request (401/403)",
+    "pass": true
+  },
+  {
+    "name": "PUT /superadmin/tenants/6accca521c68e01a3df382a3/note rejects a normal tenant-admin token (403)",
+    "pass": true
+  },
+  {
+    "name": "PUT /superadmin/tenants/6accca521c68e01a3df382a3/note rejects a completely unauthenticated request (401/403)",
+    "pass": true
+  },
+  {
+    "name": "POST /superadmin/tenants/6accca521c68e01a3df382a3/reset-password rejects a normal tenant-admin token (403)",
+    "pass": true
+  },
+  {
+    "name": "POST /superadmin/tenants/6accca521c68e01a3df382a3/reset-password rejects a completely unauthenticated request (401/403)",
+    "pass": true
+  },
+  {
+    "name": "GET /superadmin/tenants/6accca521c68e01a3df382a3/logs rejects a normal tenant-admin token (403)",
+    "pass": true
+  },
+  {
+    "name": "GET /superadmin/tenants/6accca521c68e01a3df382a3/logs rejects a completely unauthenticated request (401/403)",
+    "pass": true
+  },
+  {
+    "name": "POST /superadmin/process-schedules rejects a normal tenant-admin token (403)",
+    "pass": true
+  },
+  {
+    "name": "POST /superadmin/process-schedules rejects a completely unauthenticated request (401/403)",
+    "pass": true
+  },
+  {
+    "name": "PUT /superadmin/tenants/6accca521c68e01a3df382a3/custom-db rejects a normal tenant-admin token (403)",
+    "pass": true
+  },
+  {
+    "name": "PUT /superadmin/tenants/6accca521c68e01a3df382a3/custom-db rejects a completely unauthenticated request (401/403)",
+    "pass": true
+  },
+  {
+    "name": "PUT /superadmin/tenants/6accca521c68e01a3df382a3/custom-whatsapp rejects a normal tenant-admin token (403)",
+    "pass": true
+  },
+  {
+    "name": "PUT /superadmin/tenants/6accca521c68e01a3df382a3/custom-whatsapp rejects a completely unauthenticated request (401/403)",
+    "pass": true
+  },
+  {
+    "name": "superadmin tenant list includes both freshly-created tenants",
+    "pass": true
+  },
+  {
+    "name": "superadmin can view tenant A detail",
+    "pass": true
+  },
+  {
+    "name": "tenant A detail response does not leak tenant B data",
+    "pass": true
+  },
+  {
+    "name": "superadmin can update tenant A feature flags",
+    "pass": true
+  },
+  {
+    "name": "superadmin can update tenant A limits",
+    "pass": true
+  },
+  {
+    "name": "superadmin can update tenant A billing/plan",
+    "pass": true
+  },
+  {
+    "name": "MINOR FINDING: an invalid plan value currently 500s instead of returning 400 (SUPERADMIN_REPORT.md)",
+    "pass": true
+  },
+  {
+    "name": "superadmin updating tenant B limits does not require/accept tenant A context (independent)",
+    "pass": true
+  },
+  {
+    "name": "tenant A limits update did not leak into or get overwritten by tenant B update",
+    "pass": true
+  },
+  {
+    "name": "before pause: tenant A admin can call an ordinary API route",
+    "pass": true
+  },
+  {
+    "name": "superadmin can pause tenant A",
+    "pass": true
+  },
+  {
+    "name": "after pause: tenant A admin's existing token is now rejected by subscriptionGuard (403 SUBSCRIPTION_PAUSED)",
+    "pass": true
+  },
+  {
+    "name": "KNOWN GAP (documented in PRODUCT_MAP.md risk #7): a paused tenant can still log in successfully (loginEmployee only checks the old subscription.status field, not superAdmin.status) - this check records the current (undesirable) behavior rather than asserting the ideal one",
+    "pass": true
+  },
+  {
+    "name": "KNOWN GAP (PRODUCT_MAP.md risk #14): chat has no subscriptionGuard at all, so a paused tenant can still use chat",
+    "pass": true
+  },
+  {
+    "name": "superadmin can resume tenant A",
+    "pass": true
+  },
+  {
+    "name": "after resume: tenant A admin can call ordinary API routes again",
+    "pass": true
+  },
+  {
+    "name": "superadmin can reset tenant A admin password",
+    "pass": true
+  },
+  {
+    "name": "tenant A admin can log in with the newly reset password",
+    "pass": true
+  },
+  {
+    "name": "tenant A admin can no longer log in with the OLD password after reset",
+    "pass": true
+  },
+  {
+    "name": "superadmin can fetch tenant A activity log",
+    "pass": true
+  }
+]
