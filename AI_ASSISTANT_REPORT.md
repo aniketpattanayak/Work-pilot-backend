@@ -14,6 +14,24 @@ Test harness: `scripts/phase4-ai-assistant/test-ai-assistant.js`.
 
 This was a manual, scripted spot-check (not yet folded back into the full 18-check automated suite with the fake-model line removed) — see "Not tested / not done" below for what that would still add.
 
+## Update: full real-model re-run — found a real, previously undetected bug
+
+The fake-model suite's checks are keyed to synthetic sentinel strings (`"CREATE_TASK_FOR:<id>"`, `"TRY_APPROVE_PAYROLL"`, ...) that the fake model string-matches — a real model has no idea what those mean, so the suite couldn't be re-run unchanged. A parallel script, `scripts/phase4-ai-assistant/test-ai-assistant-real-model.js`, rewrites the 5 checks that depend on model behavior into natural language a real user would type, keeps the other checks (disabled-by-default, degradation, rate limit, monthly cap) structurally identical since those don't depend on what the model says, and runs against the real `claude-sonnet-4-5` model with a hard call cap (temporarily patched into `provider.js` for the run, reverted immediately after — not a committed change). **Result: 12/17 pass.**
+
+**The 5 failures are one real bug, not five separate ones, and it was only visible with a real model:**
+
+The system prompt (`controllers/aiAssistantController.js`'s `SYSTEM_PROMPT`, rule 3) explicitly instructs the model: *"you must get the user's explicit 'yes' to a plain-language summary of exactly what will happen before calling it [the tool]."* Taken literally, that means: ask in plain text first, call the tool only after the user says yes, in a second turn. But the backend's actual confirmation mechanism (`needsConfirmation`/`confirmId`) is built the opposite way: it expects the model to call the tool **immediately**, on the first turn, and the backend itself then generates the confirmation card — the model is never supposed to ask for confirmation itself in plain text.
+
+A real model follows its system prompt literally: asked to create a task, it replied with a plain-language "Should I go ahead and create this task?" and called no tool — so no `confirmId` was ever issued, and the frontend's `ConfirmCard` never appeared. I then tested the obvious next step — replying "Yes, please go ahead" — and the model said *"I don't have enough context... you haven't told me what you'd like me to create,"* because **`/api/ai-assistant/chat` is stateless: it does not send or store conversation history between requests.** So even the model's own intended two-turn flow (ask, then act on yes) cannot work as implemented — there is no way for a real user to actually get a write action confirmed and executed through natural conversation today.
+
+This went entirely undetected by the fake-model suite, because the fake model was scripted to call the tool on the first message regardless of the system prompt (it's a canned function, not something that actually reads or obeys `SYSTEM_PROMPT`) — so the suite exercised the backend's `confirmId` mechanism correctly in isolation, but never tested whether a model that actually follows its own instructions would ever reach that mechanism in the first place. It wouldn't.
+
+**What still held up correctly** even under this bug: the forbidden-action block (payroll approve/release refused by the model itself, unprompted), the prompt-injection resistance (same), ambiguity handling (asks instead of guessing dates), tenant/data isolation (Doer's own token, own data only), rate limiting, and the monthly usage cap — all 12 passing checks are these, confirmed live against the real model.
+
+**Real model calls made across this whole project** (spot-checks + full re-run + the follow-up confirmation check): **21 total** — 3 earlier spot-checks, 16 in the `test-ai-assistant-real-model.js` run, 2 in a follow-up two-turn check. All short, single-turn-or-two exchanges, `max_tokens: 1024` cap, well under the 30-call hard cap set for this run. Approximate cost: low — on the order of a few tens of cents total, not a meaningful spend (no exact token-level accounting was logged; this is an order-of-magnitude estimate).
+
+**This needs a real fix before the AI assistant ships**, not just a doc update: either (a) remove system-prompt rule 3's instruction to ask in plain text first, and let the model call the tool immediately so the backend's existing `confirmId` card flow runs as designed, or (b) keep the two-turn conversational design but make `/api/ai-assistant/chat` stateful (store and resend conversation history per session). (a) is the smaller change and matches what the frontend already expects (a `ConfirmCard`, not a second free-text confirmation).
+
 ## Result: 18/18 automated checks pass
 
 | # | Check | Result |
@@ -57,15 +75,17 @@ This was verified with a real Playwright browser walk against the real running b
 
 ## Decisions needed
 
-1. Someone with push access to `Work-pilot-frontend` needs to pull commits `985123e` and `e7b722d` out of this sandbox and land them on GitHub — they cannot be pushed from here.
-2. Is the 10-requests/minute per-user rate limit (and the default 500/month company cap) the right starting point, or should these be tenant-configurable from day one rather than only the monthly cap?
-3. ~~Before enabling this for any real company, a real `ANTHROPIC_API_KEY` should be provisioned~~ — **a key was provided this pass** and wired into this sandbox's `.env` (gitignored, never committed). Spot-checks against the real model (normal request + the exact injection text from check #8) both passed. The full 18-check fake-model suite has not yet been re-run end-to-end against the real model — that's the next concrete step, not provisioning a key. **This key was pasted in plaintext in a chat session and should be rotated/revoked in the Anthropic Console before any real use**, since it's now sitting in that session's history.
-4. The in-memory rate limiter needs a shared store (Redis) before any multi-process/cluster deployment (see `SCALING_PLAN.md`) — should that be bundled into Phase 5's work, since it's the same infrastructure Phase 5 needs anyway?
+1. **New, highest priority**: fix the confirmation-flow contradiction found this pass (system prompt tells the model to ask in plain text first; backend expects an immediate tool call). Recommend removing/rewriting system-prompt rule 3 so the model calls the tool immediately and lets the backend's existing `confirmId`/`ConfirmCard` mechanism do the confirming, rather than making `/api/ai-assistant/chat` stateful. **This should block shipping** — as currently prompted, no real user can get a write action (create task, apply leave) confirmed and executed through the assistant at all.
+2. Someone with push access to `Work-pilot-frontend` needs to pull commits `985123e` and `e7b722d` out of this sandbox and land them on GitHub — they cannot be pushed from here.
+3. Is the 10-requests/minute per-user rate limit (and the default 500/month company cap) the right starting point, or should these be tenant-configurable from day one rather than only the monthly cap?
+4. ~~Before enabling this for any real company, a real `ANTHROPIC_API_KEY` should be provisioned~~ — **a key was provided and used for two supervised runs** (21 real model calls total), then removed from `.env` again and is no longer in use anywhere in this sandbox. **This key was pasted in plaintext in a chat session and must be rotated/revoked in the Anthropic Console before any real use.**
+5. The in-memory rate limiter needs a shared store (Redis) before any multi-process/cluster deployment (see `SCALING_PLAN.md`) — should that be bundled into Phase 5's work, since it's the same infrastructure Phase 5 needs anyway?
 
 ## Not tested / not done
 
-- The full 18-check automated suite re-run against the real model with the fake-model line removed (only 2 manual spot-checks were done against the real model, not the whole suite).
-- A statistically meaningful red-team pass against the real model (many injection phrasings) — one spot-check passed, which is encouraging but not a guarantee.
+- A fix for the confirmation-flow bug found this pass (see above) — found and root-caused, not yet fixed, since it requires deciding between two different designs (decision #1 above).
+- A re-run of the full real-model suite after that bug is fixed, to confirm checks 3–7 (the ones blocked by it) actually pass once the model can get all the way to task creation.
+- A statistically meaningful red-team pass against the real model (many injection phrasings) — the ones tried (2, across both runs) passed, which is encouraging but not a guarantee.
 - Hindi-language behavior specifically (frontend selector exists and was verified to render; actual Hindi speech-recognition accuracy was not tested — headless Chromium has no real microphone input).
 - Load/concurrency behavior of the assistant itself under many simultaneous users (deferred to Phase 5, which covers general load testing).
 - The frontend commit is unverified by GitHub CI since it never reached the remote (see "Decisions needed" above).
