@@ -69,6 +69,60 @@ Other matrix checks covered and passing:
 Scripts: `scratchpad/perm-matrix.js` (generator + live runner),
 `scratchpad/results-perm-matrix.json` (raw results).
 
+## Section E: security (IDOR + injection, partial)
+
+Real HTTP checks between two freshly created tenants, admin tokens only:
+
+| # | Check | Result |
+|---|---|---|
+| 1 | Create employee with `<script>alert(1)</script>` as the name | 201 - stored as-is server-side (correct: HTML-escaping is the renderer's job; React escapes by default, and this backend never uses `dangerouslySetInnerHTML` on employee names in the files reviewed for the CSV export below) |
+| 2 | Create employee with a unicode name (`Ünïcödé Nâme 名前 🎉`) | 201 - stored and round-tripped correctly |
+| 3 | Tenant B's admin requests tenant A's employee list by tenant A's id | 403 |
+| 4 | Tenant B's admin tries to UPDATE a tenant A employee by id | 403 |
+| 5 | Tenant B's admin tries to DELETE a tenant A employee by id | 403 |
+| 6 | Malformed (non-ObjectId) id on an update route | 400, handled cleanly (no 500/crash) |
+| 7 | 5,000-character id string on a GET route | 403, handled cleanly |
+| 8 | Create employee with a formula-looking name (`=1+1`) | 201 - stored as typed |
+
+All 8 pass. One of these (#8) led to checking the CSV export path specifically for
+formula injection (a name like `=1+1` or `=cmd|...` opened in Excel can execute): read
+`utils/payrollEngine.js`'s `csv()`/`csvCell()` helper (used by every payroll CSV export -
+register, bank file) and confirmed any cell starting with `=`, `+`, `-`, `@` or a tab is
+quoted and prefixed with a literal `'`, which neutralizes it in Excel/Sheets. This is a
+code read, not a live export-and-reopen-in-Excel test, so it's marked as *code-verified*
+rather than fully end-to-end.
+
+This is a small slice of Section E (8 checks across 2 of the many id-taking routes), not
+the full sweep across every route the brief asks for.
+
+## Section F: scale check at 200 people (seeded directly into the DB, not via API)
+
+200 employees + 200 salary structures + 10,400 punches (a full September 2026, weekdays
+only) were bulk-inserted directly into the test DB with `insertMany` (bypassing the HTTP
+API entirely, as instructed), then four real HTTP routes were timed against the running
+local server:
+
+| Route | Time | Notes |
+|---|---|---|
+| `GET /tasks/employees/:tenantId` (200-person list) | 90ms | |
+| `GET /tasks/attendance/sheet?month=2026-09` (200 people x 26 working days) | 733ms | Slowest of the four. Worth a closer look if real companies this size report the dashboard feeling slow, though 733ms for a single admin-facing call isn't alarming on its own. |
+| `GET /tasks/payroll/salaries` (200 people) | 46ms | |
+| `POST /tasks/payroll/runs` (create a run for 200 people) | 976ms | |
+
+**Honest correction on methodology:** the brief asks for a database query count per route.
+My first attempt hooked `mongoose.set('debug', ...)` in the *test script's own* Node
+process, which has its own separate connection from the running backend server process -
+so it only ever saw its own seeding queries, not the server's. It reported "0 queries" for
+every HTTP call, which is wrong, not good news, and I'm flagging it rather than letting a
+clean-looking zero stand. **Query counts per route were not actually captured this
+session.** Getting a real count needs either `mongoose.set('debug')` inside the server
+process itself (restart with an env flag) or the Mongo profiler - both doable, just not
+done here. The wall-clock timings above are real and were not affected by this mistake.
+
+This is one scale point (200 people, one month of attendance, a single sequential run of
+each route) - not the full Section F ask (query-count profiling, finding and fixing the
+cause of anything slow, re-running after each fix).
+
 ## What else from the Phase 1 brief was planned but not run this session
 
 Given the size of the remaining ask relative to what one session can verify honestly,
@@ -84,10 +138,14 @@ these were **not executed**, not "passed by reading code":
   on the same run) was verified in the *prior* payroll-only test round
   (`PAYROLL_LIVE_TEST_REPORT.md`) and is not repeated here.
 - **Section D** (every Settings/module on-off combination) - not run.
-- **Section E** (IDOR fuzzing, oversized/malformed input, formula-injection CSV cells,
-  unicode names) across every id-taking route - not run, beyond the cross-tenant checks
-  folded into the permission matrix above.
-- **Section F** (200-person scale seed + timing + query counts) - not run.
+- **Section E** - only a small slice run (8 checks, see above): cross-tenant IDOR on
+  employee update/delete, a malformed id, an oversized id, an HTML-ish name, a unicode
+  name, and a formula-looking name, plus a code read confirming CSV formula-injection
+  guarding. The full ask (fuzzing every id-taking route, oversized/malformed payloads on
+  every write endpoint, exports actually re-opened in Excel) was not done.
+- **Section F** - only a single scale point run (see above): 200 people, one month of
+  attendance, four routes timed once each, no query-count profiling, no root-causing or
+  fixing of the slowest route, no re-run after a fix.
 - **Section G** (browser walk per role, phone width, dark/light, double-click guard) -
   not run this session. (A prior, narrower Playwright pass exists from the earlier
   payroll-only testing round and is not repeated here.)
