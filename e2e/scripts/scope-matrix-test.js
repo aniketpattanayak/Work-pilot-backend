@@ -67,8 +67,11 @@ const check = (label, cond, detail) => {
 
   await req('PUT', `/tenants/access/modules/${tenantId}`, superToken, { modules: { attendance: true, leave: true, payroll: true } });
 
-  // Admin login (seeded qa-admin, same as the rest of the e2e suite) to manage employees/roles.
-  const adminLogin = await req('POST', '/tasks/login-employee', null, { email: process.env.E2E_EMAIL || 'qa-admin@workpilot-test.com', password: process.env.E2E_PASSWORD || 'TestPass123!', subdomain: SUBDOMAIN });
+  // Admin login for zzz-playwright-test — this is the PRODUCTION throwaway tenant that
+  // global-setup.prod.js creates, with its own fixed credentials (not the LOCAL CI tenant's
+  // qa-admin creds, which only exist in the docker/mongo-seeded wp-qa-test tenant used by
+  // e2e.yml and don't exist on the real production database at all).
+  const adminLogin = await req('POST', '/tasks/login-employee', null, { email: 'zzz-autotest@workpilot-test.invalid', password: 'AutoTestProd!2026', subdomain: SUBDOMAIN });
   if (!adminLogin.ok) throw new Error('Admin login failed: ' + JSON.stringify(adminLogin.data));
   const adminToken = adminLogin.data.token;
 
