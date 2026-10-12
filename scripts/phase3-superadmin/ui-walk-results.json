@@ -1,0 +1,50 @@
+[
+  {
+    "name": "Desktop: superadmin login succeeds and leaves the login screen",
+    "pass": true,
+    "note": {
+      "url": "http://localhost:5173/"
+    }
+  },
+  {
+    "name": "Desktop: the tenant list/table renders after login",
+    "pass": true,
+    "note": {
+      "errors": []
+    }
+  },
+  {
+    "name": "Desktop: clicking a tenant opens its detail view with a Billing tab",
+    "pass": true,
+    "note": {
+      "url": "http://localhost:5173/"
+    }
+  },
+  {
+    "name": "Desktop: Billing tab shows a Plan select control",
+    "pass": true,
+    "note": {}
+  },
+  {
+    "name": "Phone (390px): superadmin login succeeds",
+    "pass": true,
+    "note": {
+      "errors": []
+    }
+  },
+  {
+    "name": "Phone (390px): no horizontal overflow on the main dashboard view",
+    "pass": false,
+    "note": {}
+  },
+  {
+    "name": "Desktop, dark color scheme: superadmin login succeeds and the page renders without crashing",
+    "pass": true,
+    "note": {}
+  },
+  {
+    "name": "Desktop: wrong superadmin credentials show an error and do not log in",
+    "pass": true,
+    "note": {}
+  }
+]

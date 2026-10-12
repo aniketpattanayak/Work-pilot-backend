@@ -3,9 +3,9 @@
 Branch: `fix/superadmin-findings` (off `payroll-phase3-4`, carries all of `fix/e2e-findings`'s commits too since it was branched after Phase 2).
 Test harness: `scripts/phase3-superadmin/test-superadmin.js`, run live against the local test server (port 5099) and local test Mongo (nosqldb, port 27018). **Never pointed at any real/production instance.**
 
-## Scope actually covered this session
+## Scope covered this session
 
-Given the overall project's size, Phase 3 this session focused on the API layer (`/api/superadmin/*` + `/api/tenants/master-login`), which is where the real authorization and data-correctness risk lives, rather than a full Playwright UI walk of `SuperAdmin.jsx`/`SuperAdminPanel`. See "Not tested" below for what a full Phase 3 pass would still need.
+The API layer (`/api/superadmin/*` + `/api/tenants/master-login`) plus a real-browser Playwright UI walk of `SuperAdmin.jsx` (desktop, 390px phone, dark mode, wrong-credentials). See "Not tested" below for what's still outside this session's scope (e.g. impersonation doesn't exist, no delete-company route).
 
 ## Result: 56/56 automated checks pass (after 1 real bug fixed)
 
@@ -40,9 +40,16 @@ Fixed in commit `168c913` on `fix/superadmin-findings`: the handler now looks up
 
 `/tmp/wpf/src/pages/SuperAdminPanel.jsx` contains stray backend Node.js controller code (literally starts with `require('../models/Tenant')`, etc.) instead of a React component — this is checked into the frontend repo's `main` branch, predating this session's work. It is **not imported or referenced anywhere** (`grep -rn "SuperAdminPanel" src` shows it's only referenced as a function *name* defined inside the real, working `SuperAdmin.jsx`, which is what's actually used) — so it doesn't break the build or any live page. Worth deleting as dead/confusing debris, but intentionally not touched this session since it isn't wired into anything and removing files from the frontend wasn't asked for.
 
+## Real-browser UI walk (`scripts/phase3-superadmin/ui-walk.js`): 7/8 pass, 1 real finding
+
+- **Desktop (1440px)**: login succeeds, the tenant list/table renders with real data, clicking into a tenant opens its detail view with working tabs, and the Billing tab's Plan `<select>` renders. All pass.
+- **Dark mode (desktop)**: login and render succeed without crashing. Pass.
+- **Wrong credentials**: the UI shows an error and does not log in. Pass.
+- **Phone width (390px)**: login itself succeeds, but **the dashboard does not adapt to the viewport at all** — screenshot (`scripts/phase3-superadmin/ui-screens/05-phone-dashboard.png`) shows the full desktop stat-tile row, data table, and side "Live activity" panel all rendered at their full desktop widths inside a 390px viewport, forcing horizontal scroll. This is a real, confirmed UI gap, not a flaky check: `document.documentElement.scrollWidth` genuinely exceeds the viewport width. **Unlike the main tenant app** (which Phase 1's Section G browser walk confirmed does have a working hamburger-menu mobile layout), the SuperAdmin panel has no responsive breakpoint at all. Not fixed this session — this is a frontend layout redesign (new CSS breakpoints, likely a card-based mobile view replacing the table), not a one-line patch, and attempting it without a design pass risked making things worse rather than better. Recorded as a finding with a screenshot rather than silently worked around.
+
 ## What a full Phase 3 pass would still need (not done this session)
 
-- A real-browser Playwright walk of the SuperAdmin UI (`SuperAdmin.jsx`) itself — desktop and 390px phone width, dark/light theme — covering company create/pause/resume/billing/features from the actual screens rather than only the API underneath them.
+- A UI walk was done this session (above, 7/8 pass + 1 real responsive-layout finding), but it covered login, the tenant list, a tenant detail view, and the Billing tab only — not every screen (module/feature switches, pause/resume, limits, the activity log/feed) clicked through in the browser, only via the API.
 - Verifying what a suspended company's own UI (not just its API) shows a logged-in user mid-session.
 - The same Phase 1 Section E data-safety checks (IDOR, oversized/malformed input, CSV injection) specifically against every superadmin route's own input fields (e.g. `customMongoUri`, `customWhatsappKey`, `note`) — this session's superadmin tests focused on authorization and correctness, not the full security sweep.
 - Rate-limiting on `master-login` — confirmed (via the Phase 2 codebase-wide grep for `rate-limit`/`rateLimit`) that **no rate-limiting middleware exists anywhere in this codebase**, so `master-login` has no brute-force throttling. This is a real gap worth fixing platform-wide, but is a bigger change (needs a rate-limit store, likely Redis-backed for multi-process deployments) than this phase's scope — recorded as a "Decision needed" rather than patched with an ad hoc counter.
@@ -54,3 +61,4 @@ Fixed in commit `168c913` on `fix/superadmin-findings`: the handler now looks up
 3. Is a delete-company (not just pause) capability actually required for "company CRUD", or is pause/resume the intended permanent design?
 4. Should `master-login` (and ideally all auth endpoints) get rate-limiting? If so, what store — in-memory (breaks under Phase 5's multi-process/cluster plan) or Redis?
 5. Is the dead `src/pages/SuperAdminPanel.jsx` file (frontend repo) safe to delete, or was it intentionally left as a stub for a planned rewrite?
+6. **SuperAdmin panel is not mobile-responsive at all** (confirmed this session via screenshot, see above) — is a phone-usable SuperAdmin panel actually needed (platform staff may only ever use it on a laptop), or should this be explicitly deprioritized rather than treated as a bug to fix?
