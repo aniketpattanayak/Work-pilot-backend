@@ -80,8 +80,11 @@ exports.getTenantInstances = async (req, res) => {
  */
 exports.initializeFlow = async (req, res) => {
   try {
-    const { templateId, orderIdentifier, tenantId, sheetRowId } = req.body;
-    const template = await FmsTemplate.findById(templateId);
+    const { templateId, orderIdentifier, sheetRowId } = req.body;
+    // Always derive tenantId from the authenticated user, never trust the body's tenantId -
+    // this is what keeps the template/instance tied to the caller's own tenant (IDOR fix).
+    const tenantId = req.user.tenantId;
+    const template = await FmsTemplate.findOne({ _id: templateId, tenantId });
     if (!template) return res.status(404).json({ message: "Blueprint not found" });
 
     // 1. Duplicate Check: Ensure we don't start the same order twice
@@ -176,6 +179,9 @@ exports.executeStep = async (req, res) => {
     const { remarks, decision, action } = req.body;
     const instance = await FmsInstance.findById(instanceId).populate('templateId');
     if (!instance) return res.status(404).json({ message: "Live instance not found" });
+    if (!req.user?.isSuperAdmin && instance.tenantId.toString() !== req.user.tenantId.toString()) {
+      return res.status(403).json({ message: "Forbidden. This instance does not belong to your company." });
+    }
 
     const currentIndex = instance.currentStepIndex;
     const now = new Date();
@@ -389,10 +395,14 @@ await FmsHistory.create({
 exports.deleteFmsTemplate = async (req, res) => {
   try {
     const { templateId } = req.params;
-    await FmsTemplate.findByIdAndDelete(templateId);
-    
-    // Optional: Also delete live instances associated with this template
-    await FmsInstance.deleteMany({ templateId });
+    const query = { _id: templateId };
+    if (!req.user?.isSuperAdmin) query.tenantId = req.user.tenantId;
+    const deleted = await FmsTemplate.findOneAndDelete(query);
+    if (!deleted) return res.status(404).json({ message: "Blueprint not found" });
+
+    // Also delete live instances associated with this template - scoped the
+    // same way, so this can never touch another tenant's instances either.
+    await FmsInstance.deleteMany({ templateId, tenantId: deleted.tenantId });
 
     res.status(200).json({ message: "Blueprint and associated telemetry purged." });
   } catch (error) {
@@ -408,7 +418,9 @@ exports.deleteFmsTemplate = async (req, res) => {
 exports.syncFmsOrders = async (req, res) => {
     try {
       const { templateId } = req.params;
-      const template = await FmsTemplate.findById(templateId);
+      const templateQuery = { _id: templateId };
+      if (!req.user?.isSuperAdmin) templateQuery.tenantId = req.user.tenantId;
+      const template = await FmsTemplate.findOne(templateQuery);
       if (!template) return res.status(404).json({ message: "Template not found" });
   
       const sheetResponse = await axios.get(template.scriptUrl, {
@@ -651,7 +663,8 @@ exports.getMyMissions = async (req, res) => {
 
     //const instances = await FmsInstance.find();
 
-    const instances = await FmsInstance.find().populate('sheetDataId');
+    // Was unfiltered - leaked every tenant's mission data to any authenticated user.
+    const instances = await FmsInstance.find({ tenantId: req.user.tenantId }).populate('sheetDataId');
 
 
     const missions = [];

@@ -87,4 +87,8 @@ const FmsTemplateSchema = new mongoose.Schema({
   createdAt: { type: Date, default: Date.now }
 });
 
+// Indexes
+FmsTemplateSchema.index({ tenantId: 1 });
+FmsTemplateSchema.index({ tenantId: 1, isActive: 1 });
+
 module.exports = mongoose.model('FmsTemplate', FmsTemplateSchema);

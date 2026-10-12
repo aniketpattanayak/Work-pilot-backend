@@ -38,4 +38,8 @@ const FmsHistorySchema = new mongoose.Schema({
   timestamp: { type: Date, default: Date.now }
 });
 
+// Indexes
+FmsHistorySchema.index({ instanceId: 1 });
+FmsHistorySchema.index({ templateId: 1 });
+
 module.exports = mongoose.model('FmsHistory', FmsHistorySchema);

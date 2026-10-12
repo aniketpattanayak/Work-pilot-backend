@@ -108,7 +108,9 @@ exports.getTemplates = async (req, res) => {
 exports.getTemplateById = async (req, res) => {
   try {
     const { FlowTemplate, FlowInstance, Employee } = getModels(req);
-    const template = await FlowTemplate.findById(req.params.templateId);
+    const query = { _id: req.params.templateId };
+    if (!req.user?.isSuperAdmin) query.tenantId = req.user.tenantId;
+    const template = await FlowTemplate.findOne(query);
     if (!template) return res.status(404).json({ message: 'Template not found' });
     res.json(template);
   } catch (err) {
@@ -200,7 +202,9 @@ exports.deleteTemplate = async (req, res) => {
 exports.getSheetColumns = async (req, res) => {
   try {
     const { FlowTemplate, FlowInstance, Employee } = getModels(req);
-    const template = await FlowTemplate.findById(req.params.templateId);
+    const query = { _id: req.params.templateId };
+    if (!req.user?.isSuperAdmin) query.tenantId = req.user.tenantId;
+    const template = await FlowTemplate.findOne(query);
     if (!template) return res.status(404).json({ message: 'Template not found' });
 
     const url = `${template.scriptUrl}?operation=readSheet&sheetId=${template.googleSheetId}&tabName=${encodeURIComponent(template.tabName)}&limit=1`;
@@ -282,7 +286,9 @@ exports.pushSync = async (req, res) => {
 exports.manualSync = async (req, res) => {
   try {
     const { FlowTemplate, FlowInstance, Employee } = getModels(req);
-    const template = await FlowTemplate.findById(req.params.templateId);
+    const query = { _id: req.params.templateId };
+    if (!req.user?.isSuperAdmin) query.tenantId = req.user.tenantId;
+    const template = await FlowTemplate.findOne(query);
     if (!template) return res.status(404).json({ message: 'Template not found' });
 
     // Read all rows from sheet
@@ -341,6 +347,9 @@ exports.completeStep = async (req, res) => {
 
     const instance = await FlowInstance.findById(instanceId);
     if (!instance) return res.status(404).json({ message: 'Instance not found' });
+    if (!req.user?.isSuperAdmin && instance.tenantId.toString() !== String(req.user?.tenantId)) {
+      return res.status(403).json({ message: 'Forbidden. This instance does not belong to your company.' });
+    }
 
     // Who is pressing the button (the JWT has no name, so read it from the company records)
     let performer = null;
@@ -464,6 +473,9 @@ exports.getInstanceDetail = async (req, res) => {
     const { FlowTemplate, FlowInstance, Employee } = getModels(req);
     const instance = await FlowInstance.findById(req.params.instanceId).lean();
     if (!instance) return res.status(404).json({ message: 'Instance not found' });
+    if (!req.user?.isSuperAdmin && instance.tenantId.toString() !== String(req.user?.tenantId)) {
+      return res.status(403).json({ message: 'Forbidden. This instance does not belong to your company.' });
+    }
 
     const template = await FlowTemplate.findById(instance.templateId).lean();
 
@@ -483,6 +495,7 @@ exports.getMyTasks = async (req, res) => {
     const { employeeId } = req.params;
 
     const tasks = await FlowInstance.find({
+      tenantId: req.user.tenantId,
       status: 'active',
       'activeStep.assignedToId': employeeId,
     })
@@ -609,6 +622,9 @@ exports.cancelInstance = async (req, res) => {
     const { FlowTemplate, FlowInstance, Employee } = getModels(req);
     const instance = await FlowInstance.findById(req.params.instanceId);
     if (!instance) return res.status(404).json({ message: 'Instance not found' });
+    if (!req.user?.isSuperAdmin && instance.tenantId.toString() !== String(req.user?.tenantId)) {
+      return res.status(403).json({ message: 'Forbidden. This instance does not belong to your company.' });
+    }
 
     instance.status     = 'cancelled';
     instance.activeStep = null;
@@ -731,6 +747,12 @@ exports.reassignInstance = async (req, res) => {
     const { instanceId } = req.params;
     const { assignedToId, assignedToName } = req.body;
     if (!assignedToId) return res.status(400).json({ message: 'assignedToId required' });
+
+    const existingInstance = await FlowInstance.findById(instanceId).select('tenantId');
+    if (!existingInstance) return res.status(404).json({ message: 'Instance not found' });
+    if (!req.user?.isSuperAdmin && existingInstance.tenantId.toString() !== String(req.user?.tenantId)) {
+      return res.status(403).json({ message: 'Forbidden. This instance does not belong to your company.' });
+    }
 
     const result = await FlowInstance.updateOne(
       { _id: instanceId },
