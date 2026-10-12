@@ -86,7 +86,7 @@ const check = (label, cond, detail) => {
       log('Reusing employee', key, e.email, ids[key]);
       continue;
     }
-    const bulk = await req('POST', '/tenants/bulk-employees', adminToken, { tenantId, employees: [{ name: e.name, email: e.email, password: PASSWORD, department: e.department, Doer: true }] });
+    const bulk = await req('POST', '/tasks/bulk-employees', adminToken, { tenantId, employees: [{ name: e.name, email: e.email, password: PASSWORD, department: e.department, Doer: true }] });
     log('Created employee', key, e.email, JSON.stringify(bulk.data));
     if (!bulk.ok || (bulk.data.results && bulk.data.results.failed.length)) throw new Error(`Could not create employee ${e.email}: ${JSON.stringify(bulk.data)}`);
   }
