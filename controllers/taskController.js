@@ -394,6 +394,66 @@ exports.getGlobalPerformance = async (req, res) => {
     res.status(500).json({ message: "Global Analytics Error", error: error.message });
   }
 };
+// Fetch a single delegation task - used by the chat task-thread's details
+// card (title, deadline/revised, status, assigned by -> assigned to) so the
+// frontend doesn't have to keep its own copy of task state just to render
+// that card. Same permission shape as handleRevision's "who is part of this
+// task" check: the assigner/coordinator/forward-chain side, the doer side
+// (including a helper doer or an on-leave doer's buddy), a listed coworker,
+// or an Admin/superadmin in the same tenant.
+exports.getTaskById = async (req, res) => {
+  try {
+    const { DelegationTask } = getModels(req);
+    const { taskId } = req.params;
+
+    if (!mongoose.Types.ObjectId.isValid(taskId)) {
+      return res.status(400).json({ message: "Invalid task ID." });
+    }
+
+    const task = await DelegationTask.findById(taskId)
+      .populate('assignerId', 'name')
+      .populate('doerId', 'name leaveStatus')
+      .populate('coordinatorId', 'name');
+    if (!task) return res.status(404).json({ message: "Task not found." });
+
+    if (!req.user?.isSuperAdmin && String(task.tenantId) !== String(req.user?.tenantId)) {
+      return res.status(403).json({ message: "Forbidden." });
+    }
+
+    const uid = String(req.user?.id || '');
+    const idOf = (x) => String(x?._id || x || '');
+    const callerRoles = Array.isArray(req.user?.roles) ? req.user.roles : [];
+    const isAdminCaller = !!req.user?.isSuperAdmin || callerRoles.includes('Admin');
+    const isOwner = idOf(task.assignerId) === uid || idOf(task.coordinatorId) === uid ||
+      (task.forwardChain || []).some(f => idOf(f.employeeId) === uid);
+    const isDoerSide = idOf(task.doerId) === uid ||
+      (task.helperDoers || []).some(h => idOf(h.helperId) === uid) ||
+      idOf(task.doerId?.leaveStatus?.buddyId) === uid;
+    const isCoworker = (task.coworkers || []).some(c => idOf(c) === uid);
+
+    if (!isAdminCaller && !isOwner && !isDoerSide && !isCoworker) {
+      return res.status(403).json({ message: "You are not part of this task." });
+    }
+
+    res.json({
+      _id: task._id,
+      title: task.title,
+      status: task.status,
+      priority: task.priority,
+      deadline: task.deadline,
+      // originalDeadline is only ever set once a revision actually moved the
+      // deadline (see handleRevision) - its presence IS "was revised".
+      originalDeadline: task.originalDeadline || null,
+      wasRevised: !!task.originalDeadline,
+      assignerId: task.assignerId ? { _id: task.assignerId._id, name: task.assignerId.name } : null,
+      doerId: task.doerId ? { _id: task.doerId._id, name: task.doerId.name } : null,
+    });
+  } catch (err) {
+    console.error('[Task] getTaskById error:', err.message);
+    res.status(500).json({ message: "Failed to load task." });
+  }
+};
+
 // Edit a delegation task (title, description, assignee, deadline date, priority).
 // Allowed for an Admin or for the person who assigned the task, within the same company.
 exports.updateTask = async (req, res) => {
