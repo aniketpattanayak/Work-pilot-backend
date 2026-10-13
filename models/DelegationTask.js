@@ -58,6 +58,12 @@ const DelegationTaskSchema = new mongoose.Schema({
       performedBy: { type: mongoose.Schema.Types.ObjectId, ref: 'Employee' },
       timestamp:   { type: Date, default: Date.now },
       remarks:     String,
+      // The exact photos sent along with THIS action (a subset/copy of
+      // what also lands in the flat `files` array below) - so the History
+      // & Files view can show each photo directly under the stage that
+      // produced it, instead of a disconnected gallery the viewer has to
+      // match up by eye.
+      files: [{ fileName: String, fileUrl: String, _id: false }],
     },
   ],
 
