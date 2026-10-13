@@ -1873,12 +1873,18 @@ exports.respondToTask = async (req, res) => {
     const body = req.body || {};
     const { taskId, status, revisedDeadline, remarks, doerId } = body;
 
+    // Evidence can now be more than one file (picked from storage and/or
+    // captured live from the camera - the browser decides which; this route
+    // just accepts whatever arrives in the "evidence" field, up to 6, same
+    // for a doer completing a task or an assigner rejecting/verifying one).
+    const evidenceFiles = Array.isArray(req.files) ? req.files : (req.file ? [req.file] : []);
+
     // DEBUG LOGGING
     console.log("Incoming Respond Request:", {
       taskId,
       status,
       performerId: doerId,
-      hasFile: !!req.file
+      fileCount: evidenceFiles.length
     });
 
     if (!taskId) {
@@ -1917,9 +1923,6 @@ exports.respondToTask = async (req, res) => {
         return res.status(403).json({ message: "You do not have permission to respond to this task." });
       }
     }
-
-    // Handle Evidence Files (S3 or Local)
-    let evidenceUrl = req.file ? (req.file.location || req.file.path) : null;
 
     // --- PRESERVE: POINTS & ACHIEVEMENT ENGINE ---
     try {
@@ -1991,16 +1994,27 @@ exports.respondToTask = async (req, res) => {
 
     // 3. UPDATE TASK STATE & AUDIT LOG
     task.status = status;
+    // Bug fix: remarks were only ever saved to task.remarks for "Revision
+    // Requested" and "Completed" - every OTHER status change (importantly,
+    // an assigner sending work back for correction, which this app records
+    // as status "Accepted" again, or marking it "Verified"/"Rejected")
+    // silently dropped whatever remarks were typed, even though they were
+    // still logged in task.history. That's why a doer could never see why
+    // their work was sent back: the one field the UI showed (task.remarks)
+    // was never actually set for that case. Now any remarks sent with any
+    // status are saved, so the doer can always see the latest note.
     if (status === 'Revision Requested') {
       task.remarks = `New Date: ${revisedDeadline}. Reason: ${remarks}`;
+    } else if (remarks) {
+      task.remarks = remarks;
     } else if (status === 'Completed') {
-      task.remarks = remarks || "Work completed.";
+      task.remarks = "Work completed.";
     }
 
-    if (evidenceUrl) {
+    for (const f of evidenceFiles) {
       task.files.push({
-        fileName: `Proof: ${req.file.originalname}`,
-        fileUrl: evidenceUrl,
+        fileName: `Proof: ${f.originalname}`,
+        fileUrl: f.location || f.path,
         uploadedAt: new Date()
       });
     }
@@ -2041,7 +2055,7 @@ exports.respondToTask = async (req, res) => {
             clicker?.name || task.doerId?.name, // {{1}}
             task.title,                           // {{2}}
             completionTime,                       // {{3}}
-            evidenceUrl || "Text entry only",     // {{4}}
+            evidenceFiles.length ? `${evidenceFiles.length} file(s) attached` : "Text entry only", // {{4}}
             loginLink                             // {{5}}
           ]
         };

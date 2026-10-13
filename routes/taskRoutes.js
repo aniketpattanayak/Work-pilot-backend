@@ -231,7 +231,11 @@ router.post('/handle-revision', authMiddleware, subscriptionGuard, tenantDbMiddl
 router.post('/assign-onward', authMiddleware, subscriptionGuard, tenantDbMiddleware, taskController.assignOnward);
 router.post('/coordinator-force-done', authMiddleware, subscriptionGuard, tenantDbMiddleware, taskController.coordinatorForceDone);
 router.put('/coordinator-force-done', authMiddleware, subscriptionGuard, tenantDbMiddleware, taskController.coordinatorForceDone);
-router.put('/respond', authMiddleware, subscriptionGuard, tenantDbMiddleware, ...useUpload(_upload.single('evidence')), taskController.respondToTask);
+// Accepts up to 6 evidence files per response (completing, verifying, or
+// rejecting a task) - either picked from storage or captured live from the
+// camera; the browser side decides which (routes/taskRoutes.js has no say
+// in that, it just accepts the files either way the field arrives).
+router.put('/respond', authMiddleware, subscriptionGuard, tenantDbMiddleware, ...useUpload(_upload.array('evidence', 6)), taskController.respondToTask);
 router.post('/send-reminder', authMiddleware, subscriptionGuard, tenantDbMiddleware, taskController.sendWhatsAppReminder);
 
 // Direct WhatsApp send — used by coordinator dashboard (no task lookup)
