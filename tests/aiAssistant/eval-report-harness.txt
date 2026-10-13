@@ -1,4 +1,4 @@
-[dotenv@17.2.3] injecting env (5) from .env -- tip: ⚙️  override existing env vars with { override: true }
+[dotenv@17.2.3] injecting env (5) from .env -- tip: 🗂️ backup and recover secrets: https://dotenvx.com/ops
 ⚠️  AWS S3 not configured — files saved locally to /server/uploads/
     Set AWS_ACCESS_KEY_ID, AWS_SECRET_ACCESS_KEY, S3_BUCKET_NAME in .env to enable S3
 🔌 [Socket.io] Real-time chat engine active
@@ -9,192 +9,207 @@
 ⏳ Running FMS Auto Sync...
 🔄 FMS Auto Sync Scheduler Active.
 🔔 [FMS Notifier] WhatsApp notification engine active.
-📅 [Briefing] zzz-eval-a-1791833389109-515510 scheduled at 07:00 IST
-📅 [Briefing] zzz-eval-b-1791833389366-140358 scheduled at 07:00 IST
-✅ [Briefing] 2 tenant schedules registered.
+📅 [Briefing] zzz-ai-1791869385972 scheduled at 07:00 IST
+📅 [Briefing] zzz-ai2-1791869386889 scheduled at 07:00 IST
+📅 [Briefing] zzz-behavior-1791869393899 scheduled at 07:00 IST
+📅 [Briefing] zzz-chips-1791869400584 scheduled at 07:00 IST
+📅 [Briefing] zzz-completetask-1791869405178 scheduled at 07:00 IST
+📅 [Briefing] zzz-confirmfix-1791869409871 scheduled at 07:00 IST
+📅 [Briefing] zzz-lookup-1791869414656 scheduled at 07:00 IST
+📅 [Briefing] zzz-part3-1791869422066 scheduled at 07:00 IST
+📅 [Briefing] zzz-part8-1791869429251 scheduled at 07:00 IST
+📅 [Briefing] zzz-respond-1791869437181 scheduled at 07:00 IST
+📅 [Briefing] zzz-respondb-1791869438008 scheduled at 07:00 IST
+📅 [Briefing] zzz-session-1791869442097 scheduled at 07:00 IST
+📅 [Briefing] zzz-taskdeta-1791869449347 scheduled at 07:00 IST
+📅 [Briefing] zzz-taskdetb-1791869450091 scheduled at 07:00 IST
+📅 [Briefing] zzz-usage-1791869454067 scheduled at 07:00 IST
+📅 [Briefing] zzz-eval-a-1791869469017-440910 scheduled at 07:00 IST
+📅 [Briefing] zzz-eval-b-1791869469275-313820 scheduled at 07:00 IST
+✅ [Briefing] 17 tenant schedules registered.
 🌅 LRBC Daily Briefing Engine Active (per-tenant scheduling).
-[TenantDB] tenant: 6acd3544decbba9df6e7e494 customUri: NULL
+[TenantDB] tenant: 6acdc22f26a5c6112a578633 customUri: NULL
 ⚠️ Welcome Template Failed: Request failed with status code 405
-[TenantDB] tenant: 6acd3544decbba9df6e7e494 customUri: NULL
+[TenantDB] tenant: 6acdc22f26a5c6112a578633 customUri: NULL
 ⚠️ Welcome Template Failed: Request failed with status code 405
-[TenantDB] tenant: 6acd3544decbba9df6e7e494 customUri: NULL
+[TenantDB] tenant: 6acdc22f26a5c6112a578633 customUri: NULL
 ⚠️ Welcome Template Failed: Request failed with status code 405
-[TenantDB] tenant: 6acd3544decbba9df6e7e494 customUri: NULL
+[TenantDB] tenant: 6acdc22f26a5c6112a578633 customUri: NULL
 ⚠️ Welcome Template Failed: Request failed with status code 405
-[TenantDB] tenant: 6acd3544decbba9df6e7e494 customUri: NULL
+[TenantDB] tenant: 6acdc22f26a5c6112a578633 customUri: NULL
 ⚠️ Welcome Template Failed: Request failed with status code 405
-[TenantDB] tenant: 6acd3544decbba9df6e7e494 customUri: NULL
+[TenantDB] tenant: 6acdc22f26a5c6112a578633 customUri: NULL
 ⚠️ Welcome Template Failed: Request failed with status code 405
-[TenantDB] tenant: 6acd3544decbba9df6e7e494 customUri: NULL
+[TenantDB] tenant: 6acdc22f26a5c6112a578633 customUri: NULL
 ⚠️ Welcome Template Failed: Request failed with status code 405
-[TenantDB] tenant: 6acd3544decbba9df6e7e494 customUri: NULL
+[TenantDB] tenant: 6acdc22f26a5c6112a578633 customUri: NULL
 ⚠️ Welcome Template Failed: Request failed with status code 405
-[TenantDB] tenant: 6acd3544decbba9df6e7e494 customUri: NULL
+[TenantDB] tenant: 6acdc22f26a5c6112a578633 customUri: NULL
 ⚠️ Welcome Template Failed: Request failed with status code 405
-[TenantDB] tenant: 6acd3544decbba9df6e7e494 customUri: NULL
+[TenantDB] tenant: 6acdc22f26a5c6112a578633 customUri: NULL
 ⚠️ Welcome Template Failed: Request failed with status code 405
-[TenantDB] tenant: 6acd3544decbba9df6e7e494 customUri: NULL
+[TenantDB] tenant: 6acdc22f26a5c6112a578633 customUri: NULL
 ⚠️ Welcome Template Failed: Request failed with status code 405
-[TenantDB] tenant: 6acd3544decbba9df6e7e494 customUri: NULL
+[TenantDB] tenant: 6acdc22f26a5c6112a578633 customUri: NULL
 ⚠️ Welcome Template Failed: Request failed with status code 405
-[TenantDB] tenant: 6acd3544decbba9df6e7e494 customUri: NULL
+[TenantDB] tenant: 6acdc22f26a5c6112a578633 customUri: NULL
 ⚠️ Welcome Template Failed: Request failed with status code 405
-[TenantDB] tenant: 6acd3544decbba9df6e7e494 customUri: NULL
+[TenantDB] tenant: 6acdc22f26a5c6112a578633 customUri: NULL
 ⚠️ Welcome Template Failed: Request failed with status code 405
-[TenantDB] tenant: 6acd3544decbba9df6e7e494 customUri: NULL
+[TenantDB] tenant: 6acdc22f26a5c6112a578633 customUri: NULL
 ⚠️ Welcome Template Failed: Request failed with status code 405
-[TenantDB] tenant: 6acd3544decbba9df6e7e494 customUri: NULL
+[TenantDB] tenant: 6acdc22f26a5c6112a578633 customUri: NULL
 ⚠️ Welcome Template Failed: Request failed with status code 405
-[TenantDB] tenant: 6acd3544decbba9df6e7e494 customUri: NULL
+[TenantDB] tenant: 6acdc22f26a5c6112a578633 customUri: NULL
 ⚠️ Welcome Template Failed: Request failed with status code 405
-[TenantDB] tenant: 6acd3544decbba9df6e7e494 customUri: NULL
+[TenantDB] tenant: 6acdc22f26a5c6112a578633 customUri: NULL
 ⚠️ Welcome Template Failed: Request failed with status code 405
-[TenantDB] tenant: 6acd3544decbba9df6e7e494 customUri: NULL
+[TenantDB] tenant: 6acdc22f26a5c6112a578633 customUri: NULL
 ⚠️ Welcome Template Failed: Request failed with status code 405
-[TenantDB] tenant: 6acd3544decbba9df6e7e494 customUri: NULL
+[TenantDB] tenant: 6acdc22f26a5c6112a578633 customUri: NULL
 ⚠️ Welcome Template Failed: Request failed with status code 405
-[TenantDB] tenant: 6acd3544decbba9df6e7e494 customUri: NULL
+[TenantDB] tenant: 6acdc22f26a5c6112a578633 customUri: NULL
 ⚠️ Welcome Template Failed: Request failed with status code 405
-[TenantDB] tenant: 6acd3544decbba9df6e7e494 customUri: NULL
+[TenantDB] tenant: 6acdc22f26a5c6112a578633 customUri: NULL
 ⚠️ Welcome Template Failed: Request failed with status code 405
-[TenantDB] tenant: 6acd3544decbba9df6e7e494 customUri: NULL
+[TenantDB] tenant: 6acdc22f26a5c6112a578633 customUri: NULL
 ⚠️ Welcome Template Failed: Request failed with status code 405
-[TenantDB] tenant: 6acd3544decbba9df6e7e494 customUri: NULL
+[TenantDB] tenant: 6acdc22f26a5c6112a578633 customUri: NULL
 ⚠️ Welcome Template Failed: Request failed with status code 405
-[TenantDB] tenant: 6acd3544decbba9df6e7e494 customUri: NULL
+[TenantDB] tenant: 6acdc22f26a5c6112a578633 customUri: NULL
 ⚠️ Welcome Template Failed: Request failed with status code 405
-[TenantDB] tenant: 6acd3544decbba9df6e7e494 customUri: NULL
+[TenantDB] tenant: 6acdc22f26a5c6112a578633 customUri: NULL
 ⚠️ Welcome Template Failed: Request failed with status code 405
-[TenantDB] tenant: 6acd3544decbba9df6e7e494 customUri: NULL
+[TenantDB] tenant: 6acdc22f26a5c6112a578633 customUri: NULL
 ⚠️ WhatsApp Error: Request failed with status code 405
-[TenantDB] tenant: 6acd3544decbba9df6e7e494 customUri: NULL
-[TenantDB] tenant: 6acd3544decbba9df6e7e494 customUri: NULL
-[TenantDB] tenant: 6acd3544decbba9df6e7e4a1 customUri: NULL
+[TenantDB] tenant: 6acdc22f26a5c6112a578633 customUri: NULL
+[TenantDB] tenant: 6acdc22f26a5c6112a578633 customUri: NULL
+[TenantDB] tenant: 6acdc22f26a5c6112a578640 customUri: NULL
 ⚠️ WhatsApp Error: Request failed with status code 405
-[TenantDB] tenant: 6acd3544decbba9df6e7e4a1 customUri: NULL
-[TenantDB] tenant: 6acd3544decbba9df6e7e4a1 customUri: NULL
-Fixtures ready: tenantA=6acd3544decbba9df6e7e494 tenantB=6acd3544decbba9df6e7e4a1
-[TenantDB] tenant: 6acd3544decbba9df6e7e494 customUri: NULL
-[TenantDB] tenant: 6acd3544decbba9df6e7e494 customUri: NULL
-[TenantDB] tenant: 6acd3544decbba9df6e7e494 customUri: NULL
-[TenantDB] tenant: 6acd3544decbba9df6e7e494 customUri: NULL
-[TenantDB] tenant: 6acd3544decbba9df6e7e494 customUri: NULL
-[TenantDB] tenant: 6acd3544decbba9df6e7e494 customUri: NULL
-[TenantDB] tenant: 6acd3544decbba9df6e7e494 customUri: NULL
-[TenantDB] tenant: 6acd3544decbba9df6e7e494 customUri: NULL
-[TenantDB] tenant: 6acd3544decbba9df6e7e494 customUri: NULL
-[TenantDB] tenant: 6acd3544decbba9df6e7e494 customUri: NULL
-[TenantDB] tenant: 6acd3544decbba9df6e7e494 customUri: NULL
-[TenantDB] tenant: 6acd3544decbba9df6e7e494 customUri: NULL
-[TenantDB] tenant: 6acd3544decbba9df6e7e494 customUri: NULL
-[TenantDB] tenant: 6acd3544decbba9df6e7e494 customUri: NULL
-[TenantDB] tenant: 6acd3544decbba9df6e7e494 customUri: NULL
-[TenantDB] tenant: 6acd3544decbba9df6e7e494 customUri: NULL
-[TenantDB] tenant: 6acd3544decbba9df6e7e494 customUri: NULL
-[TenantDB] tenant: 6acd3544decbba9df6e7e494 customUri: NULL
-[TenantDB] tenant: 6acd3544decbba9df6e7e494 customUri: NULL
-[TenantDB] tenant: 6acd3544decbba9df6e7e494 customUri: NULL
-[TenantDB] tenant: 6acd3544decbba9df6e7e494 customUri: NULL
-[TenantDB] tenant: 6acd3544decbba9df6e7e494 customUri: NULL
-[TenantDB] tenant: 6acd3544decbba9df6e7e494 customUri: NULL
-[TenantDB] tenant: 6acd3544decbba9df6e7e494 customUri: NULL
-[TenantDB] tenant: 6acd3544decbba9df6e7e494 customUri: NULL
-[TenantDB] tenant: 6acd3544decbba9df6e7e494 customUri: NULL
-[TenantDB] tenant: 6acd3544decbba9df6e7e494 customUri: NULL
-[TenantDB] tenant: 6acd3544decbba9df6e7e494 customUri: NULL
-[TenantDB] tenant: 6acd3544decbba9df6e7e494 customUri: NULL
-[TenantDB] tenant: 6acd3544decbba9df6e7e494 customUri: NULL
-[TenantDB] tenant: 6acd3544decbba9df6e7e494 customUri: NULL
-[TenantDB] tenant: 6acd3544decbba9df6e7e494 customUri: NULL
+[TenantDB] tenant: 6acdc22f26a5c6112a578640 customUri: NULL
+[TenantDB] tenant: 6acdc22f26a5c6112a578640 customUri: NULL
+Fixtures ready: tenantA=6acdc22f26a5c6112a578633 tenantB=6acdc22f26a5c6112a578640
+[TenantDB] tenant: 6acdc22f26a5c6112a578633 customUri: NULL
+[TenantDB] tenant: 6acdc22f26a5c6112a578633 customUri: NULL
+[TenantDB] tenant: 6acdc22f26a5c6112a578633 customUri: NULL
+[TenantDB] tenant: 6acdc22f26a5c6112a578633 customUri: NULL
+[TenantDB] tenant: 6acdc22f26a5c6112a578633 customUri: NULL
+[TenantDB] tenant: 6acdc22f26a5c6112a578633 customUri: NULL
+[TenantDB] tenant: 6acdc22f26a5c6112a578633 customUri: NULL
+[TenantDB] tenant: 6acdc22f26a5c6112a578633 customUri: NULL
+[TenantDB] tenant: 6acdc22f26a5c6112a578633 customUri: NULL
+[TenantDB] tenant: 6acdc22f26a5c6112a578633 customUri: NULL
+[TenantDB] tenant: 6acdc22f26a5c6112a578633 customUri: NULL
+[TenantDB] tenant: 6acdc22f26a5c6112a578633 customUri: NULL
+[TenantDB] tenant: 6acdc22f26a5c6112a578633 customUri: NULL
+[TenantDB] tenant: 6acdc22f26a5c6112a578633 customUri: NULL
+[TenantDB] tenant: 6acdc22f26a5c6112a578633 customUri: NULL
+[TenantDB] tenant: 6acdc22f26a5c6112a578633 customUri: NULL
+[TenantDB] tenant: 6acdc22f26a5c6112a578633 customUri: NULL
+[TenantDB] tenant: 6acdc22f26a5c6112a578633 customUri: NULL
+[TenantDB] tenant: 6acdc22f26a5c6112a578633 customUri: NULL
+[TenantDB] tenant: 6acdc22f26a5c6112a578633 customUri: NULL
+[TenantDB] tenant: 6acdc22f26a5c6112a578633 customUri: NULL
+[TenantDB] tenant: 6acdc22f26a5c6112a578633 customUri: NULL
+[TenantDB] tenant: 6acdc22f26a5c6112a578633 customUri: NULL
+[TenantDB] tenant: 6acdc22f26a5c6112a578633 customUri: NULL
+[TenantDB] tenant: 6acdc22f26a5c6112a578633 customUri: NULL
+[TenantDB] tenant: 6acdc22f26a5c6112a578633 customUri: NULL
+[TenantDB] tenant: 6acdc22f26a5c6112a578633 customUri: NULL
+[TenantDB] tenant: 6acdc22f26a5c6112a578633 customUri: NULL
+[TenantDB] tenant: 6acdc22f26a5c6112a578633 customUri: NULL
+[TenantDB] tenant: 6acdc22f26a5c6112a578633 customUri: NULL
+[TenantDB] tenant: 6acdc22f26a5c6112a578633 customUri: NULL
+[TenantDB] tenant: 6acdc22f26a5c6112a578633 customUri: NULL
 ⚠️ WhatsApp Error: Request failed with status code 405
-[TenantDB] tenant: 6acd3544decbba9df6e7e494 customUri: NULL
-[TenantDB] tenant: 6acd3544decbba9df6e7e494 customUri: NULL
-[TenantDB] tenant: 6acd3544decbba9df6e7e494 customUri: NULL
-[TenantDB] tenant: 6acd3544decbba9df6e7e494 customUri: NULL
-[TenantDB] tenant: 6acd3544decbba9df6e7e494 customUri: NULL
-[TenantDB] tenant: 6acd3544decbba9df6e7e494 customUri: NULL
+[TenantDB] tenant: 6acdc22f26a5c6112a578633 customUri: NULL
+[TenantDB] tenant: 6acdc22f26a5c6112a578633 customUri: NULL
+[TenantDB] tenant: 6acdc22f26a5c6112a578633 customUri: NULL
+[TenantDB] tenant: 6acdc22f26a5c6112a578633 customUri: NULL
+[TenantDB] tenant: 6acdc22f26a5c6112a578633 customUri: NULL
+[TenantDB] tenant: 6acdc22f26a5c6112a578633 customUri: NULL
 ⚠️ WhatsApp Error: Request failed with status code 405
-[TenantDB] tenant: 6acd3544decbba9df6e7e494 customUri: NULL
-[TenantDB] tenant: 6acd3544decbba9df6e7e494 customUri: NULL
-[TenantDB] tenant: 6acd3544decbba9df6e7e494 customUri: NULL
-[TenantDB] tenant: 6acd3544decbba9df6e7e494 customUri: NULL
-[TenantDB] tenant: 6acd3544decbba9df6e7e494 customUri: NULL
+[TenantDB] tenant: 6acdc22f26a5c6112a578633 customUri: NULL
+[TenantDB] tenant: 6acdc22f26a5c6112a578633 customUri: NULL
+[TenantDB] tenant: 6acdc22f26a5c6112a578633 customUri: NULL
+[TenantDB] tenant: 6acdc22f26a5c6112a578633 customUri: NULL
+[TenantDB] tenant: 6acdc22f26a5c6112a578633 customUri: NULL
 ⚠️ WhatsApp Error: Request failed with status code 405
-[TenantDB] tenant: 6acd3544decbba9df6e7e494 customUri: NULL
-[TenantDB] tenant: 6acd3544decbba9df6e7e494 customUri: NULL
-[TenantDB] tenant: 6acd3544decbba9df6e7e494 customUri: NULL
-[TenantDB] tenant: 6acd3544decbba9df6e7e494 customUri: NULL
-[TenantDB] tenant: 6acd3544decbba9df6e7e494 customUri: NULL
+[TenantDB] tenant: 6acdc22f26a5c6112a578633 customUri: NULL
+[TenantDB] tenant: 6acdc22f26a5c6112a578633 customUri: NULL
+[TenantDB] tenant: 6acdc22f26a5c6112a578633 customUri: NULL
+[TenantDB] tenant: 6acdc22f26a5c6112a578633 customUri: NULL
+[TenantDB] tenant: 6acdc22f26a5c6112a578633 customUri: NULL
 ⚠️ WhatsApp Error: Request failed with status code 405
-[TenantDB] tenant: 6acd3544decbba9df6e7e494 customUri: NULL
-[TenantDB] tenant: 6acd3544decbba9df6e7e494 customUri: NULL
-[TenantDB] tenant: 6acd3544decbba9df6e7e494 customUri: NULL
-[TenantDB] tenant: 6acd3544decbba9df6e7e494 customUri: NULL
-[TenantDB] tenant: 6acd3544decbba9df6e7e494 customUri: NULL
+[TenantDB] tenant: 6acdc22f26a5c6112a578633 customUri: NULL
+[TenantDB] tenant: 6acdc22f26a5c6112a578633 customUri: NULL
+[TenantDB] tenant: 6acdc22f26a5c6112a578633 customUri: NULL
+[TenantDB] tenant: 6acdc22f26a5c6112a578633 customUri: NULL
+[TenantDB] tenant: 6acdc22f26a5c6112a578633 customUri: NULL
 ⚠️ WhatsApp Error: Request failed with status code 405
-[TenantDB] tenant: 6acd3544decbba9df6e7e494 customUri: NULL
-[TenantDB] tenant: 6acd3544decbba9df6e7e494 customUri: NULL
-[TenantDB] tenant: 6acd3544decbba9df6e7e494 customUri: NULL
-[TenantDB] tenant: 6acd3544decbba9df6e7e494 customUri: NULL
-[TenantDB] tenant: 6acd3544decbba9df6e7e494 customUri: NULL
+[TenantDB] tenant: 6acdc22f26a5c6112a578633 customUri: NULL
+[TenantDB] tenant: 6acdc22f26a5c6112a578633 customUri: NULL
+[TenantDB] tenant: 6acdc22f26a5c6112a578633 customUri: NULL
+[TenantDB] tenant: 6acdc22f26a5c6112a578633 customUri: NULL
+[TenantDB] tenant: 6acdc22f26a5c6112a578633 customUri: NULL
 ⚠️ WhatsApp Error: Request failed with status code 405
-[TenantDB] tenant: 6acd3544decbba9df6e7e494 customUri: NULL
-[TenantDB] tenant: 6acd3544decbba9df6e7e494 customUri: NULL
-[TenantDB] tenant: 6acd3544decbba9df6e7e494 customUri: NULL
-[TenantDB] tenant: 6acd3544decbba9df6e7e494 customUri: NULL
-[TenantDB] tenant: 6acd3544decbba9df6e7e494 customUri: NULL
+[TenantDB] tenant: 6acdc22f26a5c6112a578633 customUri: NULL
+[TenantDB] tenant: 6acdc22f26a5c6112a578633 customUri: NULL
+[TenantDB] tenant: 6acdc22f26a5c6112a578633 customUri: NULL
+[TenantDB] tenant: 6acdc22f26a5c6112a578633 customUri: NULL
+[TenantDB] tenant: 6acdc22f26a5c6112a578633 customUri: NULL
 ⚠️ WhatsApp Error: Request failed with status code 405
-[TenantDB] tenant: 6acd3544decbba9df6e7e494 customUri: NULL
-[TenantDB] tenant: 6acd3544decbba9df6e7e494 customUri: NULL
-[TenantDB] tenant: 6acd3544decbba9df6e7e494 customUri: NULL
-[TenantDB] tenant: 6acd3544decbba9df6e7e494 customUri: NULL
-[TenantDB] tenant: 6acd3544decbba9df6e7e494 customUri: NULL
-[TenantDB] tenant: 6acd3544decbba9df6e7e494 customUri: NULL
-[TenantDB] tenant: 6acd3544decbba9df6e7e494 customUri: NULL
-[TenantDB] tenant: 6acd3544decbba9df6e7e494 customUri: NULL
-[TenantDB] tenant: 6acd3544decbba9df6e7e494 customUri: NULL
-[TenantDB] tenant: 6acd3544decbba9df6e7e494 customUri: NULL
+[TenantDB] tenant: 6acdc22f26a5c6112a578633 customUri: NULL
+[TenantDB] tenant: 6acdc22f26a5c6112a578633 customUri: NULL
+[TenantDB] tenant: 6acdc22f26a5c6112a578633 customUri: NULL
+[TenantDB] tenant: 6acdc22f26a5c6112a578633 customUri: NULL
+[TenantDB] tenant: 6acdc22f26a5c6112a578633 customUri: NULL
+[TenantDB] tenant: 6acdc22f26a5c6112a578633 customUri: NULL
+[TenantDB] tenant: 6acdc22f26a5c6112a578633 customUri: NULL
+[TenantDB] tenant: 6acdc22f26a5c6112a578633 customUri: NULL
+[TenantDB] tenant: 6acdc22f26a5c6112a578633 customUri: NULL
+[TenantDB] tenant: 6acdc22f26a5c6112a578633 customUri: NULL
 Incoming Respond Request: {
-  taskId: '6acd354adecbba9df6e7e5df',
+  taskId: '6acdc23626a5c6112a57877e',
   status: 'Completed',
   performerId: undefined,
   hasFile: false
 }
-[TenantDB] tenant: 6acd3544decbba9df6e7e494 customUri: NULL
-[TenantDB] tenant: 6acd3544decbba9df6e7e494 customUri: NULL
-[TenantDB] tenant: 6acd3544decbba9df6e7e494 customUri: NULL
-[TenantDB] tenant: 6acd3544decbba9df6e7e494 customUri: NULL
-[TenantDB] tenant: 6acd3544decbba9df6e7e494 customUri: NULL
-[TenantDB] tenant: 6acd3544decbba9df6e7e494 customUri: NULL
-[TenantDB] tenant: 6acd3544decbba9df6e7e494 customUri: NULL
-[TenantDB] tenant: 6acd3544decbba9df6e7e494 customUri: NULL
-[TenantDB] tenant: 6acd3544decbba9df6e7e494 customUri: NULL
-[TenantDB] tenant: 6acd3544decbba9df6e7e494 customUri: NULL
-[TenantDB] tenant: 6acd3544decbba9df6e7e494 customUri: NULL
-[TenantDB] tenant: 6acd3544decbba9df6e7e494 customUri: NULL
-[TenantDB] tenant: 6acd3544decbba9df6e7e494 customUri: NULL
-[TenantDB] tenant: 6acd3544decbba9df6e7e494 customUri: NULL
-[TenantDB] tenant: 6acd3544decbba9df6e7e494 customUri: NULL
-[TenantDB] tenant: 6acd3544decbba9df6e7e494 customUri: NULL
-[TenantDB] tenant: 6acd3544decbba9df6e7e494 customUri: NULL
-[TenantDB] tenant: 6acd3544decbba9df6e7e494 customUri: NULL
-[TenantDB] tenant: 6acd3544decbba9df6e7e494 customUri: NULL
-[TenantDB] tenant: 6acd3544decbba9df6e7e494 customUri: NULL
-[TenantDB] tenant: 6acd3544decbba9df6e7e494 customUri: NULL
-[TenantDB] tenant: 6acd3544decbba9df6e7e494 customUri: NULL
-[TenantDB] tenant: 6acd3544decbba9df6e7e494 customUri: NULL
-[TenantDB] tenant: 6acd3544decbba9df6e7e494 customUri: NULL
-[TenantDB] tenant: 6acd3544decbba9df6e7e494 customUri: NULL
-[TenantDB] tenant: 6acd3544decbba9df6e7e494 customUri: NULL
-[TenantDB] tenant: 6acd3544decbba9df6e7e494 customUri: NULL
-[TenantDB] tenant: 6acd3544decbba9df6e7e494 customUri: NULL
-[TenantDB] tenant: 6acd3544decbba9df6e7e494 customUri: NULL
-[TenantDB] tenant: 6acd3544decbba9df6e7e494 customUri: NULL
-[TenantDB] tenant: 6acd3544decbba9df6e7e494 customUri: NULL
-[TenantDB] tenant: 6acd3544decbba9df6e7e494 customUri: NULL
-[TenantDB] tenant: 6acd3544decbba9df6e7e494 customUri: NULL
-[TenantDB] tenant: 6acd3544decbba9df6e7e494 customUri: NULL
-[TenantDB] tenant: 6acd3544decbba9df6e7e494 customUri: NULL
+[TenantDB] tenant: 6acdc22f26a5c6112a578633 customUri: NULL
+[TenantDB] tenant: 6acdc22f26a5c6112a578633 customUri: NULL
+[TenantDB] tenant: 6acdc22f26a5c6112a578633 customUri: NULL
+[TenantDB] tenant: 6acdc22f26a5c6112a578633 customUri: NULL
+[TenantDB] tenant: 6acdc22f26a5c6112a578633 customUri: NULL
+[TenantDB] tenant: 6acdc22f26a5c6112a578633 customUri: NULL
+[TenantDB] tenant: 6acdc22f26a5c6112a578633 customUri: NULL
+[TenantDB] tenant: 6acdc22f26a5c6112a578633 customUri: NULL
+[TenantDB] tenant: 6acdc22f26a5c6112a578633 customUri: NULL
+[TenantDB] tenant: 6acdc22f26a5c6112a578633 customUri: NULL
+[TenantDB] tenant: 6acdc22f26a5c6112a578633 customUri: NULL
+[TenantDB] tenant: 6acdc22f26a5c6112a578633 customUri: NULL
+[TenantDB] tenant: 6acdc22f26a5c6112a578633 customUri: NULL
+[TenantDB] tenant: 6acdc22f26a5c6112a578633 customUri: NULL
+[TenantDB] tenant: 6acdc22f26a5c6112a578633 customUri: NULL
+[TenantDB] tenant: 6acdc22f26a5c6112a578633 customUri: NULL
+[TenantDB] tenant: 6acdc22f26a5c6112a578633 customUri: NULL
+[TenantDB] tenant: 6acdc22f26a5c6112a578633 customUri: NULL
+[TenantDB] tenant: 6acdc22f26a5c6112a578633 customUri: NULL
+[TenantDB] tenant: 6acdc22f26a5c6112a578633 customUri: NULL
+[TenantDB] tenant: 6acdc22f26a5c6112a578633 customUri: NULL
+[TenantDB] tenant: 6acdc22f26a5c6112a578633 customUri: NULL
+[TenantDB] tenant: 6acdc22f26a5c6112a578633 customUri: NULL
+[TenantDB] tenant: 6acdc22f26a5c6112a578633 customUri: NULL
+[TenantDB] tenant: 6acdc22f26a5c6112a578633 customUri: NULL
+[TenantDB] tenant: 6acdc22f26a5c6112a578633 customUri: NULL
+[TenantDB] tenant: 6acdc22f26a5c6112a578633 customUri: NULL
+[TenantDB] tenant: 6acdc22f26a5c6112a578633 customUri: NULL
+[TenantDB] tenant: 6acdc22f26a5c6112a578633 customUri: NULL
+[TenantDB] tenant: 6acdc22f26a5c6112a578633 customUri: NULL
+[TenantDB] tenant: 6acdc22f26a5c6112a578633 customUri: NULL
+[TenantDB] tenant: 6acdc22f26a5c6112a578633 customUri: NULL
+[TenantDB] tenant: 6acdc22f26a5c6112a578633 customUri: NULL
+[TenantDB] tenant: 6acdc22f26a5c6112a578633 customUri: NULL
+[TenantDB] tenant: 6acdc22f26a5c6112a578633 customUri: NULL
 
 === AI-layer-v2 eval report (HARNESS / fake model) ===
 
