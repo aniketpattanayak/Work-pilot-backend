@@ -1891,6 +1891,33 @@ exports.respondToTask = async (req, res) => {
     const task = await DelegationTask.findById(taskId).populate('assignerId doerId coordinatorId');
     if (!task) return res.status(404).json({ message: "Task node not found." });
 
+    // SECURITY: this route had no tenant-isolation or ownership check at all -
+    // any authenticated caller who knew (or was handed) a taskId from ANY
+    // tenant, or any employee unrelated to the task within their own tenant,
+    // could change its status. Allow every role that legitimately reaches
+    // this route today or via the task's own relationship fields: the doer
+    // (completes/accepts/requests revision), the assigner (verifies/sends
+    // back), a coordinator, a helper doer, anyone in the forward chain, or
+    // an Admin/superAdmin acting as a manager override. Block everyone else,
+    // and block it outright across tenants - mirrors the same checks
+    // updateTask/deleteTask/getTaskById already use elsewhere in this file.
+    if (!req.user?.isSuperAdmin && String(task.tenantId) !== String(req.user?.tenantId)) {
+      return res.status(404).json({ message: "Task not found." });
+    }
+    {
+      const roles = Array.isArray(req.user?.roles) ? req.user.roles : [];
+      const uid = String(req.user?.id);
+      const isAdmin = req.user?.isSuperAdmin || roles.includes('Admin');
+      const isAssigner = String(task.assignerId?._id || task.assignerId) === uid;
+      const isDoer = String(task.doerId?._id || task.doerId) === uid;
+      const isCoordinator = task.coordinatorId && String(task.coordinatorId?._id || task.coordinatorId) === uid;
+      const isHelper = (task.helperDoers || []).some((h) => String(h.helperId?._id || h.helperId) === uid);
+      const isInForwardChain = (task.forwardChain || []).some((f) => String(f.employeeId?._id || f.employeeId) === uid);
+      if (!isAdmin && !isAssigner && !isDoer && !isCoordinator && !isHelper && !isInForwardChain) {
+        return res.status(403).json({ message: "You do not have permission to respond to this task." });
+      }
+    }
+
     // Handle Evidence Files (S3 or Local)
     let evidenceUrl = req.file ? (req.file.location || req.file.path) : null;
 
