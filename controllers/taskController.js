@@ -1903,10 +1903,22 @@ exports.respondToTask = async (req, res) => {
     // could change its status. Allow every role that legitimately reaches
     // this route today or via the task's own relationship fields: the doer
     // (completes/accepts/requests revision), the assigner (verifies/sends
-    // back), a coordinator, a helper doer, anyone in the forward chain, or
-    // an Admin/superAdmin acting as a manager override. Block everyone else,
-    // and block it outright across tenants - mirrors the same checks
+    // back), a coordinator, a helper doer, anyone in the forward chain, the
+    // doer's buddy cover (leaveStatus.buddyId - same lookup getDoerTasks
+    // uses to show a buddy their colleague's tasks while on leave, so they
+    // must also be allowed to actually complete them), or an Admin/
+    // superAdmin acting as a manager override. Block everyone else, and
+    // block it outright across tenants - mirrors the same checks
     // updateTask/deleteTask/getTaskById already use elsewhere in this file.
+    //
+    // NOTE: task.coworkers was deliberately NOT added here. getDoerTasks's
+    // own query never includes coworkers (it only matches doerId,
+    // helperDoers.helperId, the buddy lookup, and forwardChain), and
+    // neither TaskCard.jsx nor DoerChecklist.jsx read or act on
+    // task.coworkers anywhere - coworkers never see this task in their own
+    // task list or get a "Complete" button for it today. Allowing them to
+    // respond here would open a path the frontend doesn't expose, not close
+    // one it does.
     if (!req.user?.isSuperAdmin && String(task.tenantId) !== String(req.user?.tenantId)) {
       return res.status(404).json({ message: "Task not found." });
     }
@@ -1919,7 +1931,8 @@ exports.respondToTask = async (req, res) => {
       const isCoordinator = task.coordinatorId && String(task.coordinatorId?._id || task.coordinatorId) === uid;
       const isHelper = (task.helperDoers || []).some((h) => String(h.helperId?._id || h.helperId) === uid);
       const isInForwardChain = (task.forwardChain || []).some((f) => String(f.employeeId?._id || f.employeeId) === uid);
-      if (!isAdmin && !isAssigner && !isDoer && !isCoordinator && !isHelper && !isInForwardChain) {
+      const isBuddy = String(task.doerId?.leaveStatus?.buddyId || '') === uid;
+      if (!isAdmin && !isAssigner && !isDoer && !isCoordinator && !isHelper && !isInForwardChain && !isBuddy) {
         return res.status(403).json({ message: "You do not have permission to respond to this task." });
       }
     }

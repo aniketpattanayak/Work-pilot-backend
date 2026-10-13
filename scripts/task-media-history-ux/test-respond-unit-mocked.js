@@ -38,10 +38,11 @@ function makeTask(overrides = {}) {
     _id: 'task1',
     tenantId: 'tenantA',
     assignerId: { _id: 'assigner1' },
-    doerId: { _id: 'doer1' },
+    doerId: { _id: 'doer1', leaveStatus: {} },
     coordinatorId: null,
     helperDoers: [],
     forwardChain: [],
+    coworkers: [],
     status: 'Accepted',
     deadline: new Date(Date.now() + 86400000),
     createdAt: new Date(),
@@ -149,6 +150,72 @@ function makeReqRes({ taskId = 'task1', status, remarks, doerId, files = [], use
     await taskController.respondToTask(req, res);
     const { status, body } = getResult();
     check('T4: an unrelated same-tenant employee is blocked (403)', status === 403, { status, body });
+  }
+
+  // --- TEST 5: the doer's BUDDY COVER (leaveStatus.buddyId) can complete the task ---
+  // Same lookup getDoerTasks uses to show a buddy their colleague's tasks
+  // while the colleague is on leave - they must also be able to act on them.
+  {
+    const task = makeTask({ doerId: { _id: 'doer1', leaveStatus: { onLeave: true, buddyId: 'buddy1' } } });
+    DelegationTask.findById = () => mockQuery(task);
+    const { req, res, getResult } = makeReqRes({
+      status: 'Completed', remarks: 'Covering for doer1 while they are on leave.', doerId: 'buddy1',
+      files: [pngFile('cover.png')],
+      user: { id: 'buddy1', tenantId: 'tenantA', roles: ['Doer'] },
+    });
+    await taskController.respondToTask(req, res);
+    const { status } = getResult();
+    check('T5: the doer\'s buddy cover (leaveStatus.buddyId) is allowed to complete the task', status === 200 || status === undefined, { status, task });
+    check('T5: the buddy\'s file + remarks were recorded', task.files.length === 1 && task.remarks === 'Covering for doer1 while they are on leave.', task);
+  }
+
+  // --- TEST 6: someone who is NOT the buddy (same tenant) is still blocked ---
+  {
+    const task = makeTask({ doerId: { _id: 'doer1', leaveStatus: { onLeave: true, buddyId: 'buddy1' } } });
+    DelegationTask.findById = () => mockQuery(task);
+    const { req, res, getResult } = makeReqRes({
+      status: 'Completed', remarks: 'not actually the buddy', doerId: 'imposter1',
+      files: [],
+      user: { id: 'imposter1', tenantId: 'tenantA', roles: ['Doer'] },
+    });
+    await taskController.respondToTask(req, res);
+    const { status, body } = getResult();
+    check('T6: a non-buddy same-tenant employee is still blocked (403)', status === 403, { status, body });
+  }
+
+  // --- TEST 7: the buddy relationship does NOT cross tenants ---
+  // Same buddyId value, but the caller's tenant differs from the task's -
+  // must still be blocked by the tenant check before the buddy check ever runs.
+  {
+    const task = makeTask({ doerId: { _id: 'doer1', leaveStatus: { onLeave: true, buddyId: 'buddy1' } } });
+    DelegationTask.findById = () => mockQuery(task);
+    const { req, res, getResult } = makeReqRes({
+      status: 'Completed', remarks: 'cross-tenant buddy id reuse', doerId: 'buddy1',
+      files: [],
+      user: { id: 'buddy1', tenantId: 'tenantB_DIFFERENT', roles: ['Doer'] },
+    });
+    await taskController.respondToTask(req, res);
+    const { status, body } = getResult();
+    check('T7: a cross-tenant caller with a matching buddyId is still blocked (404)', status === 404, { status, body });
+  }
+
+  // --- TEST 8: a task.coworkers member is NOT allowed to respond ---
+  // Confirmed finding: getDoerTasks never queries by coworkers, and neither
+  // TaskCard.jsx nor DoerChecklist.jsx read task.coworkers anywhere, so the
+  // frontend does not give a coworker any "Complete"/"Respond" action on a
+  // task today. This permission check intentionally stays just as strict
+  // for them as for any other unrelated same-tenant employee.
+  {
+    const task = makeTask({ coworkers: [{ _id: 'coworker1' }] });
+    DelegationTask.findById = () => mockQuery(task);
+    const { req, res, getResult } = makeReqRes({
+      status: 'Completed', remarks: 'coworker trying to respond', doerId: 'coworker1',
+      files: [],
+      user: { id: 'coworker1', tenantId: 'tenantA', roles: ['Doer'] },
+    });
+    await taskController.respondToTask(req, res);
+    const { status, body } = getResult();
+    check('T8: a task.coworkers member is blocked (403) - matches the frontend, which never lets them respond', status === 403, { status, body });
   }
 
   const failed = results.filter(r => !r.pass);

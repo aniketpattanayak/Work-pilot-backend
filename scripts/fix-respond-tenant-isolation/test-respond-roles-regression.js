@@ -1,10 +1,13 @@
 // fix/respond-task-tenant-isolation: PUT /api/tasks/respond had NO
 // tenant-isolation or ownership check at all. Fixed by allowing every role
 // that legitimately has a stake in a task (doer, assigner, coordinator,
-// helper doer, forward-chain member, Admin/superAdmin manager override)
-// and blocking everyone else - same tenant or not. One case per legitimate
-// role, plus the two block cases (a different company, an unrelated
-// same-company employee).
+// helper doer, forward-chain member, the doer's buddy cover via
+// leaveStatus.buddyId, Admin/superAdmin manager override) and blocking
+// everyone else - same tenant or not. task.coworkers is deliberately NOT
+// allowed (see the "Coworker block check" case below for why). One case
+// per legitimate role, plus the block cases: a different company, an
+// unrelated same-company employee, a non-buddy, a cross-company buddy-id
+// reuse, and a coworker.
 process.env.PORT = process.env.PORT || '5199';
 
 const results = [];
@@ -88,13 +91,27 @@ async function j(base, method, p, body, token) {
     return rr.data?.task?._id;
   }
 
-  async function setRelationships(taskId, { coordinatorId, helperIds, forwardIds }) {
+  async function setRelationships(taskId, { coordinatorId, helperIds, forwardIds, coworkerIds }) {
     const DelegationTask = mongoose.model('DelegationTask');
     const update = {};
     if (coordinatorId) update.coordinatorId = coordinatorId;
     if (helperIds) update.helperDoers = helperIds.map((id) => ({ helperId: id }));
     if (forwardIds) update.forwardChain = forwardIds.map((id) => ({ employeeId: id }));
+    if (coworkerIds) update.coworkers = coworkerIds;
     await DelegationTask.findByIdAndUpdate(taskId, update);
+  }
+
+  // Sets the given employee's leaveStatus.buddyId directly, the same field
+  // getDoerTasks reads ('leaveStatus.buddyId': doerId) to show a buddy their
+  // covered colleague's tasks.
+  async function setBuddy(employeeId, buddyId) {
+    const Employee = mongoose.model('Employee');
+    await Employee.findByIdAndUpdate(employeeId, {
+      'leaveStatus.onLeave': true,
+      'leaveStatus.startDate': new Date(),
+      'leaveStatus.endDate': new Date(Date.now() + 86400000),
+      'leaveStatus.buddyId': buddyId,
+    });
   }
 
   // --- Case: the DOER can complete their own task ---------------------------
@@ -137,6 +154,40 @@ async function j(base, method, p, body, token) {
   await setRelationships(taskId, { forwardIds: [forwardMember.id] });
   r = await j(BASE, 'PUT', '/tasks/respond', { taskId, status: 'Completed', doerId: forwardMember.id }, forwardMember.token);
   check('a FORWARD-CHAIN member (task was passed onward to them) can act on the task', r.status === 200, r);
+
+  // --- Case: the doer's BUDDY COVER (leaveStatus.buddyId) can act -----------
+  // Same lookup getDoerTasks uses to show a buddy their colleague's tasks
+  // while that colleague is on leave - the buddy must also be able to
+  // actually complete those tasks, not just see them.
+  const buddy = await addEmp('Buddy Real', '9999955506');
+  taskId = await makeTask('Buddy cover role check');
+  await setBuddy(doer.id, buddy.id);
+  r = await j(BASE, 'PUT', '/tasks/respond', { taskId, status: 'Completed', doerId: buddy.id }, buddy.token);
+  check('the doer\'s BUDDY COVER (leaveStatus.buddyId) can complete the task while the doer is on leave', r.status === 200, r);
+
+  // --- Block case: someone who is NOT the buddy, same company, is still blocked ---
+  taskId = await makeTask('Not-the-buddy block check');
+  r = await j(BASE, 'PUT', '/tasks/respond', { taskId, status: 'Completed' }, bystander.token);
+  check('a SAME-company employee who is NOT the buddy is BLOCKED (403)', r.status === 403, r);
+
+  // --- Block case: the buddy relationship does not cross companies ----------
+  // Tenant B's admin reusing Tenant A's buddy id - must be blocked by the
+  // tenant check before the buddy check is ever reached.
+  taskId = await makeTask('Cross-company buddy block check');
+  r = await j(BASE, 'PUT', '/tasks/respond', { taskId, status: 'Completed', doerId: buddy.id }, adminTokenB);
+  check('a cross-company caller is BLOCKED (404) even if they happen to share a buddy id value', r.status === 404, r);
+
+  // --- Finding (not a permission case): task.coworkers never gets a
+  // "Complete" action from the frontend today. getDoerTasks's own query
+  // (doerId / helperDoers.helperId / the buddy lookup / forwardChain) never
+  // matches on coworkers, and neither TaskCard.jsx nor DoerChecklist.jsx
+  // read task.coworkers anywhere - so a coworker is treated the same as any
+  // other unrelated same-company employee here, deliberately.
+  const coworker = await addEmp('Coworker Real', '9999955507');
+  taskId = await makeTask('Coworker block check');
+  await setRelationships(taskId, { coworkerIds: [coworker.id] });
+  r = await j(BASE, 'PUT', '/tasks/respond', { taskId, status: 'Completed', doerId: coworker.id }, coworker.token);
+  check('a task.coworkers member is BLOCKED (403) - matches the frontend, which gives them no respond action', r.status === 403, r);
 
   // --- Block case: an unrelated SAME-company bystander -----------------------
   taskId = await makeTask('Bystander block check');
