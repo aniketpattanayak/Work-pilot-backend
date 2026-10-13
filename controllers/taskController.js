@@ -76,6 +76,7 @@ exports.getDoerTasks = async (req, res) => {
       .populate('doerId', 'name leaveStatus') // Populate leaveStatus to check per-task
       .populate('coordinatorId', 'name')
       .populate('history.performedBy', 'name')
+      .populate('files.uploadedBy', 'name')
       .sort({ createdAt: -1 });
 
     /**
@@ -167,6 +168,7 @@ exports.getAssignerTasks = async (req, res) => {
       .populate('assignerId', 'name')                    // Populate Assigner info
       .populate('forwardChain.employeeId', 'name')
       .populate('history.performedBy', 'name')           // FIXED: Converts IDs to names in Audit Log
+      .populate('files.uploadedBy', 'name')
       .sort({ createdAt: -1 });
 
     // If for some reason the array is empty, return a clean empty array
@@ -2024,20 +2026,29 @@ exports.respondToTask = async (req, res) => {
       task.remarks = "Work completed.";
     }
 
-    for (const f of evidenceFiles) {
-      task.files.push({
-        fileName: `Proof: ${f.originalname}`,
-        fileUrl: f.location || f.path,
-        uploadedAt: new Date()
-      });
-    }
+    // Built once so the SAME file objects go onto both task.files (the
+    // flat gallery, for the row-level thumbnail/quick-view) and this
+    // action's own history entry (files: [...] below) - so the frontend
+    // never has to guess which photo belongs to which stage by matching
+    // timestamps; the link is explicit.
+    const newFileRecords = evidenceFiles.map((f) => ({
+      fileName: `Proof: ${f.originalname}`,
+      fileUrl: f.location || f.path,
+      uploadedAt: new Date(),
+      uploadedBy: doerId || task.doerId,
+      stage: status,
+    }));
+    for (const fr of newFileRecords) task.files.push(fr);
 
     // CRITICAL: Records the exact person who clicked "Done"
     task.history.push({
       action: status,
       performedBy: doerId || task.doerId,
       timestamp: new Date(),
-      remarks: remarks || `Mission telemetry synced to ${status}`
+      remarks: remarks || `Mission telemetry synced to ${status}`,
+      // Exact photos sent with THIS action - so "who sent this image, at
+      // which stage" never needs to be inferred from matching timestamps.
+      files: newFileRecords.map((fr) => ({ fileName: fr.fileName, fileUrl: fr.fileUrl })),
     });
 
     await task.save();
@@ -2102,7 +2113,8 @@ exports.respondToTask = async (req, res) => {
     // Populate performedBy names for the frontend History View
     const finalPopulatedTask = await DelegationTask.findById(task._id)
       .populate('assignerId doerId coordinatorId')
-      .populate('history.performedBy', 'name');
+      .populate('history.performedBy', 'name')
+      .populate('files.uploadedBy', 'name');
 
     res.status(200).json({ message: "Registry updated successfully.", task: finalPopulatedTask });
 
@@ -2189,7 +2201,9 @@ exports.createTask = async (req, res) => {
       uploadedFiles = req.files.map(file => ({
         fileName: file.originalname,
         fileUrl: file.location || file.path,
-        uploadedAt: new Date()
+        uploadedAt: new Date(),
+        uploadedBy: taskData.assignerId,
+        stage: 'Task Created',
       }));
     }
     taskData.files = uploadedFiles;
@@ -2220,7 +2234,8 @@ exports.createTask = async (req, res) => {
       action: "Task Created",
       performedBy: taskData.assignerId,
       timestamp: new Date(),
-      remarks: `Work assigned with ${uploadedFiles.length} file(s).`
+      remarks: `Work assigned with ${uploadedFiles.length} file(s).`,
+      files: uploadedFiles.map((f) => ({ fileName: f.fileName, fileUrl: f.fileUrl })),
     }];
 
     await newTask.save();
