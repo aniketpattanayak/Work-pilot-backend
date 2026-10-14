@@ -37,6 +37,72 @@ function getModels(req) {
   };
 }
 
+// Read-only "Following" view: everything a task follower (DelegationTask.coworkers) can
+// see, same data shape the read-only task detail modal already uses (title, assigner,
+// doer, deadline, status, followers, history, photos). WATCH ONLY - there is
+// deliberately no action-capable field here beyond what the follower is allowed to see;
+// enforcement that followers can't act lives in respondToTask/handleRevision/
+// assignOnward/updateTask/deleteTask, not here.
+//
+// SECURITY: auth = only the employeeId themselves, or an Admin/superAdmin, same
+// pattern as other subject-scoped endpoints (e.g. getEmployeeDeepDive). Must also be
+// same-tenant - mirrors getTaskById/respondToTask elsewhere in this file.
+exports.getFollowingTasks = async (req, res) => {
+  try {
+    const { DelegationTask, Employee } = getModels(req);
+    const { employeeId } = req.params;
+
+    if (!mongoose.Types.ObjectId.isValid(employeeId)) {
+      return res.status(400).json({ message: "Invalid ID format" });
+    }
+
+    const roles = Array.isArray(req.user?.roles) ? req.user.roles : [];
+    const isAdminCaller = !!req.user?.isSuperAdmin || roles.includes('Admin');
+    const isSelf = String(req.user?.id || '') === String(employeeId);
+    if (!isAdminCaller && !isSelf) {
+      return res.status(403).json({ message: "You can only view your own followed tasks." });
+    }
+
+    const employee = await Employee.findById(employeeId).select('tenantId');
+    if (!employee) return res.status(404).json({ message: "Employee not found." });
+    if (!req.user?.isSuperAdmin && String(employee.tenantId) !== String(req.user?.tenantId)) {
+      return res.status(403).json({ message: "Forbidden." });
+    }
+
+    const tasks = await DelegationTask.find({ coworkers: employeeId, tenantId: employee.tenantId })
+      .populate('assignerId', 'name')
+      .populate('doerId', 'name')
+      .populate('coordinatorId', 'name')
+      .populate('coworkers', 'name')
+      .populate('history.performedBy', 'name')
+      .populate('files.uploadedBy', 'name')
+      .sort({ createdAt: -1 });
+
+    const result = tasks.map(t => ({
+      _id: t._id,
+      title: t.title,
+      description: t.description,
+      status: t.status,
+      priority: t.priority,
+      deadline: t.deadline,
+      originalDeadline: t.originalDeadline || null,
+      wasRevised: !!t.originalDeadline,
+      assignerId: t.assignerId ? { _id: t.assignerId._id, name: t.assignerId.name } : null,
+      doerId: t.doerId ? { _id: t.doerId._id, name: t.doerId.name } : null,
+      coordinatorId: t.coordinatorId ? { _id: t.coordinatorId._id, name: t.coordinatorId.name } : null,
+      followers: (t.coworkers || []).filter(c => c && c._id).map(c => ({ _id: c._id, name: c.name })),
+      history: t.history || [],
+      files: t.files || [],
+      isFollowing: true,
+    }));
+
+    res.status(200).json(result);
+  } catch (error) {
+    console.error('[Task] getFollowingTasks error:', error.message);
+    res.status(500).json({ message: "Failed to load followed tasks.", error: error.message });
+  }
+};
+
 exports.getDoerTasks = async (req, res) => {
   try {
     const { DelegationTask, Employee, Tenant, ChecklistTask, FlowInstance } = getModels(req);
@@ -75,6 +141,7 @@ exports.getDoerTasks = async (req, res) => {
       .populate('forwardChain.employeeId', 'name')
       .populate('doerId', 'name leaveStatus') // Populate leaveStatus to check per-task
       .populate('coordinatorId', 'name')
+      .populate('coworkers', 'name')
       .populate('history.performedBy', 'name')
       .populate('files.uploadedBy', 'name')
       .sort({ createdAt: -1 });
@@ -118,7 +185,15 @@ exports.getDoerTasks = async (req, res) => {
       return true;
     });
 
-    res.status(200).json(filteredTasks);
+    // Additive: expose populated coworkers under a clearer "followers" alias too,
+    // without touching the existing `coworkers` field anything else may read.
+    const withFollowers = filteredTasks.map(t => {
+      const obj = t.toObject ? t.toObject() : t;
+      obj.followers = (obj.coworkers || []).filter(c => c && c._id).map(c => ({ _id: c._id, name: c.name }));
+      return obj;
+    });
+
+    res.status(200).json(withFollowers);
   } catch (error) {
     res.status(500).json({ message: "Internal Server Error", error: error.message });
   }
@@ -167,12 +242,20 @@ exports.getAssignerTasks = async (req, res) => {
       .populate('coordinatorId', 'name')                 // Populate Coordinator info
       .populate('assignerId', 'name')                    // Populate Assigner info
       .populate('forwardChain.employeeId', 'name')
+      .populate('coworkers', 'name')
       .populate('history.performedBy', 'name')           // FIXED: Converts IDs to names in Audit Log
       .populate('files.uploadedBy', 'name')
       .sort({ createdAt: -1 });
 
+    // Additive "followers" alias (see getDoerTasks) - existing `coworkers` field untouched.
+    const withFollowers = (tasks || []).map(t => {
+      const obj = t.toObject ? t.toObject() : t;
+      obj.followers = (obj.coworkers || []).filter(c => c && c._id).map(c => ({ _id: c._id, name: c.name }));
+      return obj;
+    });
+
     // If for some reason the array is empty, return a clean empty array
-    res.status(200).json(tasks || []);
+    res.status(200).json(withFollowers);
   } catch (error) {
     console.error("❌ Error in getAssignerTasks:", error.message);
     res.status(500).json({
@@ -413,7 +496,8 @@ exports.getTaskById = async (req, res) => {
     const task = await DelegationTask.findById(taskId)
       .populate('assignerId', 'name')
       .populate('doerId', 'name leaveStatus')
-      .populate('coordinatorId', 'name');
+      .populate('coordinatorId', 'name')
+      .populate('coworkers', 'name');
     if (!task) return res.status(404).json({ message: "Task not found." });
 
     if (!req.user?.isSuperAdmin && String(task.tenantId) !== String(req.user?.tenantId)) {
@@ -447,6 +531,9 @@ exports.getTaskById = async (req, res) => {
       wasRevised: !!task.originalDeadline,
       assignerId: task.assignerId ? { _id: task.assignerId._id, name: task.assignerId.name } : null,
       doerId: task.doerId ? { _id: task.doerId._id, name: task.doerId.name } : null,
+      // Followers (watch-only; see utils/followerValidation.js). Additive field -
+      // every existing field above is unchanged.
+      followers: (task.coworkers || []).filter(c => c && c._id).map(c => ({ _id: c._id, name: c.name })),
     });
   } catch (err) {
     console.error('[Task] getTaskById error:', err.message);
@@ -475,7 +562,7 @@ exports.updateTask = async (req, res) => {
       return res.status(403).json({ message: "Only the assigner or an admin can edit this task." });
     }
 
-    const { title, description, doerId, deadline, priority } = req.body;
+    const { title, description, doerId, deadline, priority, coworkers } = req.body;
     const changes = [];
 
     if (typeof title === 'string' && title.trim() && title.trim() !== task.title) {
@@ -512,6 +599,29 @@ exports.updateTask = async (req, res) => {
         if (isNaN(d.getTime())) return res.status(400).json({ message: "Invalid deadline." });
         task.deadline = d;
         changes.push('deadline');
+      }
+    }
+
+    if (coworkers !== undefined) {
+      const { Employee } = getModels(req);
+      const { validateFollowers } = require('../utils/followerValidation');
+      let rawFollowers = coworkers;
+      if (typeof rawFollowers === 'string') {
+        try { rawFollowers = JSON.parse(rawFollowers); } catch (e) { rawFollowers = []; }
+      }
+      const { followers, errors } = await validateFollowers({
+        rawFollowers,
+        doerId: doerId || task.doerId,
+        assignerId: task.assignerId,
+        tenantId: task.tenantId,
+        Employee,
+      });
+      if (errors.length) console.warn('[Task] follower validation (update):', errors.join(' '));
+      const before = (task.coworkers || []).map(String).sort().join(',');
+      const after = followers.slice().sort().join(',');
+      if (before !== after) {
+        task.coworkers = followers;
+        changes.push('followers');
       }
     }
 
@@ -1496,6 +1606,7 @@ exports.getCoordinatorTasks = async (req, res) => {
       DelegationTask.find(delegationQuery)
         .populate('assignerId', 'name role')
         .populate('doerId', 'name role whatsappNumber department')
+        .populate('coworkers', 'name')
         .lean(),
 
       ChecklistTask.find(checklistQuery)
@@ -1513,7 +1624,8 @@ exports.getCoordinatorTasks = async (req, res) => {
 
     const normalizedDelegations = (delegationTasks || []).map(t => ({
       ...t,
-      taskType: 'Delegation'
+      taskType: 'Delegation',
+      followers: (t.coworkers || []).filter(c => c && c._id).map(c => ({ _id: c._id, name: c.name })),
     }));
 
     // 5. Merge and Sort by chronological deadline
@@ -2275,6 +2387,22 @@ exports.createTask = async (req, res) => {
 
     if (taskData.coworkers && typeof taskData.coworkers === 'string') {
       try { taskData.coworkers = JSON.parse(taskData.coworkers); } catch (e) { taskData.coworkers = []; }
+    }
+
+    // FOLLOWERS: validate against tenant/doer/assigner/max-count rules (see utils/followerValidation.js).
+    // Invalid entries are dropped rather than failing the whole create, same spirit as other
+    // best-effort cleanup in this handler (e.g. coordinatorId above).
+    if (taskData.coworkers && taskData.coworkers.length) {
+      const { validateFollowers } = require('../utils/followerValidation');
+      const { followers, errors } = await validateFollowers({
+        rawFollowers: taskData.coworkers,
+        doerId: taskData.doerId,
+        assignerId: taskData.assignerId,
+        tenantId: taskData.tenantId,
+        Employee,
+      });
+      if (errors.length) console.warn('[Task] follower validation:', errors.join(' '));
+      taskData.coworkers = followers;
     }
 
     // Deadline change: the assigner chooses how many days the doer may extend (1 - 90).
