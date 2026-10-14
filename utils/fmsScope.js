@@ -73,9 +73,30 @@ function instanceInvolvesAnyOf(instance, idList) {
   return history.some((h) => ids.has(String(h.assignedToId)) || ids.has(String(h.completedById)));
 }
 
+/**
+ * True when `callerUser` (req.user, the caller) is allowed to ask the
+ * subject-scoped FMS endpoints (getFmsTasksForCoordinator,
+ * getCompletedFmsForCoordinator, getCompletedTasksForCoordinator,
+ * getMyTasks, getMyTasksWithNodes) about `subjectId`, a route param
+ * (coordinatorId/employeeId) naming the person whose tasks are requested.
+ *
+ * These endpoints decide WHAT to return by looking up `subjectId`'s own
+ * mapping/role (unchanged, existing behaviour) - the bug this closes is
+ * that they never checked WHO is allowed to ask for `subjectId` in the
+ * first place, so any authenticated employee could pass any other
+ * employee's id and read their task list. Admin, viewer-only and
+ * superAdmin callers may ask about anyone (unrestricted, same bypass as
+ * isUnrestrictedFmsViewer); everyone else may only ask about themselves.
+ */
+function canQuerySubject(callerUser, subjectId) {
+  if (isUnrestrictedFmsViewer(callerUser)) return true;
+  return !!callerUser && String(callerUser.id) === String(subjectId);
+}
+
 module.exports = {
   isUnrestrictedFmsViewer,
   buildMappingIds,
   buildInvolvedOrClause,
   instanceInvolvesAnyOf,
+  canQuerySubject,
 };

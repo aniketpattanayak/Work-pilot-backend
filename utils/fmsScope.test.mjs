@@ -5,6 +5,7 @@ import {
   buildMappingIds,
   buildInvolvedOrClause,
   instanceInvolvesAnyOf,
+  canQuerySubject,
 } from "./fmsScope.js";
 
 let passed = 0;
@@ -101,6 +102,37 @@ test("false when nothing matches", () => {
 test("false for empty/missing idList or instance", () => {
   assert.equal(instanceInvolvesAnyOf(null, ["a"]), false);
   assert.equal(instanceInvolvesAnyOf({}, []), false);
+});
+
+// --- canQuerySubject ---
+
+test("non-admin querying own id is allowed", () => {
+  assert.equal(canQuerySubject({ id: "me", roles: ["Coordinator"] }, "me"), true);
+});
+
+test("non-admin querying someone else's id is denied", () => {
+  assert.equal(canQuerySubject({ id: "me", roles: ["Coordinator"] }, "other"), false);
+});
+
+test("Admin querying someone else's id is allowed", () => {
+  assert.equal(canQuerySubject({ id: "me", roles: ["Admin"] }, "other"), true);
+});
+
+test("viewer-only querying someone else's id is allowed", () => {
+  assert.equal(canQuerySubject({ id: "me", roles: ["Viewer"] }, "other"), true);
+});
+
+test("superAdmin querying someone else's id is allowed", () => {
+  assert.equal(canQuerySubject({ id: "me", isSuperAdmin: true, roles: [] }, "other"), true);
+});
+
+test("no caller is denied even for a matching id (safe default)", () => {
+  assert.equal(canQuerySubject(null, "other"), false);
+});
+
+test("id comparison is string-insensitive to type (ObjectId vs string)", () => {
+  const objectIdLike = { toString: () => "abc123" };
+  assert.equal(canQuerySubject({ id: "abc123", roles: [] }, objectIdLike), true);
 });
 
 console.log(`\n${passed} tests passed`);

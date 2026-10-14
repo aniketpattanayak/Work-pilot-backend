@@ -4,7 +4,7 @@ const _Employee     = require('../models/Employee');
 const axios         = require('axios');
 const { completeStep, startInstance } = require('../utils/flowEngine');
 const { getReqModels } = require('../utils/reqModels');
-const { isUnrestrictedFmsViewer, buildMappingIds, buildInvolvedOrClause, instanceInvolvesAnyOf } = require('../utils/fmsScope');
+const { isUnrestrictedFmsViewer, buildMappingIds, buildInvolvedOrClause, instanceInvolvesAnyOf, canQuerySubject } = require('../utils/fmsScope');
 
 // Helper — get correct models for this request's tenant DB
 async function M(req) {
@@ -530,6 +530,14 @@ exports.getMyTasks = async (req, res) => {
     const { FlowTemplate, FlowInstance, Employee } = getModels(req);
     const { employeeId } = req.params;
 
+    // SECURITY: employeeId came straight from the URL with no check that it
+    // was the caller's own id - any authenticated employee could read
+    // another specific employee's task list by passing their id. Admin/
+    // viewer-only/superAdmin callers may still look up anyone (unchanged).
+    if (!canQuerySubject(req.user, employeeId)) {
+      return res.status(403).json({ message: 'Forbidden. You may only view your own tasks.' });
+    }
+
     const tasks = await FlowInstance.find({
       tenantId: req.user.tenantId,
       status: 'active',
@@ -572,6 +580,14 @@ exports.getMyTasksWithNodes = async (req, res) => {
     const { FlowTemplate, FlowInstance, Employee } = getModels(req);
     const { employeeId } = req.params;
     const now = new Date();
+
+    // SECURITY: same gap as getMyTasks - employeeId wasn't checked against
+    // the caller's own id. This endpoint IS called by the frontend
+    // (FlowMyTasks.jsx, DoerChecklist.jsx), always with the viewer's own
+    // id, so this restriction doesn't change any legitimate current usage.
+    if (!canQuerySubject(req.user, employeeId)) {
+      return res.status(403).json({ message: 'Forbidden. You may only view your own tasks.' });
+    }
 
     // Also get the employee's name for name-based fallback matching
     const empDoc = await Employee.findById(employeeId).select('name').lean();
@@ -818,6 +834,15 @@ exports.getCompletedTasksForCoordinator = async (req, res) => {
     const subject = await Employee.findById(employeeId).lean();
     if (!subject) return res.status(404).json({ message: 'Employee not found' });
 
+    // SECURITY: the above scoping decides what to return based on the
+    // SUBJECT (employeeId)'s own role/mapping, but nothing checked WHO is
+    // allowed to ask for that subject - any authenticated employee could
+    // pass another employee's id and read their completed tasks. Admin/
+    // viewer-only/superAdmin callers may still ask about anyone.
+    if (!canQuerySubject(req.user, employeeId)) {
+      return res.status(403).json({ message: 'Forbidden. You may only view your own completed tasks.' });
+    }
+
     const filter = { tenantId, status: { $in: ['completed', 'Completed'] } };
     if (!isUnrestrictedFmsViewer({ roles: subject.roles })) {
       const mappingIds = buildMappingIds(subject);
@@ -857,6 +882,14 @@ exports.getFmsTasksForCoordinator = async (req, res) => {
     // Get the coordinator record
     const coordinator = await Employee.findById(coordinatorId).lean();
     if (!coordinator) return res.status(404).json({ message: 'Coordinator not found' });
+
+    // SECURITY: coordinatorId is the SUBJECT whose mapping decides scope,
+    // but nothing checked WHO may ask for that subject - any authenticated
+    // employee could pass another coordinator's id. Admin/viewer-only/
+    // superAdmin callers may still ask about anyone.
+    if (!canQuerySubject(req.user, coordinatorId)) {
+      return res.status(403).json({ message: 'Forbidden. You may only view your own coordinator tasks.' });
+    }
 
     // SECURITY: this previously scoped by managedDoers only, missing
     // managedAssigners - aligned to the same Mapping-tab set
@@ -909,6 +942,12 @@ exports.getCompletedFmsForCoordinator = async (req, res) => {
 
     const coordinator = await Employee.findById(coordinatorId).lean();
     if (!coordinator) return res.status(404).json({ message: 'Coordinator not found' });
+
+    // SECURITY: same gap as getFmsTasksForCoordinator - check WHO may ask
+    // for this subject before deciding what to return for them.
+    if (!canQuerySubject(req.user, coordinatorId)) {
+      return res.status(403).json({ message: 'Forbidden. You may only view your own coordinator tasks.' });
+    }
 
     // SECURITY: the mapped-doer ids used to be computed and then never
     // applied to the query at all - this returned every completed FMS
