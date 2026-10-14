@@ -278,6 +278,12 @@ router.put('/update-weekly-target', authMiddleware, subscriptionGuard, tenantDbM
 router.get('/review-analytics/:tenantId', authMiddleware, subscriptionGuard, tenantDbMiddleware, sameTenantOnly, taskController.getReviewAnalytics);
 router.get('/user-dashboard/:employeeId', authMiddleware, subscriptionGuard, tenantDbMiddleware, taskController.getUserDashboard);
 
+// Read-only "Following" view for a task follower (DelegationTask.coworkers). Must be
+// registered BEFORE the catch-all GET '/:taskId' below, or '/following' is parsed as a
+// taskId and 400s as an invalid ObjectId - same route-ordering rule as every other
+// fixed path above it.
+router.get('/following/:employeeId', authMiddleware, subscriptionGuard, tenantDbMiddleware, taskController.getFollowingTasks);
+
 // Edit a task. Kept LAST so every fixed PUT path above (respond, update-mapping, ...) matches first.
 router.put('/:taskId', authMiddleware, subscriptionGuard, tenantDbMiddleware, taskController.updateTask);
 
