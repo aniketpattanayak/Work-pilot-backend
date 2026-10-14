@@ -4,6 +4,7 @@ const _Employee     = require('../models/Employee');
 const axios         = require('axios');
 const { completeStep, startInstance } = require('../utils/flowEngine');
 const { getReqModels } = require('../utils/reqModels');
+const { isUnrestrictedFmsViewer, buildMappingIds, buildInvolvedOrClause, instanceInvolvesAnyOf } = require('../utils/fmsScope');
 
 // Helper — get correct models for this request's tenant DB
 async function M(req) {
@@ -406,6 +407,28 @@ exports.getInstances = async (req, res) => {
     if (status !== 'all') filter.status = status;
     if (templateId) filter.templateId = templateId;
 
+    // SECURITY: this endpoint used to return every FMS instance in the
+    // tenant to any authenticated caller (e.g. a Coordinator's dashboard),
+    // regardless of their Mapping tab. Admin and viewer-only roles stay
+    // unrestricted (same as before); everyone else is scoped to instances
+    // involving people in their own Mapping tab (managedDoers +
+    // managedAssigners) - the same scope getCoordinatorTasks applies to
+    // delegation/checklist tasks. See utils/fmsScope.js for what
+    // "involving a person" means and why. If the mapping is empty, this
+    // returns an empty list, same as delegation.
+    if (!isUnrestrictedFmsViewer(req.user)) {
+      const me = await Employee.findById(req.user?.id).lean();
+      const mappingIds = buildMappingIds(me);
+      const orClause = buildInvolvedOrClause(mappingIds);
+      if (!orClause) {
+        return res.json({
+          instances: [],
+          pagination: { total: 0, page: Number(page), limit: Number(limit), pages: 0 },
+        });
+      }
+      filter.$or = orClause;
+    }
+
     const skip = (Number(page) - 1) * Number(limit);
 
     const [instances, total] = await Promise.all([
@@ -475,6 +498,19 @@ exports.getInstanceDetail = async (req, res) => {
     if (!instance) return res.status(404).json({ message: 'Instance not found' });
     if (!req.user?.isSuperAdmin && instance.tenantId.toString() !== String(req.user?.tenantId)) {
       return res.status(403).json({ message: 'Forbidden. This instance does not belong to your company.' });
+    }
+
+    // SECURITY: same-tenant was the only check here - any employee who had
+    // (or guessed) an instanceId could view full detail for an instance
+    // outside their Mapping tab. Same scoping rule as getInstances.
+    if (!isUnrestrictedFmsViewer(req.user)) {
+      const me = await Employee.findById(req.user?.id).lean();
+      const mappingIds = buildMappingIds(me);
+      const allIds = [...mappingIds, req.user?.id].filter(Boolean);
+      const involved = instanceInvolvesAnyOf(instance, allIds);
+      if (!involved) {
+        return res.status(403).json({ message: 'Forbidden. This task is outside your Mapping tab.' });
+      }
     }
 
     const template = await FlowTemplate.findById(instance.templateId).lean();
@@ -771,11 +807,29 @@ exports.getCompletedTasksForCoordinator = async (req, res) => {
     const { employeeId } = req.params;
     const tenantId = req.user.tenantId;
 
-    // Get all completed flow instances for this tenant
-    const instances = await FlowInstance.find({
-      tenantId,
-      status: { $in: ['completed', 'Completed'] },
-    }).sort({ completedAt: -1 }).limit(100).lean();
+    // SECURITY: this used to return every completed FMS instance in the
+    // tenant, with employeeId/coordinator mapping read but never applied.
+    // Scoped the same way as getInstances: the subject employee's own
+    // Admin/viewer-only role sees everything (matches getCoordinatorTasks's
+    // bypass, which checks the SUBJECT employee's roles, not the caller's -
+    // unchanged from that existing convention); everyone else is scoped to
+    // their Mapping tab (managedDoers + managedAssigners). Empty mapping =
+    // empty list, same as delegation.
+    const subject = await Employee.findById(employeeId).lean();
+    if (!subject) return res.status(404).json({ message: 'Employee not found' });
+
+    const filter = { tenantId, status: { $in: ['completed', 'Completed'] } };
+    if (!isUnrestrictedFmsViewer({ roles: subject.roles })) {
+      const mappingIds = buildMappingIds(subject);
+      const allIds = [...mappingIds, employeeId];
+      const orClause = buildInvolvedOrClause(allIds);
+      if (!orClause) return res.json([]);
+      filter.$or = orClause;
+    }
+
+    // Get all completed flow instances in scope for this tenant
+    const instances = await FlowInstance.find(filter)
+      .sort({ completedAt: -1 }).limit(100).lean();
 
     const enriched = instances.map(inst => ({
       instanceId: inst._id,
@@ -793,30 +847,37 @@ exports.getCompletedTasksForCoordinator = async (req, res) => {
   }
 };
 
-// ─── GET FMS TASKS FOR COORDINATOR (all mapped doers) ────────────────────────
+// ─── GET FMS TASKS FOR COORDINATOR (all mapped doers + assigners) ────────────
 exports.getFmsTasksForCoordinator = async (req, res) => {
   try {
     const { FlowTemplate, FlowInstance, Employee } = getModels(req);
     const { coordinatorId } = req.params;
     const tenantId = req.user.tenantId;
 
-    // Get coordinator's mapped doers
+    // Get the coordinator record
     const coordinator = await Employee.findById(coordinatorId).lean();
     if (!coordinator) return res.status(404).json({ message: 'Coordinator not found' });
 
-    // Get all doer IDs mapped to this coordinator
-    const doerIds = coordinator.managedDoers || [];
-    // Include coordinator themselves
-    const allIds = [...doerIds.map(id => id.toString()), coordinatorId.toString()];
+    // SECURITY: this previously scoped by managedDoers only, missing
+    // managedAssigners - aligned to the same Mapping-tab set
+    // getCoordinatorTasks uses. An Admin/viewer-only subject still sees
+    // every active instance in the tenant.
+    const filter = { tenantId, status: 'active' };
+    if (!isUnrestrictedFmsViewer({ roles: coordinator.roles })) {
+      // Mapped doers AND assigners, plus the coordinator themselves (existing
+      // behaviour, unchanged).
+      const mappingIds = buildMappingIds(coordinator);
+      const allIds = [...mappingIds, coordinatorId];
+      const orClause = buildInvolvedOrClause(allIds);
+      if (!orClause) return res.json([]);
+      filter.$or = orClause;
+    }
 
     const now = new Date();
 
-    // Get active FMS tasks for all mapped doers
-    const tasks = await FlowInstance.find({
-      tenantId,
-      status: 'active',
-      'activeStep.assignedToId': { $in: allIds },
-    }).sort({ 'activeStep.plannedDeadline': 1 }).lean();
+    // Get active FMS tasks in scope
+    const tasks = await FlowInstance.find(filter)
+      .sort({ 'activeStep.plannedDeadline': 1 }).lean();
 
     const enriched = tasks.map(inst => ({
       instanceId:      inst._id,
@@ -839,26 +900,32 @@ exports.getFmsTasksForCoordinator = async (req, res) => {
   }
 };
 
-// ─── GET COMPLETED FMS TASKS FOR COORDINATOR (all mapped doers) ──────────────
+// ─── GET COMPLETED FMS TASKS FOR COORDINATOR (all mapped doers + assigners) ──
 exports.getCompletedFmsForCoordinator = async (req, res) => {
   try {
     const { FlowTemplate, FlowInstance, Employee } = getModels(req);
     const { coordinatorId } = req.params;
     const tenantId = req.user.tenantId;
 
-
-
-
     const coordinator = await Employee.findById(coordinatorId).lean();
     if (!coordinator) return res.status(404).json({ message: 'Coordinator not found' });
 
-    const doerIds = (coordinator.managedDoers || []).map(id => id.toString());
-    doerIds.push(coordinatorId.toString());
+    // SECURITY: the mapped-doer ids used to be computed and then never
+    // applied to the query at all - this returned every completed FMS
+    // instance in the tenant to any coordinator. Now scoped the same way
+    // as getFmsTasksForCoordinator (managedDoers + managedAssigners + self,
+    // Admin/viewer-only subject unrestricted).
+    const filter = { tenantId, status: { $in: ['completed', 'Completed'] } };
+    if (!isUnrestrictedFmsViewer({ roles: coordinator.roles })) {
+      const mappingIds = buildMappingIds(coordinator);
+      const allIds = [...mappingIds, coordinatorId];
+      const orClause = buildInvolvedOrClause(allIds);
+      if (!orClause) return res.json([]);
+      filter.$or = orClause;
+    }
 
-    const instances = await FlowInstance.find({
-      tenantId,
-      status: { $in: ['completed', 'Completed'] },
-    }).sort({ completedAt: -1 }).limit(100).lean();
+    const instances = await FlowInstance.find(filter)
+      .sort({ completedAt: -1 }).limit(100).lean();
 
     const enriched = instances.map(inst => ({
       instanceId:      inst._id,
