@@ -31,6 +31,21 @@ const TenantSchema = new mongoose.Schema({
   sectors:   { type: [String], default: [] },
   locations: { type: [String], default: [] },
 
+  // Company-defined WhatsApp country-code list for the employee form's
+  // country dropdown (edited in Settings). Additive and optional: an empty
+  // or missing list means the frontend falls back to its built-in default
+  // list, so nothing changes for existing companies that never touch this.
+  phoneCountries: {
+    type: [{
+      _id: false,
+      id:       { type: String, required: true },
+      name:     { type: String, required: true },
+      flag:     { type: String, default: '' },
+      dialCode: { type: String, required: true },
+    }],
+    default: [],
+  },
+
   // Custom access roles (attendance / leave / payroll permissions) made by the company's Admin
   accessRoles: [{
     _id: false,
