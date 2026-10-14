@@ -242,6 +242,37 @@ function sanitizeReviewConfig(rc) {
   return { value: { period: rc.period, weights, overrides, thresholds: { red, orange }, driftBands: { greenMax: dg, yellowMax: dy, orangeMax: dor } } };
 }
 
+// Company-configurable WhatsApp country-code list (Settings -> Country codes).
+// Validates: dialCode is 1-4 digits with no leading 0; id is required and
+// unique (case-insensitive); name is 1-40 characters; at most ~60 entries.
+// Returns { value } or { error }.
+function cleanPhoneCountries(list) {
+  if (!Array.isArray(list)) return { error: 'Country codes must be a list.' };
+  if (list.length > 60) return { error: 'Too many country codes (max 60).' };
+  const seenIds = new Set();
+  const out = [];
+  for (const row of list) {
+    if (!row || typeof row !== 'object' || Array.isArray(row)) {
+      return { error: 'Each country code entry must be an object with id, name and dialCode.' };
+    }
+    const id = typeof row.id === 'string' ? row.id.trim() : '';
+    const name = typeof row.name === 'string' ? row.name.trim().replace(/\s+/g, ' ') : '';
+    const flag = typeof row.flag === 'string' ? row.flag.trim() : '';
+    const dialCode = typeof row.dialCode === 'string' ? row.dialCode.trim() : '';
+
+    if (!id) return { error: 'Every country code needs an id.' };
+    if (!name || name.length > 40) return { error: 'Country names must be 1-40 characters.' };
+    if (!/^[1-9]\d{0,3}$/.test(dialCode)) {
+      return { error: 'Country codes must be 1-4 digits, with no leading 0.' };
+    }
+    const key = id.toLowerCase();
+    if (seenIds.has(key)) return { error: `Duplicate country code id: "${id}".` };
+    seenIds.add(key);
+    out.push({ id, name, flag, dialCode });
+  }
+  return { value: out };
+}
+
 exports.updateSettings = async (req, res) => {
   try {
     const { Tenant, Employee, DelegationTask, ChecklistTask } = getModels(req);
@@ -256,6 +287,7 @@ exports.updateSettings = async (req, res) => {
       weekends,
       sectors,
       locations,
+      phoneCountries,
       reviewConfig
     } = req.body;
 
@@ -300,6 +332,20 @@ exports.updateSettings = async (req, res) => {
         if (!c) return res.status(400).json({ message: 'Locations must be a list of names (max 60 characters each).' });
         masterSet.locations = c;
       }
+    }
+
+    // Company-defined WhatsApp country-code list (company Admin only).
+    // Additive: an empty/omitted list just means "use the built-in default
+    // list" on the frontend, so this never breaks an existing company.
+    if (phoneCountries !== undefined) {
+      const callerRoles3 = Array.isArray(req.user?.roles) ? req.user.roles : [];
+      const isAdminCaller3 = req.user?.isSuperAdmin || callerRoles3.includes('Admin');
+      if (!isAdminCaller3 || (!req.user?.isSuperAdmin && String(tenantId) !== String(req.user?.tenantId))) {
+        return res.status(403).json({ message: 'Only your company Admin can change the country code list.' });
+      }
+      const cleaned = cleanPhoneCountries(phoneCountries);
+      if (cleaned.error) return res.status(400).json({ message: cleaned.error });
+      masterSet.phoneCountries = cleaned.value;
     }
 
     // Review Meeting settings (company Admin only)
