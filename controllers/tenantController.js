@@ -1,3 +1,4 @@
+const mongoose = require('mongoose');
 const Tenant = require('../models/Tenant');
 const Employee = require('../models/Employee');
 const bcrypt = require('bcryptjs');
@@ -726,6 +727,7 @@ exports.bulkAddChecklists = async (req, res) => {
           taskName,
           description: cl['Description'] || cl.description || '',
           doerId: assignee._id,
+          createdBy: mongoose.Types.ObjectId.isValid(req.user?.id) ? req.user.id : undefined,
           frequency,
           frequencyConfig,
           startDate: baseAnchorDate,

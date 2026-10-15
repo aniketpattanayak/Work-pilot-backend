@@ -809,6 +809,7 @@ exports.getAllChecklists = async (req, res) => {
     // 2. Fetch checklists for the entire company/tenant
     const checklists = await ChecklistTask.find({ tenantId })
       .populate('doerId', 'name department')
+      .populate('createdBy', 'name')
       .sort({ createdAt: -1 });
 
     // 3. Always return an array, even if empty, to prevent frontend crashes
@@ -1022,6 +1023,7 @@ if (frequency === "Weekly") {
       taskName,
       description: description || "",
       doerId,
+      createdBy: mongoose.Types.ObjectId.isValid(req.user?.id) ? req.user.id : undefined,
       frequency,
       /**
        * Persisting the full config object to enable iterative repeat logic
@@ -1611,6 +1613,7 @@ exports.getCoordinatorTasks = async (req, res) => {
 
       ChecklistTask.find(checklistQuery)
         .populate('doerId', 'name department whatsappNumber')
+        .populate('createdBy', 'name')
         .lean()
     ]);
 
@@ -2552,7 +2555,7 @@ exports.getChecklistTasks = async (req, res) => {
     const tasks = await ChecklistTask.find({
       doerId: { $in: authorizedIdList },
       status: 'Active'
-    }).populate('doerId', 'name workOnSunday leaveStatus');
+    }).populate('doerId', 'name workOnSunday leaveStatus').populate('createdBy', 'name');
 
     const moment = require('moment');
     const startOfTodayMoment = moment().startOf('day');

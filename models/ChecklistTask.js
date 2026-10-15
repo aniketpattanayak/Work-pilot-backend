@@ -9,6 +9,8 @@ const ChecklistTaskSchema = new mongoose.Schema({
   taskName: { type: String, required: true },
   description: { type: String },
   doerId: { type: mongoose.Schema.Types.ObjectId, ref: 'Employee', required: true },
+  // Who set this checklist up (shown as "Assigned by"). Empty on checklists created before this field existed.
+  createdBy: { type: mongoose.Schema.Types.ObjectId, ref: 'Employee' },
   frequency: {
     type: String,
     enum: ['Daily', 'Weekly', 'Monthly', 'Quarterly', 'Half-Yearly', 'Yearly', 'Interval'],
