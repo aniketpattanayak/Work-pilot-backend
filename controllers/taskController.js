@@ -2980,7 +2980,15 @@ const buildEmployeeReviewStats = (emp, ctx) => {
   const empChecklists = checklists.filter(t => t.doerId && t.doerId.toString() === emp._id.toString());
   empChecklists.forEach(t => {
     let expected = 0;
-    if (t.frequency === 'Daily') expected = view === 'Weekly' ? 7 : (view === 'Daily' ? 1 : (view === 'Monthly' ? 30 : daysInPeriod));
+    if (view === 'Custom') {
+      // a free From - To range: count how many runs of this checklist fall inside it
+      const cfgF = t.frequencyConfig || {};
+      let per = { Daily: 1, Weekly: 7, Monthly: 30, Quarterly: 90, 'Half-Yearly': 180, Yearly: 365 }[t.frequency] || 1;
+      if (t.frequency === 'Interval' && cfgF.intervalDays > 0) per = cfgF.intervalDays;
+      if (t.frequency === 'Weekly' && (cfgF.daysOfWeek || []).length > 1) per = 7 / cfgF.daysOfWeek.length;
+      if (t.frequency === 'Monthly' && (cfgF.daysOfMonth || []).length > 1) per = 30 / cfgF.daysOfMonth.length;
+      expected = per <= 1 ? daysInPeriod : Math.max(1, Math.round(daysInPeriod / per));
+    } else if (t.frequency === 'Daily') expected = view === 'Weekly' ? 7 : (view === 'Daily' ? 1 : (view === 'Monthly' ? 30 : daysInPeriod));
     else if (t.frequency === 'Weekly') expected = view === 'Monthly' ? 4 : ((view === 'Weekly' || view === 'Daily') ? 1 : Math.max(1, Math.round(daysInPeriod / 7)));
     else expected = 1;
 
@@ -3122,6 +3130,20 @@ exports.getReviewAnalytics = async (req, res) => {
 // Everything one person needs on the dashboard in a single call: identity, points, badges,
 // this period's numbers, what is overdue / due soon, and (Admin only) the points leaderboard.
 // A person can open their own; an Admin can open anyone's in the same company.
+// A custom From - To range (India dates, both days included) from ?from=YYYY-MM-DD&to=YYYY-MM-DD
+const readCustomRange = (query) => {
+  const isoDay = /^\d{4}-\d{2}-\d{2}$/;
+  if (!isoDay.test(String(query.from || '')) && !isoDay.test(String(query.to || ''))) return { custom: null };
+  if (!isoDay.test(String(query.from || '')) || !isoDay.test(String(query.to || ''))) return { error: 'Please choose both the From and To dates.' };
+  const [fy, fm, fd] = query.from.split('-').map(Number);
+  const [ty, tm, td] = query.to.split('-').map(Number);
+  const cs = new Date(Date.UTC(fy, fm - 1, fd) - IST_OFFSET_MS);
+  const ce = new Date(Date.UTC(ty, tm - 1, td + 1) - IST_OFFSET_MS - 1);
+  if (isNaN(cs.getTime()) || isNaN(ce.getTime()) || ce < cs) return { error: 'The "to" date cannot be before the "from" date.' };
+  if (ce.getTime() - cs.getTime() > 366 * 24 * 60 * 60 * 1000) return { error: 'Please choose a range of at most one year.' };
+  return { custom: { startDate: cs, endDate: ce } };
+};
+
 exports.getUserDashboard = async (req, res) => {
   try {
     const { DelegationTask, Employee, Tenant, ChecklistTask, FlowInstance } = getModels(req);
@@ -3149,8 +3171,10 @@ exports.getUserDashboard = async (req, res) => {
     const tenantDoc = await Tenant.findById(tenantId).select('reviewConfig').lean().catch(() => null);
     const cfg = readReviewConfig(tenantDoc && tenantDoc.reviewConfig);
     const requestedView = String(req.query.view || '');
-    const view = REVIEW_PERIODS.includes(requestedView) ? requestedView : cfg.period;
-    const rc = reviewContext(view, date);
+    const range = readCustomRange(req.query);
+    if (range.error) return res.status(400).json({ message: range.error });
+    const view = range.custom ? 'Custom' : (REVIEW_PERIODS.includes(requestedView) ? requestedView : cfg.period);
+    const rc = reviewContext(view, date, range.custom);
     const now = rc.now;
     const dayMs = 24 * 60 * 60 * 1000;
     const todayStart = istStartOfDay(now);
