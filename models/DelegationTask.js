@@ -45,6 +45,7 @@ const DelegationTaskSchema = new mongoose.Schema({
   maxExtensionDays:  { type: Number, default: 0, min: 0, max: 90 },
   originalDeadline:  { type: Date },   // the deadline before the doer revised it
   revisedAt:         { type: Date },
+  revisedByDoerId:   { type: mongoose.Schema.Types.ObjectId, ref: 'Employee' }, // the doer whose revision moved the deadline
   status: {
     type: String,
     enum: ['Pending', 'Accepted', 'Revision Requested', 'Completed', 'Verified', 'Rejected'],

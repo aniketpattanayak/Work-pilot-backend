@@ -71,12 +71,16 @@ exports.upsertForm = async (req, res) => {
       ? await OrderForm.findById(formId)
       : (templateId ? await OrderForm.findOne({ templateId }) : null);
 
+    if (form && !req.user?.isSuperAdmin && String(form.tenantId) !== String(tenantId)) {
+      return res.status(403).json({ message: 'This form belongs to another company.' });
+    }
+
     if (form) {
       // Update existing — if _updateLink just update templateId, else update all fields
       if (!req.body._updateLink) {
         form.name          = name;
-        form.orderFields   = cleanOrderFields.length ? cleanOrderFields : form.orderFields;
-        form.itemFields    = cleanItemFields.length  ? cleanItemFields  : form.itemFields;
+        form.orderFields   = Array.isArray(orderFields) ? cleanOrderFields : form.orderFields;
+        form.itemFields    = Array.isArray(itemFields)  ? cleanItemFields  : form.itemFields;
         form.orderIdConfig = orderIdConfig || form.orderIdConfig;
         form.lineItemConfig= lineItemConfig|| form.lineItemConfig;
         form.allowedRoles  = allowedRoles  || form.allowedRoles;
@@ -146,6 +150,9 @@ exports.deleteForm = async (req, res) => {
   try {
     const form = await OrderForm.findById(req.params.formId);
     if (!form) return res.status(404).json({ message: 'Form not found' });
+    if (!req.user?.isSuperAdmin && String(form.tenantId) !== String(req.user?.tenantId)) {
+      return res.status(403).json({ message: 'This form belongs to another company.' });
+    }
 
     form.isActive = false;
     await form.save();

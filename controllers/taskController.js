@@ -87,6 +87,7 @@ exports.getFollowingTasks = async (req, res) => {
       deadline: t.deadline,
       originalDeadline: t.originalDeadline || null,
       wasRevised: !!t.originalDeadline,
+      revisedByDoerId: t.revisedByDoerId || null,
       assignerId: t.assignerId ? { _id: t.assignerId._id, name: t.assignerId.name } : null,
       doerId: t.doerId ? { _id: t.doerId._id, name: t.doerId.name } : null,
       coordinatorId: t.coordinatorId ? { _id: t.coordinatorId._id, name: t.coordinatorId.name } : null,
@@ -529,6 +530,7 @@ exports.getTaskById = async (req, res) => {
       // deadline (see handleRevision) - its presence IS "was revised".
       originalDeadline: task.originalDeadline || null,
       wasRevised: !!task.originalDeadline,
+      revisedByDoerId: task.revisedByDoerId || null,
       assignerId: task.assignerId ? { _id: task.assignerId._id, name: task.assignerId.name } : null,
       doerId: task.doerId ? { _id: task.doerId._id, name: task.doerId.name } : null,
       // Followers (watch-only; see utils/followerValidation.js). Additive field -
@@ -627,6 +629,13 @@ exports.updateTask = async (req, res) => {
 
     if (changes.length === 0) {
       return res.status(200).json({ message: "No changes to save.", task });
+    }
+
+    // A pending revision request is settled by moving the work to someone else or by changing the date
+    if (task.status === 'Revision Requested' && (changes.includes('assignee') || changes.includes('deadline'))) {
+      task.status = 'Accepted';
+      task.proposedDeadline = null;
+      task.remarks = '';
     }
 
     const entry = { action: "Task Edited", remarks: "Edited: " + changes.join(', '), timestamp: new Date() };
@@ -1879,6 +1888,7 @@ exports.handleRevision = async (req, res) => {
         task.originalDeadline = task.originalDeadline || oldDeadline;
         task.deadline = newDeadline2;
         task.revisedAt = new Date();
+        task.revisedByDoerId = task.doerId?._id || task.doerId;
         task.status = 'Accepted';
         task.proposedDeadline = null;
         task.remarks = '';
@@ -1946,6 +1956,12 @@ exports.handleRevision = async (req, res) => {
         return res.status(400).json({ message: "Invalid deadline date." });
       }
 
+      // Remember the old deadline so the task shows as "Revised" once the new date is approved
+      if (!task.originalDeadline && task.deadline && new Date(finalDeadline).getTime() !== new Date(task.deadline).getTime()) {
+        task.originalDeadline = task.deadline;
+        task.revisedAt = new Date();
+        task.revisedByDoerId = task.doerId?._id || task.doerId;
+      }
       task.deadline = new Date(finalDeadline);
       task.status = 'Accepted';
       task.remarks = "";
@@ -2183,6 +2199,8 @@ exports.respondToTask = async (req, res) => {
     }
 
     // 3. UPDATE TASK STATE & AUDIT LOG
+    // Work that was Completed and goes back to Accepted is the assigner sending it back: log it as such
+    const sentBack = status === 'Accepted' && task.status === 'Completed';
     task.status = status;
     // Bug fix: remarks were only ever saved to task.remarks for "Revision
     // Requested" and "Completed" - every OTHER status change (importantly,
@@ -2217,7 +2235,7 @@ exports.respondToTask = async (req, res) => {
 
     // CRITICAL: Records the exact person who clicked "Done"
     task.history.push({
-      action: status,
+      action: sentBack ? 'Sent Back' : status,
       performedBy: doerId || task.doerId,
       timestamp: new Date(),
       remarks: remarks || `Mission telemetry synced to ${status}`,

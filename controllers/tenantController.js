@@ -610,8 +610,8 @@ exports.bulkAddTasks = async (req, res) => {
           assignerId:  assigner?._id,
           assignerName:assigner?.name || task['Created By'],
           deadline:    task['Deadline'] ? new Date(task['Deadline']) : null,
-          priority:    task['Priority'] || 'medium',
-          status:      'pending',
+          priority:    (() => { const v = String(task['Priority'] || task.priority || 'Medium').trim().toLowerCase(); return ({ high: 'High', low: 'Low', urgent: 'Urgent' })[v] || 'Medium'; })(),
+          status:      'Accepted',
         });
         results.success++;
       } catch (err) {
@@ -898,7 +898,7 @@ exports.loginEmployee = async (req, res) => {
         tenantId: tenant._id
       },
       process.env.JWT_SECRET || 'your_secret_key',
-      { expiresIn: '1d' }
+      { expiresIn: process.env.JWT_EXPIRES_IN || '15d' }
     );
 
     // Log login activity
