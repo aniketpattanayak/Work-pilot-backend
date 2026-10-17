@@ -8,6 +8,7 @@ const moment = require('moment');
 const { calculateNextDate } = require('../utils/scheduler');
 const personalSchema = require('../models/PersonalTask').schema;
 const employeeModel = require('../models/Employee');
+const Tenant = require('../models/Tenant');
 
 const OID = (v) => mongoose.Types.ObjectId.isValid(v);
 const YMD = /^\d{4}-\d{2}-\d{2}$/;
@@ -58,6 +59,27 @@ function shape(t, today, { forOwner = true } = {}) {
   if (forOwner) o.sharedWith = t.sharedWith || [];
   return o;
 }
+
+
+// Super-admin on/off switch (Tenant.superAdmin.features.personalTasks). Missing = on, so existing
+// companies keep working until the switch is turned off. Cached briefly to avoid a lookup per request.
+const flagCache = new Map();
+exports.requireEnabled = async (req, res, next) => {
+  try {
+    const tid = tenantOf(req);
+    if (!tid) return next();
+    const hit = flagCache.get(tid);
+    let on;
+    if (hit && hit.exp > Date.now()) on = hit.on;
+    else {
+      const t = await Tenant.findById(tid).select('superAdmin.features.personalTasks').lean();
+      on = t?.superAdmin?.features?.personalTasks !== false;
+      flagCache.set(tid, { on, exp: Date.now() + 30 * 1000 });
+    }
+    if (!on) return res.status(403).json({ message: 'Personal Tasks is switched off for your company.', disabled: true });
+    next();
+  } catch (e) { res.status(500).json({ message: e.message }); }
+};
 
 exports.listMine = async (req, res) => {
   try {

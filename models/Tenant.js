@@ -225,6 +225,7 @@ const TenantSchema = new mongoose.Schema({
     features: {
       // Task modules
       tasks:        { type: Boolean, default: true },  // Manage Tasks + My Tasks
+      personalTasks:{ type: Boolean, default: true },  // Personal Tasks (private to-do / checklist tab)
       checklist:    { type: Boolean, default: true },  // Manage Checklist
       fms:          { type: Boolean, default: true },  // Flow Management
       // Communication

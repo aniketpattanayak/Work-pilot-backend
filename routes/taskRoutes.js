@@ -83,7 +83,7 @@ router.put('/company/:id/resume', authMiddleware, resumeSubscription);
 router.get('/auth/me', authMiddleware, subscriptionGuard, tenantDbMiddleware, getProfile);
 // ─── PERSONAL TASKS (private to-do / checklist; never counted anywhere) ─────
 const personalTaskController = require('../controllers/personalTaskController');
-const personalBase = [authMiddleware, subscriptionGuard, tenantDbMiddleware];
+const personalBase = [authMiddleware, subscriptionGuard, tenantDbMiddleware, personalTaskController.requireEnabled];
 router.get('/personal', ...personalBase, personalTaskController.listMine);
 router.post('/personal', ...personalBase, personalTaskController.create);
 router.put('/personal/reorder', ...personalBase, personalTaskController.reorder);
