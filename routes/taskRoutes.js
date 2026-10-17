@@ -248,6 +248,12 @@ router.put('/coordinator-force-done', authMiddleware, subscriptionGuard, tenantD
 // rejecting a task) - either picked from storage or captured live from the
 // camera; the browser side decides which (routes/taskRoutes.js has no say
 // in that, it just accepts the files either way the field arrives).
+router.get('/upload-config', authMiddleware, async (req, res) => {
+  try {
+    const mb = await _upload.getUploadLimitMb(req.user.tenantId);
+    res.json({ maxFileMb: mb });
+  } catch (e) { res.json({ maxFileMb: _upload.DEFAULT_LIMIT_MB }); }
+});
 router.put('/respond', authMiddleware, subscriptionGuard, tenantDbMiddleware, ...useUpload(_upload.array('evidence', 6)), taskController.respondToTask);
 router.post('/send-reminder', authMiddleware, subscriptionGuard, tenantDbMiddleware, taskController.sendWhatsAppReminder);
 

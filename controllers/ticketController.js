@@ -30,7 +30,7 @@ exports.createTicket = async (req, res) => {
       mediaFiles = req.files.map(file => ({
         fileName: file.originalname,
         fileUrl: file.location || file.path,
-        fileType: file.mimetype.startsWith('video') ? 'video' : 'image'
+        fileType: (file.mimetype || '').startsWith('video') ? 'video' : (file.mimetype || '').startsWith('image') ? 'image' : 'file'
       }));
     }
 

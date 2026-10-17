@@ -247,22 +247,30 @@ exports.processScheduledPauses = async (req, res) => {
 exports.updateLimits = async (req, res) => {
   try {
     const { tenantId } = req.params;
-    const { employeeLimit, whatsappLimit } = req.body;
+    const { employeeLimit, whatsappLimit, uploadLimitMb } = req.body;
 
     const update = {};
     if (employeeLimit !== undefined) update['superAdmin.employeeLimit'] = Number(employeeLimit);
     if (whatsappLimit !== undefined) update['superAdmin.whatsappLimit'] = Number(whatsappLimit);
+    if (uploadLimitMb !== undefined) {
+      const mb = Number(uploadLimitMb);
+      if (!Number.isFinite(mb) || mb < 1 || mb > 100) {
+        return res.status(400).json({ message: 'Upload limit must be between 1 and 100 MB' });
+      }
+      update['superAdmin.uploadLimitMb'] = mb;
+    }
 
     await Tenant.findByIdAndUpdate(tenantId, { $set: update });
 
     await ActivityLog.create({
       tenantId, employeeName: 'SuperAdmin', action: 'limit_changed',
-      description: `Limits updated: employees=${employeeLimit}, whatsapp=${whatsappLimit}`,
+      description: `Limits updated: employees=${employeeLimit}, whatsapp=${whatsappLimit}, uploadMb=${uploadLimitMb}`,
     });
 
+    require('../utils/s3Uploader').clearUploadLimitCache(tenantId);
     res.json({ message: 'Limits updated' });
   } catch (err) {
-    res.status(500).json({ message: 'Failed to update limits' });
+    console.error('[SuperAdmin] updateLimits error:', err.message); res.status(500).json({ message: 'Failed to update limits' });
   }
 };
 

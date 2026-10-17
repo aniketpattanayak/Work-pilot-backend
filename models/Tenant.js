@@ -214,6 +214,7 @@ const TenantSchema = new mongoose.Schema({
     // Limits
     employeeLimit:   { type: Number, default: 50 },   // max employees allowed
     whatsappLimit:   { type: Number, default: 1000 },  // max WA msgs per month
+    uploadLimitMb:   { type: Number, default: 10 },    // max size (MB) of each uploaded file
 
     // Custom database URI (optional — if set, tenant uses their own MongoDB)
     customMongoUri:    { type: String, default: '' },
