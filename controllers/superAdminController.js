@@ -515,3 +515,80 @@ exports.setAiAssistant = async (req, res) => {
     res.status(500).json({ message: 'Failed to update AI assistant settings', error: err.message });
   }
 };
+
+// ─── VOICE AI MODULE (BETA) ───────────────────────────────────────────────────
+// Superadmin-only. The module is OFF for every company until switched on here, and even then
+// only employees flagged voiceBetaUser with a verified phone are ever called or answered.
+exports.getVoiceSettings = async (req, res) => {
+  try {
+    const tenant = await Tenant.findById(req.params.tenantId);
+    if (!tenant) return res.status(404).json({ message: 'Tenant not found' });
+    const M = await getTenantModels(tenant._id, tenant.superAdmin?.customMongoUri || '');
+    const people = await M.Employee.find({ tenantId: tenant._id }).select('name roles voiceBetaUser voicePhone voicePhoneVerified voicePhoneVerifiedAt');
+    res.json({ voiceModuleEnabled: tenant.superAdmin?.voiceModuleEnabled === true, people });
+  } catch (err) {
+    res.status(500).json({ message: 'Failed to load voice settings', error: err.message });
+  }
+};
+
+exports.setVoiceModule = async (req, res) => {
+  try {
+    const { tenantId } = req.params;
+    const { enabled } = req.body;
+    if (typeof enabled !== 'boolean') return res.status(400).json({ message: '"enabled" must be true or false' });
+    const tenant = await Tenant.findById(tenantId);
+    if (!tenant) return res.status(404).json({ message: 'Tenant not found' });
+    await Tenant.updateOne({ _id: tenantId }, { $set: { 'superAdmin.voiceModuleEnabled': enabled } });
+    if (!enabled) {
+      // Switching a company off also cancels its waiting follow-up calls.
+      await require('../models/VoiceCallLog').updateMany({ tenantId, callbackStatus: 'pending' }, { $set: { callbackStatus: 'cancelled' } });
+    }
+    await ActivityLog.create({ tenantId, employeeName: 'SuperAdmin', action: 'limit_changed', description: `Voice module (beta) ${enabled ? 'enabled' : 'disabled'}` });
+    res.json({ message: `Voice module ${enabled ? 'enabled' : 'disabled'}`, voiceModuleEnabled: enabled });
+  } catch (err) {
+    res.status(500).json({ message: 'Failed to update voice module', error: err.message });
+  }
+};
+
+exports.setVoiceUser = async (req, res) => {
+  try {
+    const { tenantId, employeeId } = req.params;
+    const { voiceBetaUser, voicePhone, voicePhoneVerified } = req.body;
+    const { normalizePhone } = require('../utils/voice/phone');
+    const tenant = await Tenant.findById(tenantId);
+    if (!tenant) return res.status(404).json({ message: 'Tenant not found' });
+    if (tenant.superAdmin?.voiceModuleEnabled !== true) {
+      return res.status(409).json({ message: 'Enable the voice module for this company first.' });
+    }
+    const M = await getTenantModels(tenant._id, tenant.superAdmin?.customMongoUri || '');
+    const emp = await M.Employee.findOne({ _id: employeeId, tenantId });
+    if (!emp) return res.status(404).json({ message: 'Employee not found' });
+
+    if (voicePhone !== undefined) {
+      const p = normalizePhone(voicePhone);
+      if (voicePhone !== '' && !p) return res.status(400).json({ message: 'That does not look like a valid phone number.' });
+      if (p !== (emp.voicePhone || '')) { emp.voicePhone = p; emp.voicePhoneVerified = false; emp.voicePhoneVerifiedAt = undefined; }
+    }
+    if (typeof voicePhoneVerified === 'boolean') {
+      if (voicePhoneVerified && !emp.voicePhone) return res.status(400).json({ message: 'Add a phone number before verifying it.' });
+      emp.voicePhoneVerified = voicePhoneVerified;
+      emp.voicePhoneVerifiedAt = voicePhoneVerified ? new Date() : undefined;
+    }
+    if (typeof voiceBetaUser === 'boolean') {
+      if (voiceBetaUser && !(emp.voicePhone && emp.voicePhoneVerified)) {
+        return res.status(400).json({ message: 'A beta user needs a verified phone number first.' });
+      }
+      emp.voiceBetaUser = voiceBetaUser;
+    }
+    // A number may belong to only one verified beta user in a company (inbound calls are matched by number).
+    if (emp.voiceBetaUser && emp.voicePhoneVerified) {
+      const clash = await M.Employee.findOne({ tenantId, _id: { $ne: emp._id }, voicePhone: emp.voicePhone, voicePhoneVerified: true, voiceBetaUser: true });
+      if (clash) return res.status(409).json({ message: `That number is already used by ${clash.name}.` });
+    }
+    await emp.save();
+    await ActivityLog.create({ tenantId, employeeName: 'SuperAdmin', action: 'limit_changed', description: `Voice beta for ${emp.name}: beta=${emp.voiceBetaUser}, phone verified=${emp.voicePhoneVerified}` });
+    res.json({ message: 'Voice settings saved', person: { _id: emp._id, name: emp.name, voiceBetaUser: emp.voiceBetaUser, voicePhone: emp.voicePhone, voicePhoneVerified: emp.voicePhoneVerified } });
+  } catch (err) {
+    res.status(500).json({ message: 'Failed to update voice user', error: err.message });
+  }
+};

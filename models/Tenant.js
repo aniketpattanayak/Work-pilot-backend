@@ -246,6 +246,11 @@ const TenantSchema = new mongoose.Schema({
       settings:     { type: Boolean, default: true },  // Settings tab
     },
 
+    // Voice AI calling module (BETA). Default OFF; only the Superadmin can switch it on
+    // (PUT /api/superadmin/tenants/:tenantId/voice). Even when on, only employees flagged
+    // voiceBetaUser (with a verified phone) are ever called or answered.
+    voiceModuleEnabled: { type: Boolean, default: false },
+
     // Billing
     plan:        { type: String, enum: ['free', 'starter', 'pro', 'enterprise', 'custom'], default: 'free' },
     amount:      { type: Number, default: 0 },

@@ -52,6 +52,12 @@ const EmployeeSchema = new mongoose.Schema({
   managedDoers:    [{ type: mongoose.Schema.Types.ObjectId, ref: 'Employee' }],
   managedAssigners:[{ type: mongoose.Schema.Types.ObjectId, ref: 'Employee' }],
 
+  // Voice AI calling module (BETA) - all default OFF, set only by the Superadmin.
+  voiceBetaUser:         { type: Boolean, default: false },
+  voicePhone:            { type: String, default: '' },     // E.164, e.g. +919876543210
+  voicePhoneVerified:    { type: Boolean, default: false },
+  voicePhoneVerifiedAt:  { type: Date },
+
   totalPoints: { type: Number, default: 0 },
   workOnSunday:{ type: Boolean, default: false },
   shadowName:  { type: String },

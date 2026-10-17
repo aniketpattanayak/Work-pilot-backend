@@ -27,5 +27,9 @@ router.put('/tenants/:tenantId/custom-whatsapp', authMiddleware, superAdminOnly,
 
 // Phase 4: AI assistant per-company kill switch + monthly usage limit.
 router.put('/tenants/:tenantId/ai-assistant', authMiddleware, superAdminOnly, c.setAiAssistant);
+// Voice AI module (beta) - Superadmin only
+router.get('/tenants/:tenantId/voice',                       authMiddleware, superAdminOnly, c.getVoiceSettings);
+router.put('/tenants/:tenantId/voice',                       authMiddleware, superAdminOnly, c.setVoiceModule);
+router.put('/tenants/:tenantId/voice/users/:employeeId',     authMiddleware, superAdminOnly, c.setVoiceUser);
 
 module.exports = router;

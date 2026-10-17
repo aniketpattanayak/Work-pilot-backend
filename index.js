@@ -20,6 +20,7 @@ const ticketRoutes = require('./routes/ticketRoutes');
 const taskRoutes = require('./routes/taskRoutes');
 const reportRoutes = require('./routes/reportRoutes');
 const aiAssistantRoutes = require('./routes/aiAssistantRoutes');
+const voiceRoutes = require('./routes/voiceRoutes');
 
 // --- 2. IMPORT SERVICES & SCHEDULERS ---
 const initReportScheduler = require('./jobs/cronScheduler');
@@ -82,6 +83,7 @@ app.use('/api/tickets', ticketRoutes);
 app.use('/api/reports', reportRoutes);
 app.use('/api/tasks', taskRoutes);
 app.use('/api/ai-assistant', aiAssistantRoutes); // Phase 4 AI assistant (default OFF per-tenant)
+app.use('/api/voice', voiceRoutes);               // Voice AI module (beta; gated per company by the Superadmin)
 
 // Catch-all 404
 app.use((req, res) => {
@@ -121,6 +123,9 @@ mongoose.connect(process.env.MONGO_URI)
 
     // New FMS WhatsApp notification engine
     startFmsNotifier();
+
+    // Voice AI callbacks (inert unless VOICE_SCHEDULER_ENABLED=true)
+    require('./jobs/voiceScheduler').start();
   })
   .catch(err => console.log('❌ DB Connection Error:', err));
 
