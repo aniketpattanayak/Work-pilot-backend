@@ -81,6 +81,19 @@ router.put('/company/:id/resume', authMiddleware, resumeSubscription);
 
 // Profile
 router.get('/auth/me', authMiddleware, subscriptionGuard, tenantDbMiddleware, getProfile);
+// ─── PERSONAL TASKS (private to-do / checklist; never counted anywhere) ─────
+const personalTaskController = require('../controllers/personalTaskController');
+const personalBase = [authMiddleware, subscriptionGuard, tenantDbMiddleware];
+router.get('/personal', ...personalBase, personalTaskController.listMine);
+router.post('/personal', ...personalBase, personalTaskController.create);
+router.put('/personal/reorder', ...personalBase, personalTaskController.reorder);
+router.get('/personal/share-options', ...personalBase, personalTaskController.shareOptions);
+router.get('/personal/shared-with-me', ...personalBase, personalTaskController.sharedWithMe);
+router.put('/personal/:id', ...personalBase, personalTaskController.update);
+router.post('/personal/:id/complete', ...personalBase, personalTaskController.complete);
+router.put('/personal/:id/share', ...personalBase, personalTaskController.setShare);
+router.delete('/personal/:id', ...personalBase, personalTaskController.remove);
+
 
 // Employee management
 router.get('/employees/:tenantId', authMiddleware, subscriptionGuard, tenantDbMiddleware, sameTenantOnly, getEmployeeList);
