@@ -26,7 +26,8 @@ const tenantDbMiddleware = async (req, res, next) => {
       const modelFiles = [
         'Employee', 'DelegationTask', 'ChecklistTask',
         'FlowInstance', 'FlowTemplate', 'Tenant',
-        'Chat', 'Conversation', 'Message', 'OrderSubmission', 'Ticket', 'PersonalTask'
+        'Chat', 'Conversation', 'Message', 'OrderSubmission', 'Ticket', 'PersonalTask',
+        'CustomFieldDefinition', 'TablePreference'
       ];
       for (const name of modelFiles) {
         if (!conn.models[name]) {

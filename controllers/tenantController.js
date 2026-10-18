@@ -4,6 +4,7 @@ const Employee = require('../models/Employee');
 const bcrypt = require('bcryptjs');
 const { log: logActivity } = require('../utils/activityLogger');
 const jwt = require('jsonwebtoken');
+const { loadActiveDefs, cleanCustomFields } = require('../utils/customFields');
 const DelegationTask = require('../models/DelegationTask');
 const ChecklistTask = require('../models/ChecklistTask');
 const { notifyTenant } = require('../utils/notify');
@@ -447,6 +448,12 @@ exports.addEmployee = async (req, res) => {
       return res.status(400).json({ message: 'Please choose a valid joining date (not in the future).' });
     }
 
+    // 0c. Company-defined extra fields (none defined = nothing to check, same as before)
+    const cfDefs = await loadActiveDefs(req, 'employee', tenantId);
+    const cf = cleanCustomFields(cfDefs, req.body.customFields, { mode: 'create' });
+    if (cf.errors.length) return res.status(400).json({ message: cf.errors[0], errors: cf.errors });
+    const customFieldValues = Object.fromEntries(Object.entries(cf.values).filter(([, v]) => v !== null));
+
     // 1. Password Hashing (Preserved)
     const salt = await bcrypt.genSalt(10);
     const hashedPassword = await bcrypt.hash(password, salt);
@@ -454,6 +461,7 @@ exports.addEmployee = async (req, res) => {
     // 2. Initialize and Save Employee
     const newEmployee = new Employee({
       tenantId, name, email, department, whatsappNumber,
+      ...(Object.keys(customFieldValues).length ? { customFields: customFieldValues } : {}),
       workOnSunday: workOnSunday || false,
       location: typeof location === 'string' ? location.trim().slice(0, 60) : undefined,
       roles: (Array.isArray(roles) && roles.length > 0) ? roles : ['Doer'],
@@ -1109,6 +1117,15 @@ exports.updateEmployee = async (req, res) => {
     if (password && password.trim() !== "") {
       const salt = await bcrypt.genSalt(10);
       updateData.password = await bcrypt.hash(password, salt);
+    }
+
+    // Company-defined extra fields: only the ones sent are changed (so other values and old records are untouched)
+    if (req.body.customFields !== undefined) {
+      const target = await Employee.findById(id).select('tenantId').lean();
+      const cfDefs = await loadActiveDefs(req, 'employee', (target && target.tenantId) || req.user?.tenantId);
+      const cf = cleanCustomFields(cfDefs, req.body.customFields, { mode: 'update' });
+      if (cf.errors.length) return res.status(400).json({ message: cf.errors[0], errors: cf.errors });
+      for (const [k, v] of Object.entries(cf.values)) updateData[`customFields.${k}`] = v;
     }
 
     const before = await Employee.findById(id).select('name roles department whatsappNumber').lean();

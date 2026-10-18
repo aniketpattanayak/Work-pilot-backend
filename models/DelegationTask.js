@@ -81,7 +81,14 @@ const DelegationTaskSchema = new mongoose.Schema({
     },
   ],
 
+  // Company-defined extra fields (see CustomFieldDefinition). Old records simply have an empty map.
+  customFields: { type: Map, of: mongoose.Schema.Types.Mixed, default: () => ({}) },
+
   createdAt: { type: Date, default: Date.now },
+}, {
+  // Map values (customFields) must come out as plain objects, also from toObject()
+  toObject: { flattenMaps: true },
+  toJSON:   { flattenMaps: true },
 });
 
 // ─── INDEXES ─────────────────────────────────────────────────────────────────

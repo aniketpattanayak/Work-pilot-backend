@@ -8,6 +8,7 @@ const { isViewerOnly } = require('../middleware/auth');
 const { notifyTenant } = require('../utils/notify');
 const moment          = require('moment');
 const { calculateNextDate } = require('../utils/scheduler');
+const { loadActiveDefs, cleanCustomFields } = require('../utils/customFields');
 const { getReqModels } = require('../utils/reqModels');
 
 async function M(req) {
@@ -625,6 +626,21 @@ exports.updateTask = async (req, res) => {
         task.coworkers = followers;
         changes.push('followers');
       }
+    }
+
+    if (req.body.customFields !== undefined) {
+      const cfDefs = await loadActiveDefs(req, 'delegation', task.tenantId);
+      const cf = cleanCustomFields(cfDefs, req.body.customFields, { mode: 'update' });
+      if (cf.errors.length) return res.status(400).json({ message: cf.errors[0], errors: cf.errors });
+      let cfChanged = false;
+      if (!task.customFields) task.customFields = {};
+      for (const [k, v] of Object.entries(cf.values)) {
+        const cur = task.customFields.get(k);
+        if ((cur === undefined ? null : cur) === v) continue;
+        if (v === null) task.customFields.delete(k); else task.customFields.set(k, v);
+        cfChanged = true;
+      }
+      if (cfChanged) changes.push('extra fields');
     }
 
     if (changes.length === 0) {
@@ -2386,6 +2402,14 @@ exports.createTask = async (req, res) => {
       } catch (e) {
         taskData.helperDoers = [];
       }
+    }
+
+    // --- COMPANY-DEFINED EXTRA FIELDS (none defined = nothing changes) ---
+    {
+      const cfDefs = await loadActiveDefs(req, 'delegation', req.user?.tenantId || taskData.tenantId);
+      const cf = cleanCustomFields(cfDefs, taskData.customFields, { mode: 'create' });
+      if (cf.errors.length) return res.status(400).json({ message: cf.errors[0], errors: cf.errors });
+      taskData.customFields = Object.fromEntries(Object.entries(cf.values).filter(([, v]) => v !== null));
     }
 
     // --- BULLETPROOF FILE PROCESSING ---

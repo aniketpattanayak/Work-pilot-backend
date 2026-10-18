@@ -17,7 +17,8 @@ const isViewerOnly = (user) =>
   user.roles.every((r) => String(r).toLowerCase() === 'viewer');
 
 const SAFE_METHODS = ['GET', 'HEAD', 'OPTIONS'];
-const VIEWER_WRITE_ALLOWLIST = [/\/tickets\/create\/?$/];
+// A view-only person may still save how THEIR OWN table columns are arranged.
+const VIEWER_WRITE_ALLOWLIST = [/\/tickets\/create\/?$/, /\/config\/table-preferences\/[a-z0-9_]+\/?$/];
 
 const authMiddleware = (req, res, next) => {
   const authHeader = req.headers.authorization;

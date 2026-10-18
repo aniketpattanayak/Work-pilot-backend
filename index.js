@@ -83,6 +83,7 @@ app.use('/api/tickets', ticketRoutes);
 app.use('/api/reports', reportRoutes);
 app.use('/api/tasks', taskRoutes);
 app.use('/api/ai-assistant', aiAssistantRoutes); // Phase 4 AI assistant (default OFF per-tenant)
+app.use('/api/config', require('./routes/configRoutes')); // custom fields + table column preferences
 app.use('/api/voice', voiceRoutes);               // Voice AI module (beta; gated per company by the Superadmin)
 
 // Catch-all 404
