@@ -22,10 +22,16 @@ async function notifyTenant(tenantId, toPhone, data) {
       const cfg = tenant?.companySettings?.whatsappTemplates?.[data && data.templateName];
       if (cfg) {
         if (cfg.enabled === false) return { skipped: true, reason: 'switched off by the company' };
-        out = { ...data, originalTemplateName: data.templateName };
-        if (cfg.providerTemplate) out.templateName = String(cfg.providerTemplate);
-        if (cfg.body) out.customBody = String(cfg.body);
-        if (cfg.senderPhoneId) out.senderPhoneId = String(cfg.senderPhoneId);
+        // Own names / wording / order only count when the company uses its OWN WhatsApp account;
+        // on the shared platform account only the on/off switch is honoured.
+        if (tenantKey) {
+          out = { ...data, originalTemplateName: data.templateName };
+          if (cfg.providerTemplate) out.templateName = String(cfg.providerTemplate);
+          if (cfg.body) out.customBody = String(cfg.body);
+          if (cfg.senderPhoneId) out.senderPhoneId = String(cfg.senderPhoneId);
+          if (cfg.language) out.language = String(cfg.language);
+          if (cfg.variableOrder) out.variableOrder = String(cfg.variableOrder).split(',').map(Number).filter((n) => n >= 1);
+        }
       }
     }
   } catch (e) {

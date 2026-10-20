@@ -6,6 +6,9 @@ const { TEMPLATES, BY_KEY: TPL } = require('../utils/notificationRegistry');
 const { reasonsOf, DEFAULT_REASONS } = require('../utils/dateChanges');
 
 const isAdmin = (u) => !!u && (u.isSuperAdmin || (Array.isArray(u.roles) && u.roles.includes('Admin')));
+// A company that connected its OWN WhatsApp account (its own key) may use its own approved templates;
+// companies on the platform's shared account may only switch messages on/off.
+const ownApiOf = (t) => !!(t && ((t.superAdmin && t.superAdmin.customWhatsappKey) || (t.whatsappConfig && t.whatsappConfig.apiKey)));
 const tenantIdOf = (req) => (req.user && req.user.tenantId) ? String(req.user.tenantId) : null;
 
 // GET /api/config/settings/effective  (any signed-in user): the on/off value of every switch
@@ -30,6 +33,7 @@ exports.getSettings = async (req, res) => {
     try { const raw = tenant?.superAdmin?.customWhatsappKey || tenant?.whatsappConfig?.apiKey; if (raw) provider = JSON.parse(raw).provider || 'doubletick'; } catch { /* a plain key = DoubleTick */ }
     res.json({
       provider,
+      ownApi: ownApiOf(tenant),
       dateReasons: reasonsOf(tenant),
       dateReasonsAreDefault: !(tenant && tenant.companySettings && Array.isArray(tenant.companySettings.dateChangeReasons) && tenant.companySettings.dateChangeReasons.length),
       switches: SWITCHES.filter((s) => !hidden.includes(s.key)).map((s) => ({ key: s.key, group: s.group, label: s.label, help: s.help, default: s.default, value: eff[s.key] })),
@@ -67,6 +71,11 @@ exports.saveTemplate = async (req, res) => {
     if (!def) return res.status(404).json({ message: 'Unknown WhatsApp message.' });
     const b = req.body || {};
     const out = {};
+    const tenantNow = await Tenant.findById(id).select('superAdmin.customWhatsappKey whatsappConfig.apiKey').lean();
+    if (!ownApiOf(tenantNow) && !req.user.isSuperAdmin) {
+      const touches = ['body', 'providerTemplate', 'senderPhoneId', 'variableOrder', 'language'].some((k) => b[k] !== undefined && String(b[k] || '').trim() !== '');
+      if (touches) return res.status(403).json({ message: 'Your company uses the shared WhatsApp account of the platform, so only the on/off switch can be changed. To use your own templates, connect your own WhatsApp account first.' });
+    }
     if (b.enabled !== undefined) { if (typeof b.enabled !== 'boolean') return res.status(400).json({ message: '"enabled" must be on or off.' }); out.enabled = b.enabled; }
     if (b.body !== undefined) {
       const body = String(b.body || '').trim();
@@ -79,6 +88,20 @@ exports.saveTemplate = async (req, res) => {
       const n = String(b.providerTemplate || '').trim();
       if (n && !/^[A-Za-z0-9_]{1,80}$/.test(n)) return res.status(400).json({ message: 'The approved template name can only have letters, numbers and underscores.' });
       out.providerTemplate = n;
+    }
+    if (b.language !== undefined) {
+      const n = String(b.language || '').trim();
+      if (n && !/^[A-Za-z]{2,3}(_[A-Za-z]{2})?$/.test(n)) return res.status(400).json({ message: 'The template language must look like en, hi or en_US.' });
+      out.language = n;
+    }
+    if (b.variableOrder !== undefined) {
+      const n = String(b.variableOrder || '').replace(/\s+/g, '');
+      if (n) {
+        const nums = n.split(',').map(Number);
+        if (nums.some((x) => !Number.isInteger(x) || x < 1 || x > def.variables.length)) return res.status(400).json({ message: `The order can only use numbers 1 to ${def.variables.length}, separated by commas, for example 2,1,3.` });
+        if (nums.length > 20) return res.status(400).json({ message: 'The order is too long.' });
+      }
+      out.variableOrder = n;
     }
     if (b.senderPhoneId !== undefined) {
       const n = String(b.senderPhoneId || '').trim();

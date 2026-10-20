@@ -8,19 +8,23 @@ const cleanPhone = (phone) => {
   return p;
 };
 
+// A company's own template may use the values in another order (e.g. 2,1,3)
+const ordered = (vars, order) => (Array.isArray(vars) && Array.isArray(order) && order.length) ? order.map((n) => vars[n - 1]) : vars;
+
 const sendViaDoubleTick = async (toPhone, data, apiKey) => {
   const phone = cleanPhone(toPhone);
   const templateName = data.templateName || 'api_otp_';
+  const lang = data.language || 'en';
   const placeholders = Array.isArray(data.variables)
-    ? data.variables.map(v => String(v ?? ''))
+    ? ordered(data.variables, data.variableOrder).map(v => String(v ?? ''))
     : [String(data ?? '')];
 
   const payload = {
     messages: [{
       to: `+${phone}`,
       templateName,
-      language: 'en',
-      content: { templateName, language: 'en', templateData: { body: { placeholders } } }
+      language: lang,
+      content: { templateName, language: lang, templateData: { body: { placeholders } } }
     }]
   };
 
@@ -32,7 +36,7 @@ const sendViaDoubleTick = async (toPhone, data, apiKey) => {
   } catch {
     const fallback = {
       messages: [{
-        to: `+${phone}`, templateName, language: 'en',
+        to: `+${phone}`, templateName, language: lang,
         components: [{ type: 'body', parameters: placeholders.map(text => ({ type: 'text', text })) }]
       }]
     };
@@ -118,7 +122,7 @@ const sendViaWati = async (toPhone, data, config) => {
   const { apiEndpoint, apiKey } = config;
   const templateName = data.templateName || 'api_otp_';
   const parameters = Array.isArray(data.variables)
-    ? data.variables.map((v, i) => ({ name: String(i + 1), value: String(v ?? '') }))
+    ? ordered(data.variables, data.variableOrder).map((v, i) => ({ name: String(i + 1), value: String(v ?? '') }))
     : [];
 
   const res = await axios.post(
