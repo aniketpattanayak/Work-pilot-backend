@@ -81,6 +81,48 @@ const DelegationTaskSchema = new mongoose.Schema({
     },
   ],
 
+  // ── Deadline rules ──
+  // true = followers may move the date; false/missing (all old tasks) = a follower must ask and the assigner decides
+  followersCanChangeDate: { type: Boolean },
+  // Every change of the deadline: who, when, old/new, why. Oldest first. Never edited afterwards.
+  dateChanges: [{
+    _id: false,
+    at:          { type: Date, default: Date.now },
+    byId:        { type: mongoose.Schema.Types.ObjectId, ref: 'Employee' },
+    byName:      String,
+    byRole:      { type: String, enum: ['doer', 'assigner', 'admin', 'coordinator', 'follower', 'approved', 'hold'], default: 'assigner' },
+    oldDeadline: Date,
+    newDeadline: Date,
+    reason:      String,   // a choice from the company's list
+    reasonNote:  String,
+    shortened:   { type: Boolean, default: false },
+  }],
+  // A follower's waiting request (when followers may not change the date themselves)
+  pendingDateRequest: {
+    byId: { type: mongoose.Schema.Types.ObjectId, ref: 'Employee' },
+    byName: String,
+    proposedDeadline: Date,
+    reason: String,
+    reasonNote: String,
+    at: Date,
+  },
+  // On hold: the clock is paused while the doer waits for someone else
+  onHold: {
+    isOn:       { type: Boolean, default: false },
+    since:      Date,
+    reason:     String,
+    reasonNote: String,
+    byId:       { type: mongoose.Schema.Types.ObjectId, ref: 'Employee' },
+  },
+
+  // ── Sub tasks (a sub task is an ordinary task that points to its main task) ──
+  parentTask: {
+    type:   { type: String, enum: ['Delegation', 'Checklist', 'FMS'] },
+    taskId: { type: String },          // id of the main task (string: FMS / checklist ids differ)
+    title:  { type: String },
+    key:    { type: String },          // which date/instance for checklist or flow step
+  },
+
   // Company-defined extra fields (see CustomFieldDefinition). Old records simply have an empty map.
   customFields: { type: Map, of: mongoose.Schema.Types.Mixed, default: () => ({}) },
 
@@ -109,5 +151,6 @@ DelegationTaskSchema.index({ 'helperDoers.helperId': 1 });
 
 // Deadline range queries (daily briefings, overdue detection)
 DelegationTaskSchema.index({ deadline: 1, status: 1 });
+DelegationTaskSchema.index({ 'parentTask.type': 1, 'parentTask.taskId': 1 });
 
 module.exports = mongoose.model('DelegationTask', DelegationTaskSchema);

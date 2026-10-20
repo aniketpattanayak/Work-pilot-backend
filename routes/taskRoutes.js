@@ -241,6 +241,15 @@ router.post('/create-task', authMiddleware, subscriptionGuard, tenantDbMiddlewar
 );
 router.delete('/:taskId', authMiddleware, subscriptionGuard, tenantDbMiddleware, taskController.deleteTask);
 router.post('/handle-revision', authMiddleware, subscriptionGuard, tenantDbMiddleware, taskController.handleRevision);
+// Deadline rules (see controllers/dateController.js)
+const dateCtl = require('../controllers/dateController');
+router.get('/date-reasons', authMiddleware, subscriptionGuard, tenantDbMiddleware, dateCtl.getReasons);
+router.post('/date-check', authMiddleware, subscriptionGuard, tenantDbMiddleware, dateCtl.checkDate);
+router.get('/date-changes-report', authMiddleware, subscriptionGuard, tenantDbMiddleware, dateCtl.report);
+router.post('/:taskId/change-date', authMiddleware, subscriptionGuard, tenantDbMiddleware, dateCtl.changeDate);
+router.post('/:taskId/date-request', authMiddleware, subscriptionGuard, tenantDbMiddleware, dateCtl.decideRequest);
+router.post('/:taskId/hold', authMiddleware, subscriptionGuard, tenantDbMiddleware, dateCtl.putOnHold);
+router.post('/:taskId/resume', authMiddleware, subscriptionGuard, tenantDbMiddleware, dateCtl.resumeTask);
 router.post('/assign-onward', authMiddleware, subscriptionGuard, tenantDbMiddleware, taskController.assignOnward);
 router.post('/coordinator-force-done', authMiddleware, subscriptionGuard, tenantDbMiddleware, taskController.coordinatorForceDone);
 router.put('/coordinator-force-done', authMiddleware, subscriptionGuard, tenantDbMiddleware, taskController.coordinatorForceDone);

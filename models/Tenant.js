@@ -145,6 +145,7 @@ const TenantSchema = new mongoose.Schema({
   // Nothing saved here = today's behaviour (see utils/settingsRegistry.js).
   companySettings: {
     switches:          { type: mongoose.Schema.Types.Mixed, default: {} },   // { 'delegation.doerRevise': false }
+    dateChangeReasons: { type: [String], default: undefined },           // the list people pick a deadline-change reason from
     whatsappTemplates: { type: mongoose.Schema.Types.Mixed, default: {} }    // { new_task_delegation_v2: { enabled, body, providerTemplate, senderPhoneId } }
   },
 

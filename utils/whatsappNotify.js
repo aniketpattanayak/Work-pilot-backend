@@ -99,7 +99,10 @@ const sendViaMaytapi = async (toPhone, data, config) => {
   // A company-edited wording wins; otherwise the built-in wording below.
   const message = data.customBody
     ? require('./notificationRegistry').render(data.customBody, variables)
-    : (renderer ? renderer(variables, data) : (variables.join('\n') || data.templateName || String(data)));
+    : (renderer ? renderer(variables, data) : (() => {
+        const def = require('./notificationRegistry').BY_KEY[data.originalTemplateName || data.templateName];
+        return def ? require('./notificationRegistry').render(def.body, variables) : (variables.join('\n') || data.templateName || String(data));
+      })());
 
   const res = await axios.post(
     `https://api.maytapi.com/api/${productId}/${phoneId}/sendMessage`,

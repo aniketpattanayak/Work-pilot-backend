@@ -567,6 +567,7 @@ exports.updateTask = async (req, res) => {
 
     const { title, description, doerId, deadline, priority, coworkers } = req.body;
     const changes = [];
+    let dateChangeInfo = null; // set when the deadline moves (recorded after every check has passed)
 
     if (typeof title === 'string' && title.trim() && title.trim() !== task.title) {
       task.title = title.trim();
@@ -600,7 +601,13 @@ exports.updateTask = async (req, res) => {
       if (newDay !== oldIso.slice(0, 10)) {
         const d = new Date(newDay + 'T' + oldIso.slice(11));
         if (isNaN(d.getTime())) return res.status(400).json({ message: "Invalid deadline." });
-        task.deadline = d;
+        const DC = require('../utils/dateChanges');
+        const tenantDoc = await _Tenant.findById(task.tenantId).lean();
+        const lock = DC.blockedReason(task, tenantDoc);
+        if (lock) return res.status(400).json({ message: lock });
+        const rs = DC.checkReason(tenantDoc, req.body);
+        if (rs.error) return res.status(400).json({ message: rs.error });
+        dateChangeInfo = { d, rs, tenantDoc };
         changes.push('deadline');
       }
     }
@@ -659,8 +666,37 @@ exports.updateTask = async (req, res) => {
     if (!task.history) task.history = [];
     task.history.push(entry);
 
+    let moved = null;
+    if (dateChangeInfo) {
+      const DC = require('../utils/dateChanges');
+      const { Employee: Emp } = getModels(req);
+      let actorName = 'Admin';
+      try { const me = await Emp.findById(req.user.id).select('name').lean(); if (me?.name) actorName = me.name; } catch (e) { /* keep default */ }
+      const isAsg = String(task.assignerId) === String(req.user?.id);
+      moved = DC.applyDateChange(task, {
+        actor: { id: mongoose.Types.ObjectId.isValid(req.user?.id) ? req.user.id : undefined, name: actorName },
+        newDeadline: dateChangeInfo.d, reason: dateChangeInfo.rs.reason, reasonNote: dateChangeInfo.rs.reasonNote,
+        byRole: isAsg ? 'assigner' : 'admin',
+      });
+      if (task.pendingDateRequest && task.pendingDateRequest.byId) task.pendingDateRequest = undefined;
+    }
+
     await task.save();
-    res.status(200).json({ message: "Task updated successfully", task });
+
+    let warnings = [];
+    if (moved) {
+      try {
+        const DC = require('../utils/dateChanges');
+        const { Employee: Emp } = getModels(req);
+        const doerDoc = await Emp.findById(task.doerId).select('name whatsappNumber').lean();
+        warnings = await DC.dateWarnings({ tenant: dateChangeInfo.tenantDoc, doerId: task.doerId, date: moved.newDeadline, models: { LeaveRequest: (req.db && (() => { try { return req.db.model('LeaveRequest'); } catch (e) { return null; } })()) || require('../models/LeaveRequest') } });
+        if (require('../utils/settingsRegistry').isOn(dateChangeInfo.tenantDoc, 'dates_notifyDoer') && String(task.doerId) !== String(req.user?.id) && doerDoc?.whatsappNumber) {
+          const last = task.dateChanges[task.dateChanges.length - 1] || {};
+          await notifyTenant(task.tenantId, doerDoc.whatsappNumber, { templateName: 'task_deadline_changed', variables: [doerDoc.name, task.title, DC.fmt(moved.oldDeadline), DC.fmt(moved.newDeadline), last.byName || 'Admin', [last.reason, last.reasonNote].filter(Boolean).join(' - ') || 'Not given', `https://${dateChangeInfo.tenantDoc?.subdomain || 'portal'}.lrbcloud.ai/dashboard/my-tasks`].map(String) });
+        }
+      } catch (e) { console.error('Deadline change notify error:', e.message); }
+    }
+    res.status(200).json({ message: "Task updated successfully", task, warnings });
   } catch (error) {
     console.error("❌ updateTask error:", error.message);
     res.status(500).json({ message: "Failed to update task", error: error.message });
@@ -1859,6 +1895,12 @@ exports.handleRevision = async (req, res) => {
 
     const tenant = await Tenant.findById(task.tenantId);
 
+    // A finished task keeps its deadline (stops scores from changing quietly afterwards)
+    if (['Request', 'Approve'].includes(action)) {
+      const lock = require('../utils/dateChanges').blockedReason(task, tenant);
+      if (lock) return res.status(400).json({ message: lock });
+    }
+
     const companySubdomain = tenant?.subdomain || "portal";
     const loginLink = `https://${companySubdomain}.lrbcloud.ai/login`;
 
@@ -1906,6 +1948,11 @@ exports.handleRevision = async (req, res) => {
         const f = (d) => moment(d).utcOffset(330).format('DD MMM YYYY');
         task.originalDeadline = task.originalDeadline || oldDeadline;
         task.deadline = newDeadline2;
+        {
+          const DC = require('../utils/dateChanges');
+          const chosen = DC.checkReason({ companySettings: { switches: { dates_requireReason: false } } }, { reason: req.body.reason, reasonNote: reasonText });
+          DC.pushDateChange(task, { actor: { id: req.user?.id, name: task.doerId?.name || 'Doer' }, oldDeadline, newDeadline: newDeadline2, reason: chosen.error ? '' : chosen.reason, reasonNote: reasonText, byRole: 'doer' });
+        }
         task.revisedAt = new Date();
         task.revisedByDoerId = task.doerId?._id || task.doerId;
         task.status = 'Accepted';
@@ -1980,6 +2027,12 @@ exports.handleRevision = async (req, res) => {
         task.originalDeadline = task.deadline;
         task.revisedAt = new Date();
         task.revisedByDoerId = task.doerId?._id || task.doerId;
+      }
+      {
+        const DC = require('../utils/dateChanges');
+        if (task.deadline && new Date(finalDeadline).getTime() !== new Date(task.deadline).getTime()) {
+          DC.pushDateChange(task, { actor: { id: req.user?.id, name: task.assignerId?.name || 'Assigner' }, oldDeadline: task.deadline, newDeadline: finalDeadline, reason: '', reasonNote: task.remarks || 'Approved the doer\'s request', byRole: 'approved' });
+        }
       }
       task.deadline = new Date(finalDeadline);
       task.status = 'Accepted';
@@ -2147,6 +2200,11 @@ exports.respondToTask = async (req, res) => {
       if (!isAdmin && !isAssigner && !isDoer && !isCoordinator && !isHelper && !isInForwardChain && !isBuddy) {
         return res.status(403).json({ message: "You do not have permission to respond to this task." });
       }
+    }
+
+    // Finishing a task that is On hold ends the hold first, so the waiting time is not counted against the doer
+    if ((status === 'Completed' || status === 'Verified') && task.onHold && task.onHold.isOn) {
+      try { require('./dateController').endHold(task, { id: mongoose.Types.ObjectId.isValid(req.user?.id) ? req.user.id : undefined, name: 'Doer' }); } catch (e) { console.error('endHold error:', e.message); }
     }
 
     // --- PRESERVE: POINTS & ACHIEVEMENT ENGINE ---
@@ -2460,6 +2518,9 @@ exports.createTask = async (req, res) => {
       if (!allowRev || !Number.isInteger(ext) || ext < 1) ext = 0;
       taskData.maxExtensionDays = Math.min(ext, 90);
     }
+
+    // Followers may change the date unless the assigner un-ticked the box (missing = ticked for new tasks)
+    taskData.followersCanChangeDate = !(taskData.followersCanChangeDate === false || taskData.followersCanChangeDate === 'false');
 
     // --- SAVE TO DATABASE ---
     // Tasks are auto-accepted on creation: the doer no longer has to press "Accept".

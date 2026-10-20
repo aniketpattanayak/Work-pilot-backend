@@ -3,6 +3,7 @@
 const Tenant = require('../models/Tenant');
 const { SWITCHES, BY_KEY: SW, effective, valuesOf, hiddenOf } = require('../utils/settingsRegistry');
 const { TEMPLATES, BY_KEY: TPL } = require('../utils/notificationRegistry');
+const { reasonsOf, DEFAULT_REASONS } = require('../utils/dateChanges');
 
 const isAdmin = (u) => !!u && (u.isSuperAdmin || (Array.isArray(u.roles) && u.roles.includes('Admin')));
 const tenantIdOf = (req) => (req.user && req.user.tenantId) ? String(req.user.tenantId) : null;
@@ -29,6 +30,8 @@ exports.getSettings = async (req, res) => {
     try { const raw = tenant?.superAdmin?.customWhatsappKey || tenant?.whatsappConfig?.apiKey; if (raw) provider = JSON.parse(raw).provider || 'doubletick'; } catch { /* a plain key = DoubleTick */ }
     res.json({
       provider,
+      dateReasons: reasonsOf(tenant),
+      dateReasonsAreDefault: !(tenant && tenant.companySettings && Array.isArray(tenant.companySettings.dateChangeReasons) && tenant.companySettings.dateChangeReasons.length),
       switches: SWITCHES.filter((s) => !hidden.includes(s.key)).map((s) => ({ key: s.key, group: s.group, label: s.label, help: s.help, default: s.default, value: eff[s.key] })),
       templates: TEMPLATES.map((t) => ({ ...t, saved: saved[t.key] || null })),
     });
@@ -120,4 +123,20 @@ exports.setSwitchAccess = async (req, res) => {
     if (!r.matchedCount && !r.n) return res.status(404).json({ message: 'Tenant not found' });
     res.json({ message: 'Saved.', hidden: [...new Set(hidden)] });
   } catch (e) { res.status(500).json({ message: 'Failed to save', error: e.message }); }
+};
+
+// PUT /api/config/settings/date-reasons  body: { reasons: ['Waiting for client', ...] }  (empty = back to the standard list)
+exports.saveDateReasons = async (req, res) => {
+  try {
+    if (!isAdmin(req.user)) return res.status(403).json({ message: 'Only an admin can change this list.' });
+    const id = tenantIdOf(req); if (!id) return res.status(400).json({ message: 'No company selected.' });
+    const raw = Array.isArray(req.body && req.body.reasons) ? req.body.reasons : null;
+    if (!raw) return res.status(400).json({ message: 'Send the list as "reasons".' });
+    const list = [...new Set(raw.map((x) => String(x || '').trim()).filter(Boolean))];
+    if (list.length > 20) return res.status(400).json({ message: 'At most 20 reasons.' });
+    if (list.some((x) => x.length > 60)) return res.status(400).json({ message: 'Each reason can have 60 characters at most.' });
+    if (list.length && !list.includes('Other')) list.push('Other');
+    await Tenant.updateOne({ _id: id }, { $set: { 'companySettings.dateChangeReasons': list } });
+    res.json({ message: 'Saved.', reasons: list.length ? list : DEFAULT_REASONS });
+  } catch (e) { res.status(500).json({ message: 'Could not save the reasons.', error: e.message }); }
 };

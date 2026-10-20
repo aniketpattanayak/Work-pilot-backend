@@ -30,6 +30,20 @@ const TEMPLATES = [
     '👋 WELCOME TO THE TEAM\n\nHello {{1}}, you have been added to the {{2}} operational system.\n\nRole: {{3}}\nDepartment: {{4}}\n\nYou can now access your dashboard using your registered mobile number here: {{5}}\nThank you!!!'),
   T('_employee_profile_update', 'Employee profile updated', 'An employee profile is changed', ['Employee name', 'Designation', 'Department', 'Link'],
     '⚙️ PROFILE UPDATED\n\nHello {{1}}, your personnel registry profile has been updated by the Admin.\n\nNew Designation: {{2}}\nDepartment: {{3}}\n\nIf you did not request this, please contact your supervisor.\nLogin: {{4}}\n\nThank you!!!'),
+  T('task_deadline_changed', 'Deadline changed', 'Someone changes the deadline of a task', ['Doer name', 'Task title', 'Old deadline', 'New deadline', 'Changed by', 'Reason', 'Link'],
+    '📅 DEADLINE CHANGED\n\nHi {{1}}, the deadline of your task was changed.\n\nTask: {{2}}\nOld deadline: {{3}}\nNew deadline: {{4}}\nChanged by: {{5}}\nReason: {{6}}\n\nView: {{7}}\nThank you!'),
+  T('task_date_request', 'Deadline change asked (follower)', 'A follower asks to change a deadline', ['Assigner name', 'Task title', 'Asked by', 'Asked deadline', 'Reason', 'Link'],
+    '🕒 DEADLINE CHANGE REQUEST\n\nHi {{1}}, {{3}} asks to move the deadline of "{{2}}" to {{4}}.\n\nReason: {{5}}\n\nPlease approve or reject: {{6}}\nThank you!'),
+  T('task_date_request_result', 'Deadline request answered', 'The assigner answers a follower\'s request', ['Person name', 'Task title', 'Answer', 'Deadline now', 'Link'],
+    '🕒 DEADLINE REQUEST {{3}}\n\nHi {{1}}, your request for "{{2}}" was answered: {{3}}.\nDeadline now: {{4}}\n\nView: {{5}}\nThank you!'),
+  T('task_on_hold', 'Task put On hold', 'A doer puts a task On hold', ['Assigner name', 'Task title', 'Doer name', 'Reason', 'Link'],
+    '⏸ TASK ON HOLD\n\nHi {{1}}, {{3}} has put "{{2}}" On hold.\n\nReason: {{4}}\n\nView: {{5}}\nThank you!'),
+  T('task_resumed', 'Task resumed', 'A doer resumes a task that was On hold', ['Assigner name', 'Task title', 'Doer name', 'New deadline', 'Link'],
+    '▶️ TASK RESUMED\n\nHi {{1}}, {{3}} has resumed "{{2}}". The waiting time was not counted.\n\nNew deadline: {{4}}\n\nView: {{5}}\nThank you!'),
+  T('subtask_assigned', 'Sub task assigned', 'A sub task is given to a person', ['Receiver name', 'Sub task', 'Main task', 'Given by', 'Deadline', 'Link'],
+    '🧩 SUB TASK ASSIGNED\n\nHi {{1}}, a sub task was given to you.\n\nSub task: {{2}}\nPart of: {{3}}\nGiven by: {{4}}\nDeadline: {{5}}\n\nView: {{6}}\nThank you!'),
+  T('subtask_created_info', 'Sub task created (to the main assigner)', 'A sub task is created under a task you gave', ['Assigner name', 'Sub task', 'Main task', 'Given to', 'Link'],
+    '🧩 SUB TASK CREATED\n\nHi {{1}}, a sub task "{{2}}" was created under "{{3}}" and given to {{4}}.\n\nView: {{5}}\nThank you!'),
 ];
 const BY_KEY = Object.fromEntries(TEMPLATES.map((t) => [t.key, t]));
 
