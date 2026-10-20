@@ -1,7 +1,7 @@
 // controllers/settingsController.js
 // Company switches and WhatsApp message wording (mounted under /api/config).
 const Tenant = require('../models/Tenant');
-const { SWITCHES, BY_KEY: SW, effective, valuesOf, hiddenOf } = require('../utils/settingsRegistry');
+const { SWITCHES, BY_KEY: SW, effective, valuesOf, hiddenOf, rawHiddenOf } = require('../utils/settingsRegistry');
 const { TEMPLATES, BY_KEY: TPL } = require('../utils/notificationRegistry');
 const { reasonsOf, DEFAULT_REASONS } = require('../utils/dateChanges');
 
@@ -15,7 +15,7 @@ const tenantIdOf = (req) => (req.user && req.user.tenantId) ? String(req.user.te
 exports.getEffective = async (req, res) => {
   try {
     const id = tenantIdOf(req);
-    const tenant = id ? await Tenant.findById(id).select('companySettings.switches').lean() : null;
+    const tenant = id ? await Tenant.findById(id).select('companySettings.switches superAdmin.features.menuControl').lean() : null;
     res.json({ switches: effective(tenant) });
   } catch (e) { res.status(500).json({ message: 'Could not load settings.', error: e.message }); }
 };
@@ -26,7 +26,7 @@ exports.getSettings = async (req, res) => {
     if (!isAdmin(req.user)) return res.status(403).json({ message: 'Only an admin can open these settings.' });
     const id = tenantIdOf(req);
     if (!id) return res.json({ switches: [], templates: [] });
-    const tenant = await Tenant.findById(id).select('companySettings superAdmin.hiddenSwitches superAdmin.customWhatsappKey whatsappConfig').lean();
+    const tenant = await Tenant.findById(id).select('companySettings superAdmin.hiddenSwitches superAdmin.features.menuControl superAdmin.customWhatsappKey whatsappConfig').lean();
     const eff = effective(tenant), hidden = hiddenOf(tenant);
     const saved = (tenant && tenant.companySettings && tenant.companySettings.whatsappTemplates) || {};
     let provider = 'doubletick';
@@ -47,7 +47,7 @@ exports.saveSwitches = async (req, res) => {
   try {
     if (!isAdmin(req.user)) return res.status(403).json({ message: 'Only an admin can change these settings.' });
     const id = tenantIdOf(req); if (!id) return res.status(400).json({ message: 'No company selected.' });
-    const tenant = await Tenant.findById(id).select('companySettings superAdmin.hiddenSwitches').lean();
+    const tenant = await Tenant.findById(id).select('companySettings superAdmin.hiddenSwitches superAdmin.features.menuControl').lean();
     if (!tenant) return res.status(404).json({ message: 'Company not found.' });
     const hidden = hiddenOf(tenant), next = { ...valuesOf(tenant) };
     for (const [k, v] of Object.entries(req.body || {})) {
@@ -57,7 +57,7 @@ exports.saveSwitches = async (req, res) => {
       next[k] = v;
     }
     await Tenant.updateOne({ _id: id }, { $set: { 'companySettings.switches': next } });
-    const t2 = await Tenant.findById(id).select('companySettings.switches').lean();
+    const t2 = await Tenant.findById(id).select('companySettings.switches superAdmin.features.menuControl').lean();
     res.json({ message: 'Saved.', switches: effective(t2) });
   } catch (e) { res.status(500).json({ message: 'Could not save settings.', error: e.message }); }
 };
@@ -132,9 +132,9 @@ exports.resetTemplate = async (req, res) => {
 // ── Platform owner: which switches a company admin may see ─────────────────────
 exports.getSwitchAccess = async (req, res) => {
   try {
-    const t = await Tenant.findById(req.params.tenantId).select('superAdmin.hiddenSwitches companySettings.switches').lean();
+    const t = await Tenant.findById(req.params.tenantId).select('superAdmin.hiddenSwitches superAdmin.features.menuControl companySettings.switches').lean();
     if (!t) return res.status(404).json({ message: 'Tenant not found' });
-    const hidden = hiddenOf(t), eff = effective(t);
+    const hidden = rawHiddenOf(t), eff = effective(t);
     res.json({ switches: SWITCHES.map((s) => ({ key: s.key, group: s.group, label: s.label, value: eff[s.key], visibleToAdmin: !hidden.includes(s.key) })) });
   } catch (e) { res.status(500).json({ message: 'Failed to load', error: e.message }); }
 };

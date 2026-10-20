@@ -77,6 +77,11 @@ exports.saveFields = async (req, res) => {
     if (!tenantId) return res.status(400).json({ message: 'No company on this account.' });
 
     const body = req.body || {};
+    const NEW_KINDS = ['textarea', 'multiselect', 'file', 'formula', 'lookup'], NEW_FORMS = ['subtask', 'ticket', 'leave', 'personal'];
+    if (!(await require('./formController').designerOn(req))) {
+      const sent = Array.isArray(body.fields) ? body.fields : [body];
+      if (NEW_FORMS.includes(entity) || sent.some((f) => f && NEW_KINDS.includes(f.fieldType))) return res.status(403).json({ message: 'These field types and forms need the Form designer. Please ask the platform owner to enable it.' });
+    }
     const list = Array.isArray(body.fields) ? body.fields : (body.fieldLabel || body.fieldName ? [body] : []);
     if (!list.length) return res.status(400).json({ message: 'Send at least one field.' });
 

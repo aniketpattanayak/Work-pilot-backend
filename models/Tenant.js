@@ -258,6 +258,9 @@ const TenantSchema = new mongoose.Schema({
       rewards:      { type: Boolean, default: true },  // Rewards Log
       // Settings
       settings:     { type: Boolean, default: true },  // Settings tab
+      // Things the platform owner must switch ON for a company (off until then)
+      formDesigner: { type: Boolean, default: false }, // Settings > Form designer (rename / hide / reorder fields, new field types)
+      menuControl:  { type: Boolean, default: false }, // Settings > Functions > Menu (switch side-menu sections off)
     },
 
     // Voice AI calling module (BETA). Default OFF; only the Superadmin can switch it on

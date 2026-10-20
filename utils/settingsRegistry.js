@@ -33,15 +33,19 @@ const SWITCHES = [
 const BY_KEY = Object.fromEntries(SWITCHES.map((s) => [s.key, s]));
 
 const valuesOf = (tenant) => (tenant && tenant.companySettings && tenant.companySettings.switches) || {};
-const hiddenOf = (tenant) => (tenant && tenant.superAdmin && Array.isArray(tenant.superAdmin.hiddenSwitches)) ? tenant.superAdmin.hiddenSwitches : [];
+const menuAllowed = (tenant) => !!(tenant && tenant.superAdmin && tenant.superAdmin.features && tenant.superAdmin.features.menuControl === true);
+const rawHiddenOf = (tenant) => (tenant && tenant.superAdmin && Array.isArray(tenant.superAdmin.hiddenSwitches)) ? tenant.superAdmin.hiddenSwitches : [];
 
-// Effective value (saved value, else the default which equals today's behaviour)
+// Switches the company admin cannot see: the ones the platform owner hid, and all menu switches until the owner gives the company access
+const hiddenOf = (tenant) => (menuAllowed(tenant) ? rawHiddenOf(tenant) : [...new Set([...rawHiddenOf(tenant), ...SWITCHES.filter((s) => s.group === 'Menu').map((s) => s.key)])]);
+
+// Effective value (saved value, else the default which equals today's behaviour). Menu sections stay ON for a company without menu access.
 function effective(tenant) {
   const v = valuesOf(tenant);
   const out = {};
-  for (const s of SWITCHES) out[s.key] = typeof v[s.key] === 'boolean' ? v[s.key] : s.default;
+  for (const s of SWITCHES) out[s.key] = (s.group === 'Menu' && !menuAllowed(tenant)) ? true : (typeof v[s.key] === 'boolean' ? v[s.key] : s.default);
   return out;
 }
 const isOn = (tenant, key) => effective(tenant)[key] !== false;
 
-module.exports = { SWITCHES, BY_KEY, effective, isOn, valuesOf, hiddenOf };
+module.exports = { SWITCHES, BY_KEY, effective, isOn, valuesOf, hiddenOf, rawHiddenOf };

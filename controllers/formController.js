@@ -11,6 +11,16 @@ const isAdmin = (u) => !!u && (u.isSuperAdmin || (Array.isArray(u.roles) && u.ro
 const tenantOf = (req) => (req.user && req.user.tenantId) ? String(req.user.tenantId) : null;
 const clean = (s, n) => String(s === undefined || s === null ? '' : s).trim().slice(0, n);
 
+// The platform owner must switch the Form designer on for a company (Super Admin > company > features).
+async function designerOn(req) {
+  if (req.user && req.user.isSuperAdmin) return true;
+  const id = tenantOf(req); if (!id) return false;
+  const t = await Tenant.findById(id).select('superAdmin.features.formDesigner').lean();
+  return !!(t && t.superAdmin && t.superAdmin.features && t.superAdmin.features.formDesigner === true);
+}
+const NOT_ON = 'The Form designer is not switched on for your company. Please ask the platform owner to enable it.';
+exports.designerOn = designerOn;
+
 async function tenantDoc(req, sel) {
   const id = tenantOf(req);
   return id ? Tenant.findById(id).select(sel).lean() : null;
@@ -20,6 +30,7 @@ async function tenantDoc(req, sel) {
 exports.listForms = async (req, res) => {
   try {
     if (!isAdmin(req.user)) return res.status(403).json({ message: 'Only an admin can open the form designer.' });
+    if (!(await designerOn(req))) return res.status(403).json({ message: NOT_ON });
     res.json({ forms: Object.entries(FORMS).map(([key, f]) => ({ key, label: f.label, entity: f.entity })) });
   } catch (e) { res.status(500).json({ message: 'Could not load the forms.', error: e.message }); }
 };
@@ -33,8 +44,10 @@ exports.getForm = async (req, res) => {
     if (!form) return res.status(404).json({ message: 'Unknown form.' });
     const tid = tenantOf(req);
     const t = await tenantDoc(req, 'companySettings.formLayouts');
-    const layout = (t && t.companySettings && t.companySettings.formLayouts && t.companySettings.formLayouts[key]) || {};
-    const showAll = req.query.all === '1' && isAdmin(req.user);
+    const on = await designerOn(req);
+    // without the platform owner's permission every form keeps its standard layout
+    const layout = (on && t && t.companySettings && t.companySettings.formLayouts && t.companySettings.formLayouts[key]) || {};
+    const showAll = req.query.all === '1' && isAdmin(req.user) && on;
     const q = { tenantId: tid, entity: form.entity };
     if (!showAll) q.isActive = true;
     const custom = tid ? await configModel(req, 'CustomFieldDefinition').find(q).sort({ order: 1, createdAt: 1 }).lean() : [];
@@ -52,6 +65,7 @@ exports.getForm = async (req, res) => {
 exports.saveForm = async (req, res) => {
   try {
     if (!isAdmin(req.user)) return res.status(403).json({ message: 'Only an admin can change forms.' });
+    if (!(await designerOn(req))) return res.status(403).json({ message: NOT_ON });
     const key = String(req.params.form || '');
     const form = FORMS[key];
     if (!form) return res.status(404).json({ message: 'Unknown form.' });
@@ -86,6 +100,7 @@ exports.saveForm = async (req, res) => {
 exports.resetForm = async (req, res) => {
   try {
     if (!isAdmin(req.user)) return res.status(403).json({ message: 'Only an admin can change forms.' });
+    if (!(await designerOn(req))) return res.status(403).json({ message: NOT_ON });
     const key = String(req.params.form || '');
     if (!FORMS[key]) return res.status(404).json({ message: 'Unknown form.' });
     const id = tenantOf(req); if (!id) return res.status(400).json({ message: 'No company selected.' });
@@ -107,6 +122,7 @@ exports.getMasterLists = async (req, res) => {
 exports.saveMasterLists = async (req, res) => {
   try {
     if (!isAdmin(req.user)) return res.status(403).json({ message: 'Only an admin can change lists.' });
+    if (!(await designerOn(req))) return res.status(403).json({ message: NOT_ON });
     const id = tenantOf(req); if (!id) return res.status(400).json({ message: 'No company selected.' });
     const lists = Array.isArray(req.body && req.body.lists) ? req.body.lists : null;
     if (!lists) return res.status(400).json({ message: 'Send the lists.' });

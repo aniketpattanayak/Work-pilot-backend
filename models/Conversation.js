@@ -17,7 +17,7 @@ const ConversationSchema = new mongoose.Schema({
 
   // For task-type conversations
   taskId:       { type: mongoose.Schema.Types.ObjectId, default: null }, // DelegationTask or FlowInstance id
-  taskType:     { type: String, enum: ['delegation', 'flow', null], default: null },
+  taskType:     { type: String, enum: ['delegation', 'flow', 'checklist', null], default: null },
   taskTitle:    { type: String, default: '' }, // cached for display
 
   // For announcements
