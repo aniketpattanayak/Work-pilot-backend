@@ -212,7 +212,7 @@ exports.resumeTask = async (req, res) => {
 exports.report = async (req, res) => {
   try {
     const roles = rolesOf(req);
-    if (!(isAdminReq(req) || roles.includes('Coordinator') || roles.includes('Assigner'))) return res.status(403).json({ message: 'Not allowed.' });
+    if (!(isAdminReq(req) || roles.includes('Coordinator') || roles.includes('Assigner') || roles.includes('Viewer'))) return res.status(403).json({ message: 'Not allowed.' });
     const m = await getReqModels(req);
     const tenantId = req.user.tenantId;
     const from = req.query.from ? new Date(req.query.from) : new Date(Date.now() - 90 * 86400000);

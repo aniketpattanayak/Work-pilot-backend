@@ -96,6 +96,10 @@ exports.getFollowingTasks = async (req, res) => {
       history: t.history || [],
       files: t.files || [],
       isFollowing: true,
+      followersCanChangeDate: t.followersCanChangeDate === true,
+      pendingDateRequest: t.pendingDateRequest && t.pendingDateRequest.byId ? t.pendingDateRequest : null,
+      onHold: t.onHold || null,
+      parentTask: t.parentTask || null,
     }));
 
     res.status(200).json(result);
@@ -975,10 +979,21 @@ anchor.setHours(0, 0, 0, 0);
     /**
      * 3. EXECUTE ATOMIC UPDATE
      */
+    // Company-defined extra fields (only when sent)
+    const cfSet = {}; const cfUnset = {};
+    if (req.body.customFields !== undefined) {
+      const cfDefsU = await loadActiveDefs(req, 'task', existingTask.tenantId);
+      const cfU = cleanCustomFields(cfDefsU, req.body.customFields, { mode: 'update' });
+      if (cfU.errors.length) return res.status(400).json({ message: cfU.errors[0], errors: cfU.errors });
+      for (const [k, v] of Object.entries(cfU.values)) { if (v === null) cfUnset['customFields.' + k] = ''; else cfSet['customFields.' + k] = v; }
+    }
+
     const updatedTask = await ChecklistTask.findByIdAndUpdate(
       id,
       {
+        ...(Object.keys(cfUnset).length ? { $unset: cfUnset } : {}),
         $set: {
+          ...cfSet,
           taskName,
           description: description || "",
           doerId,
@@ -1079,8 +1094,14 @@ if (frequency === "Weekly") {
     );
 
 
+    // Company-defined extra fields for checklist tasks (none defined = nothing changes)
+    const cfDefs = await loadActiveDefs(req, 'task', tenantId);
+    const cfClean = cleanCustomFields(cfDefs, req.body.customFields, { mode: 'create' });
+    if (cfClean.errors.length) return res.status(400).json({ message: cfClean.errors[0], errors: cfClean.errors });
+
     const newChecklist = new ChecklistTask({
       tenantId,
+      customFields: Object.fromEntries(Object.entries(cfClean.values).filter(([, v]) => v !== null)),
       taskName,
       description: description || "",
       doerId,
