@@ -243,6 +243,10 @@ router.delete('/:taskId', authMiddleware, subscriptionGuard, tenantDbMiddleware,
 router.post('/handle-revision', authMiddleware, subscriptionGuard, tenantDbMiddleware, taskController.handleRevision);
 // Deadline rules (see controllers/dateController.js)
 const dateCtl = require('../controllers/dateController');
+const subCtl = require('../controllers/subTaskController');
+router.post('/sub-task', authMiddleware, subscriptionGuard, tenantDbMiddleware, subCtl.createSubTask);
+router.get('/sub-tasks', authMiddleware, subscriptionGuard, tenantDbMiddleware, subCtl.listSubTasks);
+router.post('/sub-tasks/summary', authMiddleware, subscriptionGuard, tenantDbMiddleware, subCtl.summary);
 router.get('/date-reasons', authMiddleware, subscriptionGuard, tenantDbMiddleware, dateCtl.getReasons);
 router.post('/date-check', authMiddleware, subscriptionGuard, tenantDbMiddleware, dateCtl.checkDate);
 router.get('/date-changes-report', authMiddleware, subscriptionGuard, tenantDbMiddleware, dateCtl.report);
