@@ -71,6 +71,8 @@ exports.createSubTask = async (req, res) => {
     const receiver = await m.Employee.findById(b.receiverId).select('name whatsappNumber tenantId').lean();
     if (!receiver || String(receiver.tenantId) !== String(req.user.tenantId)) return res.status(404).json({ message: 'That person was not found.' });
 
+    const cf = await require('../utils/customFields').validateForEntity(req, 'subtask', b.customFields, 'create', req.user.tenantId);
+    if (cf.errors.length) return res.status(400).json({ message: cf.errors[0], errors: cf.errors });
     const prioMap = { low: 'Low', medium: 'Medium', high: 'High', urgent: 'Urgent' };
     const priority = prioMap[String(b.priority || 'medium').toLowerCase()] || 'Medium';
     const mainAssigner = parent.assignerId && parent.assignerId !== me && parent.assignerId !== String(b.receiverId) ? parent.assignerId : null;
@@ -83,6 +85,7 @@ exports.createSubTask = async (req, res) => {
       priority, deadline: dl, status: 'Accepted',
       isRevisionAllowed: true, maxExtensionDays: 0, followersCanChangeDate: false,
       parentTask: { type: b.parentType, taskId: String(b.parentId), title: parent.title, key: parent.key },
+      customFields: cf.values,
       history: [{ action: 'Task Created', performedBy: me, timestamp: new Date(), remarks: `Sub task of "${parent.title}"` }],
     });
     await task.save();

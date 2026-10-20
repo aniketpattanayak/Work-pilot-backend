@@ -4,8 +4,11 @@ const mongoose = require('mongoose');
 const { ENTITY_MODEL, FIELD_NAME_RE, configModel } = require('../utils/customFields');
 
 const TABLE_KEY_RE = /^[a-z0-9_]{1,50}$/;
-const MAX_FIELDS_PER_ENTITY = 30;
-const FIELD_TYPES = ['text', 'number', 'date', 'select', 'boolean'];
+const MAX_FIELDS_PER_ENTITY = 60;
+const FIELD_TYPES = ['text', 'textarea', 'number', 'date', 'select', 'multiselect', 'boolean', 'file', 'formula', 'lookup'];
+const { parse: parseFormula } = require('../utils/formula');
+const FILE_KINDS = ['image', 'video', 'pdf', 'document', 'audio', 'any'];
+const LOOKUP_SOURCES = ['employees', 'sectors', 'locations', 'roles'];
 
 const isAdmin = (u) => !!u && (u.isSuperAdmin || (Array.isArray(u.roles) && u.roles.includes('Admin')));
 const tenantOf = (req) => (req.user && req.user.tenantId) ? String(req.user.tenantId) : null;
@@ -13,11 +16,41 @@ const slug = (s) => String(s || '').toLowerCase().replace(/[^a-z0-9]+/g, '_').re
 
 function entityOrFail(req, res) {
   const entity = String(req.params.entity || '').toLowerCase();
-  if (!ENTITY_MODEL[entity]) { res.status(400).json({ message: 'Unknown entity. Use employee, delegation or task.' }); return null; }
+  if (!ENTITY_MODEL[entity]) { res.status(400).json({ message: 'Unknown form.' }); return null; }
   return entity;
 }
 
 // ── GET /api/config/fields/:entity ─────────────────────────────────────────────
+// Type-specific settings, checked and cleaned. Returns { config } or { error }.
+function cleanConfig(type, raw, ctx) {
+  const c = (raw && typeof raw === 'object') ? raw : {};
+  if (type === 'file') {
+    let accept = Array.isArray(c.accept) ? c.accept.filter((k) => FILE_KINDS.includes(k)) : [];
+    if (!accept.length || accept.includes('any')) accept = ['any'];
+    const maxMb = Math.max(1, Math.min(100, Number(c.maxMb) || 10));
+    const multiple = !!c.multiple;
+    const maxFiles = multiple ? Math.max(1, Math.min(10, Number(c.maxFiles) || 5)) : 1;
+    return { config: { accept, camera: !!c.camera, maxMb, multiple, maxFiles } };
+  }
+  if (type === 'lookup') {
+    const source = String(c.source || '');
+    const okMaster = /^master:[a-z0-9_]{1,40}$/.test(source) && (ctx.masterKeys || []).includes(source.slice(7));
+    if (!LOOKUP_SOURCES.includes(source) && !okMaster) return { error: 'Choose what the dropdown is linked to.' };
+    return { config: { source, multiple: !!c.multiple } };
+  }
+  if (type === 'formula') {
+    const expression = String(c.expression || '').trim();
+    let parsed; try { parsed = parseFormula(expression); } catch (e) { return { error: 'Formula: ' + e.message }; }
+    const unknown = parsed.refs.filter((r) => !(ctx.names || []).includes(r));
+    if (unknown.length) return { error: `Formula uses {${unknown[0]}} but this form has no field with that key.` };
+    const decimals = Number.isInteger(Number(c.decimals)) ? Math.max(0, Math.min(6, Number(c.decimals))) : 2;
+    return { config: { expression, decimals } };
+  }
+  if (type === 'multiselect' || type === 'select') return { config: {} };
+  return { config: {} };
+}
+exports.cleanConfig = cleanConfig;
+
 exports.getFields = async (req, res) => {
   try {
     const entity = entityOrFail(req, res); if (!entity) return;
@@ -51,6 +84,16 @@ exports.saveFields = async (req, res) => {
     const existing = await Def.find({ tenantId, entity }).lean();
     const byName = new Map(existing.map((d) => [d.fieldName, d]));
     const errors = [];
+    // names the formulas may use: every field key of this form (saved ones + the ones sent now)
+    const allNames = [...new Set([...existing.map((d) => d.fieldName), ...list.map((f) => String(f.fieldName || slug(String(f.fieldLabel || ''))))])];
+    const tdoc = await require('../models/Tenant').findById(tenantId).select('companySettings.masterLists').lean();
+    const masterKeys = ((tdoc && tdoc.companySettings && tdoc.companySettings.masterLists) || []).map((m) => m.key);
+    // a sub task shares its saved values with delegation tasks: the same key may not be used by both
+    if (entity === 'subtask' || entity === 'delegation') {
+      const other = await Def.find({ tenantId, entity: entity === 'subtask' ? 'delegation' : 'subtask' }).select('fieldName').lean();
+      const clash = new Set(other.map((d) => d.fieldName));
+      list.forEach((f, i) => { const n = String(f.fieldName || slug(String(f.fieldLabel || ''))); if (clash.has(n)) errors.push(`Field ${i + 1}: the key "${n}" is already used on the ${entity === 'subtask' ? 'delegation task' : 'sub task'} form. Use another name.`); });
+    }
     const ops = [];
     let newCount = 0;
     const seen = new Set();
@@ -60,6 +103,7 @@ exports.saveFields = async (req, res) => {
       const label = String(f.fieldLabel || '').trim().slice(0, 80);
       const name = String(f.fieldName || slug(label)).trim();
       if (!label) return errors.push(`${where}: a label is required.`);
+      if (errors.length) return;
       if (!FIELD_NAME_RE.test(name)) return errors.push(`${where}: key must be lowercase letters, numbers or _ and start with a letter.`);
       if (seen.has(name)) return errors.push(`${where}: "${name}" is listed twice.`);
       seen.add(name);
@@ -69,10 +113,13 @@ exports.saveFields = async (req, res) => {
       if (prev && prev.fieldType !== type) return errors.push(`${where}: the type of "${name}" cannot change once created. Add a new field instead.`);
       let options = Array.isArray(f.options) ? f.options : (prev ? prev.options : []);
       options = [...new Set(options.map((o) => String(o).trim().slice(0, 100)).filter(Boolean))].slice(0, 50);
-      if (type === 'select' && options.length === 0) return errors.push(`${where}: a dropdown needs at least one option.`);
-      if (type !== 'select') options = [];
+      if ((type === 'select' || type === 'multiselect') && options.length === 0) return errors.push(`${where}: a dropdown needs at least one option.`);
+      if (type !== 'select' && type !== 'multiselect') options = [];
+      const cfg = cleanConfig(type, f.config !== undefined ? f.config : (prev && prev.config), { masterKeys, names: allNames });
+      if (cfg.error) return errors.push(`${where}: ${cfg.error}`);
       const set = {
-        fieldLabel: label, fieldType: type, options,
+        fieldLabel: label, fieldType: type, options, config: cfg.config,
+        helpText: f.helpText !== undefined ? String(f.helpText || '').slice(0, 200) : ((prev && prev.helpText) || ''),
         isRequired: f.isRequired !== undefined ? !!f.isRequired : !!(prev && prev.isRequired),
         isActive:   f.isActive   !== undefined ? !!f.isActive   : (prev ? prev.isActive : true),
         order: Number.isFinite(Number(f.order)) ? Number(f.order) : (prev ? prev.order : existing.length + newCount),

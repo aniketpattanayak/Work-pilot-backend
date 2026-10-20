@@ -18,6 +18,8 @@ exports.createTicket = async (req, res) => {
       return res.status(400).json({ message: "Subject and description are required." });
     }
     
+    const cf = await require('../utils/customFields').validateForEntity(req, 'ticket', req.body.customFields, 'create', tenantId);
+    if (cf.errors.length) return res.status(400).json({ message: cf.errors[0], errors: cf.errors });
     // 1. Fetch Reporter details to auto-capture Role and Name
     // company's own database when it has one
     const EmployeeModel = (req.db && req.db.model('Employee')) || Employee;
@@ -45,6 +47,7 @@ exports.createTicket = async (req, res) => {
       category,
       priority,
       initialMedia: mediaFiles,
+      customFields: cf.values,
       history: [{ action: 'Ticket Raised', remarks: 'New support request initiated.' }]
     });
 

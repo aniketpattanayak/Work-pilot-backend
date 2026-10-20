@@ -48,7 +48,7 @@ function shape(t, today, { forOwner = true } = {}) {
     dueDate: t.dueDate, done: t.done, doneAt: t.doneAt,
     frequency: t.frequency, frequencyConfig: t.frequencyConfig, startDate: t.startDate,
     nextDueDate: t.nextDueDate, lastDoneDate: t.lastDoneDate, doneCount: t.doneCount,
-    order: t.order, createdAt: t.createdAt,
+    order: t.order, createdAt: t.createdAt, customFields: t.customFields || {},
   };
   if (t.type === 'Checklist') {
     o.dueNow = !!t.nextDueDate && t.nextDueDate <= today;
@@ -97,11 +97,14 @@ exports.create = async (req, res) => {
     const type = b.type === 'Checklist' ? 'Checklist' : 'Task';
     const title = String(b.title || '').trim();
     if (!title) return res.status(400).json({ message: 'Please enter a title.' });
+    const cf = await require('../utils/customFields').validateForEntity(req, 'personal', b.customFields, 'create', tenantOf(req));
+    if (cf.errors.length) return res.status(400).json({ message: cf.errors[0], errors: cf.errors });
     const today = todayOf(req);
     const doc = {
       tenantId: tenantOf(req), ownerId: me(req), type, title: title.slice(0, 200),
       notes: String(b.notes || '').slice(0, 2000),
       priority: ['Low', 'Medium', 'High'].includes(b.priority) ? b.priority : 'Medium',
+      customFields: cf.values,
     };
     if (type === 'Task') {
       if (b.dueDate) { if (!YMD.test(b.dueDate)) return res.status(400).json({ message: 'Invalid due date.' }); doc.dueDate = b.dueDate; }
@@ -151,6 +154,11 @@ exports.update = async (req, res) => {
       if (b.startDate && YMD.test(b.startDate)) t.startDate = b.startDate;
       const base = t.startDate && t.startDate > today ? t.startDate : today;
       t.nextDueDate = nextAfter(freq, cfg, base, true);
+    }
+    if (b.customFields !== undefined) {
+      const cf = await require('../utils/customFields').validateForEntity(req, 'personal', b.customFields, 'update', tenantOf(req));
+      if (cf.errors.length) return res.status(400).json({ message: cf.errors[0], errors: cf.errors });
+      for (const [k, v] of Object.entries(cf.values)) t.set(`customFields.${k}`, v);
     }
     t.updatedAt = new Date();
     await t.save();

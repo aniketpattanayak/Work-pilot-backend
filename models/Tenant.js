@@ -146,6 +146,8 @@ const TenantSchema = new mongoose.Schema({
   companySettings: {
     switches:          { type: mongoose.Schema.Types.Mixed, default: {} },   // { 'delegation.doerRevise': false }
     dateChangeReasons: { type: [String], default: undefined },           // the list people pick a deadline-change reason from
+    formLayouts:       { type: mongoose.Schema.Types.Mixed, default: {} },   // { employee: { fields: { name: { label, required, hidden } }, order: [] } }
+    masterLists:       { type: mongoose.Schema.Types.Mixed, default: undefined }, // [{ key, label, items: [] }] lists a dropdown can be linked to
     whatsappTemplates: { type: mongoose.Schema.Types.Mixed, default: {} }    // { new_task_delegation_v2: { enabled, body, providerTemplate, senderPhoneId } }
   },
 

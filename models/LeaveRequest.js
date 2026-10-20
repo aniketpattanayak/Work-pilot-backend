@@ -19,7 +19,8 @@ const LeaveRequestSchema = new mongoose.Schema({
   decidedAt:   { type: Date, default: null },
   decisionNote:{ type: String, default: '', maxlength: 300 },
   leaveStatusSynced: { type: Boolean, default: false }, // the existing "on leave + buddy" flag was set for this leave
-}, { timestamps: true });
+  customFields: { type: Map, of: mongoose.Schema.Types.Mixed, default: () => ({}) },
+}, { timestamps: true, toObject: { flattenMaps: true }, toJSON: { flattenMaps: true } });
 
 LeaveRequestSchema.index({ tenantId: 1, employeeId: 1, status: 1 });
 LeaveRequestSchema.index({ tenantId: 1, status: 1, fromDate: 1 });

@@ -38,9 +38,11 @@ const PersonalTaskSchema = new mongoose.Schema({
   // Assigners this person chose to show the item to (read-only for them).
   sharedWith: [{ type: mongoose.Schema.Types.ObjectId }],
 
+  customFields: { type: Map, of: mongoose.Schema.Types.Mixed, default: () => ({}) },
+
   createdAt: { type: Date, default: Date.now },
   updatedAt: { type: Date, default: Date.now },
-});
+}, { toObject: { flattenMaps: true }, toJSON: { flattenMaps: true } });
 
 PersonalTaskSchema.index({ tenantId: 1, ownerId: 1, order: 1 });
 PersonalTaskSchema.index({ tenantId: 1, sharedWith: 1 });

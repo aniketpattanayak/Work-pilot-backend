@@ -42,8 +42,10 @@ const TicketSchema = new mongoose.Schema({
     performedBy: String,
     timestamp: { type: Date, default: Date.now },
     remarks: String
-  }]
-}, { timestamps: true });
+  }],
+  // Company-defined extra fields (see CustomFieldDefinition)
+  customFields: { type: Map, of: mongoose.Schema.Types.Mixed, default: () => ({}) },
+}, { timestamps: true, toObject: { flattenMaps: true }, toJSON: { flattenMaps: true } });
 
 // Indexes
 TicketSchema.index({ tenantId: 1, status: 1 });

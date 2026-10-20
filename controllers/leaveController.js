@@ -252,9 +252,11 @@ exports.createRequest = async (req, res) => {
     const problem = await balanceProblem(req, emp, type, counted.detail, company, null);
     if (problem) return res.status(400).json({ message: problem });
 
+    const cf = await require('../utils/customFields').validateForEntity(req, 'leave', b.customFields, 'create', tenantId(req));
+    if (cf.errors.length) return res.status(400).json({ message: cf.errors[0], errors: cf.errors });
     const doc = await LeaveRequest.create({
       tenantId: tenantId(req), employeeId: emp._id, leaveTypeId: type._id, typeName: type.name, paid: type.paid,
-      fromDate, toDate, halfDay, days: counted.days, daysDetail: counted.detail, reason, buddyId, status: 'Pending'
+      fromDate, toDate, halfDay, days: counted.days, daysDetail: counted.detail, reason, buddyId, status: 'Pending', customFields: cf.values
     });
     req.actor = req.actor || { name: emp.name };
     await audit(req, 'leave_applied', `Applied for ${counted.days} day(s) of ${type.name} (${fromDate} to ${toDate})`, { requestId: String(doc._id) });
