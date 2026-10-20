@@ -92,10 +92,14 @@ MAYTAPI_TEMPLATES.fms_overdue_manager = (v) =>
 
 const sendViaMaytapi = async (toPhone, data, config) => {
   const phone = cleanPhone(toPhone);
-  const { productId, token, phoneId } = config;
+  const { productId, token } = config;
+  const phoneId = data.senderPhoneId || config.phoneId; // a template may send from another of the company's numbers
   const variables = Array.isArray(data.variables) ? data.variables : [];
-  const renderer = MAYTAPI_TEMPLATES[data.templateName];
-  const message = renderer ? renderer(variables, data) : (variables.join('\n') || data.templateName || String(data));
+  const renderer = MAYTAPI_TEMPLATES[data.originalTemplateName || data.templateName];
+  // A company-edited wording wins; otherwise the built-in wording below.
+  const message = data.customBody
+    ? require('./notificationRegistry').render(data.customBody, variables)
+    : (renderer ? renderer(variables, data) : (variables.join('\n') || data.templateName || String(data)));
 
   const res = await axios.post(
     `https://api.maytapi.com/api/${productId}/${phoneId}/sendMessage`,

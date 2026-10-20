@@ -1873,6 +1873,9 @@ exports.handleRevision = async (req, res) => {
       : "\nNo attachments provided.";
     
     if (action === 'Request') {
+      if (await settingOff(req, 'delegation_doerRevise')) {
+        return res.status(403).json({ message: "Your company has switched off deadline changes by doers. Please ask the person who gave you the task." });
+      }
       // A revision can only be requested before the deadline has passed.
       if (task.deadline && new Date() > new Date(task.deadline)) {
         return res.status(400).json({ message: "The deadline has passed, so a revision can no longer be requested for this task." });
@@ -3264,11 +3267,24 @@ exports.getUserDashboard = async (req, res) => {
 // ─── ASSIGN A RECEIVED TASK ONWARD ───────────────────────────────────────────
 // The current doer (must hold the Assigner role) passes the task to someone mapped under them.
 // Same task record: chain = assignerId -> forwardChain[] -> doerId. The new doer completes it.
+// True when the company has switched this function off in Settings (default = on, as before)
+async function settingOff(req, key) {
+  try {
+    const id = req.user && req.user.tenantId;
+    if (!id) return false;
+    const t = await require('../models/Tenant').findById(id).select('companySettings.switches').lean();
+    return !require('../utils/settingsRegistry').isOn(t, key);
+  } catch { return false; }
+}
+
 exports.assignOnward = async (req, res) => {
   try {
     const { DelegationTask, Employee, Tenant } = getModels(req);
     const { taskId, newDoerId, remarks } = req.body || {};
     const me = String(req.user?.id || '');
+    if (await settingOff(req, 'delegation_assignOnward')) {
+      return res.status(403).json({ message: 'Your company has switched off passing a task to someone else.' });
+    }
 
     if (!mongoose.Types.ObjectId.isValid(taskId) || !mongoose.Types.ObjectId.isValid(newDoerId)) {
       return res.status(400).json({ message: 'Invalid task or person selected.' });

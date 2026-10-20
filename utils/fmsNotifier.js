@@ -15,7 +15,7 @@ const cron             = require('node-cron');
 const FlowInstance     = require('../models/FlowInstance');
 const Employee         = require('../models/Employee');
 const Tenant           = require('../models/Tenant');
-const sendWhatsAppMessage = require('./whatsappNotify');
+const { notifyTenant } = require('./notify');
 
 // ─── TEMPLATE NAMES ───────────────────────────────────────────────────────────
 // These must match your DoubleTick / WhatsApp Business template names exactly.
@@ -101,9 +101,7 @@ async function sendAssignmentNotifications() {
       }
 
       const loginLink = await buildLoginLink(inst.tenantId);
-
-      const tKey = await getTenantWhatsappKey(inst.tenantId);
-      await sendWhatsAppMessage(emp.whatsappNumber, {
+      await notifyTenant(inst.tenantId, emp.whatsappNumber, {
         templateName: TEMPLATES.ASSIGNED,
         variables: [
           emp.name,
@@ -113,7 +111,7 @@ async function sendAssignmentNotifications() {
           fmtDeadline(step.plannedDeadline),
           loginLink,
         ],
-      }, tKey);
+      });
 
       // Mark as notified
       await FlowInstance.updateOne(
@@ -156,9 +154,7 @@ async function sendReminderNotifications() {
         await FlowInstance.updateOne({ _id: inst._id }, { $set: { 'activeStep.reminderSent': true } });
         continue;
       }
-
-      const tKey = await getTenantWhatsappKey(inst.tenantId);
-      await sendWhatsAppMessage(emp.whatsappNumber, {
+      await notifyTenant(inst.tenantId, emp.whatsappNumber, {
         templateName: TEMPLATES.REMINDER,
         variables: [
           emp.name,
@@ -166,7 +162,7 @@ async function sendReminderNotifications() {
           inst.orderIdentifier,
           fmtDeadline(step.plannedDeadline),
         ],
-      }, tKey);
+      });
 
       await FlowInstance.updateOne(
         { _id: inst._id },
@@ -213,9 +209,8 @@ async function sendOverdueNotifications() {
 
       // Notify the employee
       const emp = await getEmployeePhone(step.assignedToId);
-      const tKey = await getTenantWhatsappKey(inst.tenantId);
       if (emp?.whatsappNumber) {
-        await sendWhatsAppMessage(emp.whatsappNumber, {
+        await notifyTenant(inst.tenantId, emp.whatsappNumber, {
           templateName: TEMPLATES.OVERDUE,
           variables: [
             emp.name,
@@ -224,14 +219,14 @@ async function sendOverdueNotifications() {
             String(minutesLate),
             loginLink,
           ],
-        }, tKey);
+        });
       }
 
       // Escalate to admins
       const admins = await getTenantAdmins(inst.tenantId);
       for (const admin of admins) {
         if (!admin.whatsappNumber) continue;
-        await sendWhatsAppMessage(admin.whatsappNumber, {
+        await notifyTenant(inst.tenantId, admin.whatsappNumber, {
           templateName: TEMPLATES.MANAGER,
           variables: [
             admin.name,
@@ -240,7 +235,7 @@ async function sendOverdueNotifications() {
             inst.orderIdentifier,
             String(minutesLate),
           ],
-        }, tKey);
+        });
       }
 
       console.log(`[FMS Notify] Overdue alert: "${step.nodeName}" for ${inst.orderIdentifier} — ${minutesLate}min late`);

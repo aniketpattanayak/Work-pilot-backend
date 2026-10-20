@@ -141,6 +141,13 @@ const TenantSchema = new mongoose.Schema({
     default: null // Stores the AWS S3 URL or local path
   },
 
+  // Company-chosen settings: on/off switches and WhatsApp message overrides.
+  // Nothing saved here = today's behaviour (see utils/settingsRegistry.js).
+  companySettings: {
+    switches:          { type: mongoose.Schema.Types.Mixed, default: {} },   // { 'delegation.doerRevise': false }
+    whatsappTemplates: { type: mongoose.Schema.Types.Mixed, default: {} }    // { new_task_delegation_v2: { enabled, body, providerTemplate, senderPhoneId } }
+  },
+
   // WhatsApp Configuration (Stored per client)
   whatsappConfig: {
     isActive: { type: Boolean, default: false },
@@ -218,6 +225,9 @@ const TenantSchema = new mongoose.Schema({
 
     // Custom database URI (optional — if set, tenant uses their own MongoDB)
     customMongoUri:    { type: String, default: '' },
+
+    // Switches the company admin may NOT see (the platform owner decides). Empty = admin sees all.
+    hiddenSwitches: { type: [String], default: [] },
 
     // Custom WhatsApp API key (optional — if set, overrides global DoubleTick key)
     customWhatsappKey: { type: String, default: '' },
