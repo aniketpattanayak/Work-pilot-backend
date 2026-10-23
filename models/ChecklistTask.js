@@ -8,6 +8,9 @@ const ChecklistTaskSchema = new mongoose.Schema({
   tenantId: { type: mongoose.Schema.Types.ObjectId, ref: 'Tenant', required: true },
   taskName: { type: String, required: true },
   description: { type: String },
+  // Set when the checklist was made from a step of a Planner plan (it is then shown under the Planner tab)
+  planId:      { type: mongoose.Schema.Types.ObjectId },
+  planStepId:  { type: mongoose.Schema.Types.ObjectId },
   doerId: { type: mongoose.Schema.Types.ObjectId, ref: 'Employee', required: true },
   // Who set this checklist up (shown as "Assigned by"). Empty on checklists created before this field existed.
   createdBy: { type: mongoose.Schema.Types.ObjectId, ref: 'Employee' },

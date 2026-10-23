@@ -1118,8 +1118,10 @@ if (frequency === "Weekly") {
     const cfClean = cleanCustomFields(cfDefs, req.body.customFields, { mode: 'create' });
     if (cfClean.errors.length) return res.status(400).json({ message: cfClean.errors[0], errors: cfClean.errors });
 
+    const planIdOk = await require('./plannerController').validPlanFor(req, req.body.planId);
     const newChecklist = new ChecklistTask({
       tenantId,
+      ...(planIdOk ? { planId: planIdOk } : {}),
       customFields: Object.fromEntries(Object.entries(cfClean.values).filter(([, v]) => v !== null)),
       taskName,
       description: description || "",
@@ -2501,6 +2503,12 @@ exports.createTask = async (req, res) => {
     // otherwise tasks for tenants with a dedicated DB are saved where the app never reads.
     const { DelegationTask, Employee, Tenant } = getModels(req);
     const taskData = { ...req.body };
+    // Made from a Planner step? Keep the tag only for the caller's own plan.
+    {
+      const pid = await require('./plannerController').validPlanFor(req, taskData.planId);
+      if (pid) taskData.planId = pid; else { delete taskData.planId; }
+      delete taskData.planStepId;
+    }
 
     // --- PARSE HELPER DOERS ---
     if (taskData.helperDoers && typeof taskData.helperDoers === 'string') {

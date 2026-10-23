@@ -81,6 +81,20 @@ router.put('/company/:id/resume', authMiddleware, resumeSubscription);
 
 // Profile
 router.get('/auth/me', authMiddleware, subscriptionGuard, tenantDbMiddleware, getProfile);
+// ─── PLANNER (private plans made of ordered steps; switched on per company by the platform owner) ─────
+const plannerController = require('../controllers/plannerController');
+const plannerBase = [authMiddleware, subscriptionGuard, tenantDbMiddleware, plannerController.requireEnabled];
+router.get('/planner', ...plannerBase, plannerController.list);
+router.post('/planner', ...plannerBase, plannerController.create);
+router.put('/planner/reorder', ...plannerBase, plannerController.reorderPlans);
+router.put('/planner/:id', ...plannerBase, plannerController.update);
+router.delete('/planner/:id', ...plannerBase, plannerController.remove);
+router.post('/planner/:id/steps', ...plannerBase, plannerController.addStep);
+router.put('/planner/:id/steps/reorder', ...plannerBase, plannerController.reorderSteps);
+router.put('/planner/:id/steps/:stepId', ...plannerBase, plannerController.updateStep);
+router.delete('/planner/:id/steps/:stepId', ...plannerBase, plannerController.removeStep);
+router.post('/planner/:id/steps/:stepId/link', ...plannerBase, plannerController.linkStep);
+
 // ─── PERSONAL TASKS (private to-do / checklist; never counted anywhere) ─────
 const personalTaskController = require('../controllers/personalTaskController');
 const personalBase = [authMiddleware, subscriptionGuard, tenantDbMiddleware, personalTaskController.requireEnabled];

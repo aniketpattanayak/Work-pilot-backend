@@ -262,6 +262,7 @@ const TenantSchema = new mongoose.Schema({
       // Things the platform owner must switch ON for a company (off until then)
       formDesigner: { type: Boolean, default: false }, // Settings > Form designer (rename / hide / reorder fields, new field types)
       menuControl:  { type: Boolean, default: false }, // Settings > Functions > Menu (switch side-menu sections off)
+      planner: { type: Boolean, default: false },       // Planner tab (plans made of ordered steps that become tasks; off until switched on for a company)
       dailyTaskAlert: { type: Boolean, default: false }, // Daily WhatsApp reminder: overdue / today / tomorrow tasks (off until switched on for a company)
     },
 

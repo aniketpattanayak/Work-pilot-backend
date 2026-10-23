@@ -9,6 +9,9 @@ const DelegationTaskSchema = new mongoose.Schema({
   tenantId:      { type: mongoose.Schema.Types.ObjectId, ref: 'Tenant', required: true },
   title:         { type: String, required: true },
   description:   { type: String },
+  // Set when the task was made from a step of a Planner plan (it is then shown under the Planner tab)
+  planId:        { type: mongoose.Schema.Types.ObjectId },
+  planStepId:    { type: mongoose.Schema.Types.ObjectId },
 
   // People Involved
   assignerId:    { type: mongoose.Schema.Types.ObjectId, ref: 'Employee', required: true },
