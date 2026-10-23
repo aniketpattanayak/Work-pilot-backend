@@ -48,6 +48,15 @@ function getModels(req) {
 // SECURITY: auth = only the employeeId themselves, or an Admin/superAdmin, same
 // pattern as other subject-scoped endpoints (e.g. getEmployeeDeepDive). Must also be
 // same-tenant - mirrors getTaskById/respondToTask elsewhere in this file.
+// Everyone who FOLLOWS a task: the proper followers list (coworkers) plus anyone saved by the
+// old "helper" box (helperDoers), which the New Task form used for its Followers picker.
+const followersOf = (t) => {
+  const seen = new Set(); const out = [];
+  (t.coworkers || []).forEach((c) => { const id = String((c && c._id) || c || ''); if (id && !seen.has(id)) { seen.add(id); out.push({ _id: (c && c._id) || c, name: (c && c.name) || '' }); } });
+  (t.helperDoers || []).forEach((h) => { const id = String((h && h.helperId && h.helperId._id) || (h && h.helperId) || ''); if (id && !seen.has(id)) { seen.add(id); out.push({ _id: (h.helperId && h.helperId._id) || h.helperId, name: (h && h.name) || (h.helperId && h.helperId.name) || '' }); } });
+  return out;
+};
+
 exports.getFollowingTasks = async (req, res) => {
   try {
     const { DelegationTask, Employee } = getModels(req);
@@ -70,7 +79,7 @@ exports.getFollowingTasks = async (req, res) => {
       return res.status(403).json({ message: "Forbidden." });
     }
 
-    const tasks = await DelegationTask.find({ coworkers: employeeId, tenantId: employee.tenantId })
+    const tasks = await DelegationTask.find({ $or: [{ coworkers: employeeId }, { 'helperDoers.helperId': employeeId }], tenantId: employee.tenantId })
       .populate('assignerId', 'name')
       .populate('doerId', 'name')
       .populate('coordinatorId', 'name')
@@ -92,11 +101,11 @@ exports.getFollowingTasks = async (req, res) => {
       assignerId: t.assignerId ? { _id: t.assignerId._id, name: t.assignerId.name } : null,
       doerId: t.doerId ? { _id: t.doerId._id, name: t.doerId.name } : null,
       coordinatorId: t.coordinatorId ? { _id: t.coordinatorId._id, name: t.coordinatorId.name } : null,
-      followers: (t.coworkers || []).filter(c => c && c._id).map(c => ({ _id: c._id, name: c.name })),
+      followers: followersOf(t),
       history: t.history || [],
       files: t.files || [],
       isFollowing: true,
-      followersCanChangeDate: t.followersCanChangeDate === true,
+      followersCanChangeDate: false, // followers only follow up; the doer changes the date
       pendingDateRequest: t.pendingDateRequest && t.pendingDateRequest.byId ? t.pendingDateRequest : null,
       onHold: t.onHold || null,
       parentTask: t.parentTask || null,
@@ -138,6 +147,7 @@ exports.getDoerTasks = async (req, res) => {
       $or: [
         { doerId: doerId },
         { "helperDoers.helperId": doerId },
+        { coworkers: doerId }, // tasks I follow (view only, shown in a different colour)
         { doerId: { $in: buddyForIds } },
         // My Tasks only: also return tasks I passed on, so I can still follow them
         ...(req.query.includePassedOn === '1' ? [{ 'forwardChain.employeeId': doerId }] : [])
@@ -195,7 +205,16 @@ exports.getDoerTasks = async (req, res) => {
     // without touching the existing `coworkers` field anything else may read.
     const withFollowers = filteredTasks.map(t => {
       const obj = t.toObject ? t.toObject() : t;
-      obj.followers = (obj.coworkers || []).filter(c => c && c._id).map(c => ({ _id: c._id, name: c.name }));
+      obj.followers = followersOf(obj);
+      // How this task relates to ME: doer (mine, or covering as buddy), passedOn (I handed it on) or follower (view only)
+      const ownerId = String((obj.doerId && obj.doerId._id) || obj.doerId || '');
+      const inChain = (obj.forwardChain || []).some(c => String((c.employeeId && c.employeeId._id) || c.employeeId || '') === String(doerId));
+      const follows = obj.followers.some(f => String(f._id) === String(doerId));
+      obj.myRole = ownerId === String(doerId) ? 'doer'
+        : buddyForIds.some(id => String(id) === ownerId) ? 'doer'
+        : inChain ? 'passedOn'
+        : follows ? 'follower'
+        : 'doer';
       return obj;
     });
 
@@ -256,7 +275,7 @@ exports.getAssignerTasks = async (req, res) => {
     // Additive "followers" alias (see getDoerTasks) - existing `coworkers` field untouched.
     const withFollowers = (tasks || []).map(t => {
       const obj = t.toObject ? t.toObject() : t;
-      obj.followers = (obj.coworkers || []).filter(c => c && c._id).map(c => ({ _id: c._id, name: c.name }));
+      obj.followers = followersOf(obj);
       return obj;
     });
 
@@ -517,9 +536,9 @@ exports.getTaskById = async (req, res) => {
     const isOwner = idOf(task.assignerId) === uid || idOf(task.coordinatorId) === uid ||
       (task.forwardChain || []).some(f => idOf(f.employeeId) === uid);
     const isDoerSide = idOf(task.doerId) === uid ||
-      (task.helperDoers || []).some(h => idOf(h.helperId) === uid) ||
       idOf(task.doerId?.leaveStatus?.buddyId) === uid;
-    const isCoworker = (task.coworkers || []).some(c => idOf(c) === uid);
+    const isCoworker = (task.coworkers || []).some(c => idOf(c) === uid) ||
+      (task.helperDoers || []).some(h => idOf(h.helperId) === uid);
 
     if (!isAdminCaller && !isOwner && !isDoerSide && !isCoworker) {
       return res.status(403).json({ message: "You are not part of this task." });
@@ -540,7 +559,7 @@ exports.getTaskById = async (req, res) => {
       doerId: task.doerId ? { _id: task.doerId._id, name: task.doerId.name } : null,
       // Followers (watch-only; see utils/followerValidation.js). Additive field -
       // every existing field above is unchanged.
-      followers: (task.coworkers || []).filter(c => c && c._id).map(c => ({ _id: c._id, name: c.name })),
+      followers: followersOf(task),
     });
   } catch (err) {
     console.error('[Task] getTaskById error:', err.message);
@@ -1212,7 +1231,7 @@ exports.coordinatorForceDone = async (req, res) => {
         : "N/A";
 
       // MAP SUPPORT TEAM NAMES AND FETCH NUMBERS
-      const helperIds = Array.isArray(task.helperDoers) ? task.helperDoers.map(h => h.helperId) : [];
+      const helperIds = [...(Array.isArray(task.helperDoers) ? task.helperDoers.map(h => h.helperId) : []), ...(Array.isArray(task.coworkers) ? task.coworkers.map(c => (c && c._id) || c) : [])];
       const helpers = helperIds.length > 0 ? await Employee.find({ _id: { $in: helperIds } }) : [];
       const helperNames = helpers.map(h => h.name).join(", ") || "None";
 
@@ -1710,7 +1729,7 @@ exports.getCoordinatorTasks = async (req, res) => {
     const normalizedDelegations = (delegationTasks || []).map(t => ({
       ...t,
       taskType: 'Delegation',
-      followers: (t.coworkers || []).filter(c => c && c._id).map(c => ({ _id: c._id, name: c.name })),
+      followers: followersOf(t),
     }));
 
     // 5. Merge and Sort by chronological deadline
@@ -1747,7 +1766,7 @@ exports.handleRevision = async (req, res) => {
     const moment = require('moment'); // Ensure moment is available
     const formattedDeadline = moment(newDeadline || task.deadline).format('DD MMM YYYY, hh:mm A');
 
-    const helperIds = Array.isArray(task.helperDoers) ? task.helperDoers.map(h => h.helperId) : [];
+    const helperIds = [...(Array.isArray(task.helperDoers) ? task.helperDoers.map(h => h.helperId) : []), ...(Array.isArray(task.coworkers) ? task.coworkers.map(c => (c && c._id) || c) : [])];
     const helpers = helperIds.length > 0 ? await Employee.find({ _id: { $in: helperIds } }) : [];
     const helperNames = helpers.map(h => h.name).join(", ") || "None";
 
@@ -1899,8 +1918,8 @@ exports.handleRevision = async (req, res) => {
       }
       const isOwner = idOf(g.assignerId) === uid || idOf(g.coordinatorId) === uid ||
         (g.forwardChain || []).some(f => idOf(f.employeeId) === uid);
+      // Only the doer (or the person covering for them) may ask for more time. Followers only follow up.
       const isDoerSide = idOf(g.doerId) === uid ||
-        (g.helperDoers || []).some(h => idOf(h.helperId) === uid) ||
         idOf(g.doerId?.leaveStatus?.buddyId) === uid;
       const allowed = isAdminCaller || (action === 'Request' ? (isDoerSide || isOwner) : isOwner);
       if (!allowed) {
@@ -1927,7 +1946,7 @@ exports.handleRevision = async (req, res) => {
 
     const moment = require('moment');
 
-    const helperIds = Array.isArray(task.helperDoers) ? task.helperDoers.map(h => h.helperId) : [];
+    const helperIds = [...(Array.isArray(task.helperDoers) ? task.helperDoers.map(h => h.helperId) : []), ...(Array.isArray(task.coworkers) ? task.coworkers.map(c => (c && c._id) || c) : [])];
     const helpers = helperIds.length > 0 ? await Employee.find({ _id: { $in: helperIds } }) : [];
     const helperNames = helpers.map(h => h.name).join(", ") || "None";
 
@@ -2215,7 +2234,7 @@ exports.respondToTask = async (req, res) => {
       const isAssigner = String(task.assignerId?._id || task.assignerId) === uid;
       const isDoer = String(task.doerId?._id || task.doerId) === uid;
       const isCoordinator = task.coordinatorId && String(task.coordinatorId?._id || task.coordinatorId) === uid;
-      const isHelper = (task.helperDoers || []).some((h) => String(h.helperId?._id || h.helperId) === uid);
+      const isHelper = false; // followers (old "helpers") can only watch: they cannot complete, verify or send back
       const isInForwardChain = (task.forwardChain || []).some((f) => String(f.employeeId?._id || f.employeeId) === uid);
       const isBuddy = String(task.doerId?.leaveStatus?.buddyId || '') === uid;
       if (!isAdmin && !isAssigner && !isDoer && !isCoordinator && !isHelper && !isInForwardChain && !isBuddy) {
@@ -2486,6 +2505,16 @@ exports.createTask = async (req, res) => {
       }
     }
 
+    // The Followers picker on New Task sends its list as helperDoers: save them as FOLLOWERS (watch only),
+    // never as helpers, so they cannot complete or change the date of the task.
+    if (Array.isArray(taskData.helperDoers) && taskData.helperDoers.length) {
+      const fromPicker = taskData.helperDoers.map(h => (h && (h.helperId || h._id)) || h).filter(Boolean);
+      let existing = taskData.coworkers;
+      if (typeof existing === 'string') { try { existing = JSON.parse(existing); } catch (e) { existing = []; } }
+      taskData.coworkers = [...(Array.isArray(existing) ? existing : []), ...fromPicker];
+    }
+    taskData.helperDoers = [];
+
     // --- COMPANY-DEFINED EXTRA FIELDS (none defined = nothing changes) ---
     {
       const cfDefs = await loadActiveDefs(req, 'delegation', req.user?.tenantId || taskData.tenantId);
@@ -2540,8 +2569,8 @@ exports.createTask = async (req, res) => {
       taskData.maxExtensionDays = Math.min(ext, 90);
     }
 
-    // Followers may change the date unless the assigner un-ticked the box (missing = ticked for new tasks)
-    taskData.followersCanChangeDate = !(taskData.followersCanChangeDate === false || taskData.followersCanChangeDate === 'false');
+    // Followers only follow up: they cannot change the date (only the doer, the assigner or an Admin can)
+    taskData.followersCanChangeDate = false;
 
     // --- SAVE TO DATABASE ---
     // Tasks are auto-accepted on creation: the doer no longer has to press "Accept".

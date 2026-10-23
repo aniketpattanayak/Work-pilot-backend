@@ -108,6 +108,9 @@ exports.changeDate = async (req, res) => {
     }
 
     if (isFollower && !isDoer) {
+      return res.status(403).json({ message: 'Followers can only follow up with the doer. Only the doer, the assigner or an Admin can change the date.' });
+    }
+    if (false && isFollower && !isDoer) {
       if (!isOn(tenant, 'dates_followersChange')) return res.status(403).json({ message: 'Your company has switched off deadline changes by followers.' });
       if (task.followersCanChangeDate === true) {
         const r = D.applyDateChange(task, { actor, newDeadline: nd, reason: rs.reason, reasonNote: rs.reasonNote, byRole: 'follower' });

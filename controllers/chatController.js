@@ -148,6 +148,21 @@ exports.getOrCreateTaskThread = async (req, res) => {
       conversation = conversation.toObject();
     }
 
+    // A person who FOLLOWS the task (or is its doer / assigner) can always join its thread, so a follower can follow up with the doer
+    try {
+      const me = String(req.user.id || '');
+      const isIn = (conversation.participants || []).some(p => String(p) === me);
+      if (!isIn && (taskType || 'delegation') === 'delegation' && /^[a-f0-9]{24}$/i.test(String(taskId || ''))) {
+        const DT = req.db ? req.db.model('DelegationTask') : require('../models/DelegationTask');
+        const t = await DT.findOne({ _id: taskId, tenantId }).select('doerId assignerId coworkers helperDoers').lean();
+        const ids = t ? [t.doerId, t.assignerId, ...(t.coworkers || []), ...(t.helperDoers || []).map(h => h.helperId)].map(x => String(x || '')) : [];
+        if (ids.includes(me)) {
+          await Conversation.updateOne({ _id: conversation._id }, { $addToSet: { participants: req.user.id } });
+          conversation = await Conversation.findById(conversation._id).lean();
+        }
+      }
+    } catch (e) { console.error('[Chat] join task thread:', e.message); }
+
     res.json(conversation);
   } catch (err) {
     console.error('[Chat] getOrCreateTaskThread error:', err.message);
