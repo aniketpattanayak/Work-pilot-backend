@@ -148,7 +148,8 @@ const TenantSchema = new mongoose.Schema({
     dateChangeReasons: { type: [String], default: undefined },           // the list people pick a deadline-change reason from
     formLayouts:       { type: mongoose.Schema.Types.Mixed, default: {} },   // { employee: { fields: { name: { label, required, hidden } }, order: [] } }
     masterLists:       { type: mongoose.Schema.Types.Mixed, default: undefined }, // [{ key, label, items: [] }] lists a dropdown can be linked to
-    whatsappTemplates: { type: mongoose.Schema.Types.Mixed, default: {} }    // { new_task_delegation_v2: { enabled, body, providerTemplate, senderPhoneId } }
+    whatsappTemplates: { type: mongoose.Schema.Types.Mixed, default: {} },   // { new_task_delegation_v2: { enabled, body, providerTemplate, senderPhoneId } }
+    dailyAlert:        { type: mongoose.Schema.Types.Mixed, default: {} }    // { enabled, time: 'HH:MM', lastSentOn: 'YYYY-MM-DD' } Daily task reminder (platform owner must allow it)
   },
 
   // WhatsApp Configuration (Stored per client)
@@ -261,6 +262,7 @@ const TenantSchema = new mongoose.Schema({
       // Things the platform owner must switch ON for a company (off until then)
       formDesigner: { type: Boolean, default: false }, // Settings > Form designer (rename / hide / reorder fields, new field types)
       menuControl:  { type: Boolean, default: false }, // Settings > Functions > Menu (switch side-menu sections off)
+      dailyTaskAlert: { type: Boolean, default: false }, // Daily WhatsApp reminder: overdue / today / tomorrow tasks (off until switched on for a company)
     },
 
     // Voice AI calling module (BETA). Default OFF; only the Superadmin can switch it on

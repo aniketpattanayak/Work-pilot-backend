@@ -33,6 +33,8 @@ router.get('/settings/effective', ...base, st.getEffective);
 router.get('/settings', ...base, st.getSettings);
 router.put('/settings/switches', ...base, st.saveSwitches);
 router.put('/settings/date-reasons', ...base, st.saveDateReasons);
+router.put('/settings/daily-alert', ...base, st.saveDailyAlert);
+router.post('/settings/daily-alert/test', ...base, st.testDailyAlert);
 router.put('/settings/whatsapp-templates/:key', ...base, st.saveTemplate);
 router.delete('/settings/whatsapp-templates/:key', ...base, st.resetTemplate);
 

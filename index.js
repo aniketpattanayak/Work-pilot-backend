@@ -128,6 +128,9 @@ mongoose.connect(process.env.MONGO_URI)
       console.log('🌅 LRBC Daily Briefing Engine Active (per-tenant scheduling).');
     });
 
+    // Daily task reminder on WhatsApp (only for companies the platform owner switched it on for)
+    require('./utils/dailyTaskAlert').startDailyTaskAlert();
+
     // FIX B-2: FMS sync now starts AFTER the DB is open
     const runFmsSync = require('./utils/fmsScheduler');
     runFmsSync();

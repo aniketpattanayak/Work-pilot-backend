@@ -18,6 +18,8 @@ const TEMPLATES = [
     '✨ ROUTINE ENTRY SAVED\n\nChecklist entry for "{{1}}" has been recorded for date: {{2}}.\n\nDone By: {{3}}\nTimestamp: {{4}}\nEvidence: {{5}}\n\nRegistry successfully updated: {{6}}\nThank you!!!'),
   T('daily_morning_briefing', 'Daily morning briefing', 'Every morning at the briefing time', ['Person name', 'Date', "Today's tasks", 'Backlog', 'Total needing action', 'Link'],
     "🌅 DAILY MISSION BRIEFING\n\nGood Morning {{1}}, here is your operational agenda for {{2}}:\n\n✅ TODAY'S TASKS: {{3}}\n⚠️ PENDING BACKLOG: {{4}}\n\nTotal Items Needing Action: {{5}}\n\nPlease ensure all safety protocols are followed. Synchronize your progress here: {{6}}\nThank you!!!"),
+  T('daily_task_alert', 'Daily task reminder (overdue, today, tomorrow)', 'Every morning at the time the admin sets (only for companies the platform owner switched it on for)', ['Person name', 'Overdue tasks', 'Today (date)', 'Tasks due today', 'Tomorrow (date)', 'Tasks due tomorrow', 'Link'],
+    'Dear {{1}},\n\n*Daily Task Reminder:*\n\n*⚠️ Overdue Tasks:*\n{{2}}\n\n*📅 Today ({{3}}):*\n{{4}}\n\n*⏭️ Tomorrow ({{5}}):*\n{{6}}\n\nLog in: {{7}}'),
   T('fms_step_assigned', 'Flow step assigned', 'A flow step becomes active for a person', ['Person name', 'Step', 'Order ID', 'Flow name', 'Complete by', 'Link'],
     'Hi {{1}},\n\nYou have a new task assigned to you in WorkPilot.\n\nStep: {{2}}\nOrder ID: {{3}}\nFlow: {{4}}\nComplete by: {{5}}\n\nPlease log in and complete this step on time.\n\n{{6}}\n\nThank you\nWorkPilot Team'),
   T('fms_step_reminder', 'Flow step due in 1 hour', 'One hour before a flow step is due', ['Person name', 'Step', 'Order ID', 'Due by'],

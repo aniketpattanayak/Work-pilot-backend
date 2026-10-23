@@ -11,6 +11,48 @@ const isAdmin = (u) => !!u && (u.isSuperAdmin || (Array.isArray(u.roles) && u.ro
 const ownApiOf = (t) => !!(t && ((t.superAdmin && t.superAdmin.customWhatsappKey) || (t.whatsappConfig && t.whatsappConfig.apiKey)));
 const tenantIdOf = (req) => (req.user && req.user.tenantId) ? String(req.user.tenantId) : null;
 
+// The daily task reminder exists only for companies the platform owner switched it on for
+const dailyAlertAllowed = (t) => !!(t && t.superAdmin && t.superAdmin.features && t.superAdmin.features.dailyTaskAlert === true);
+
+// PUT /api/config/settings/daily-alert   body: { enabled, time: 'HH:MM' }
+exports.saveDailyAlert = async (req, res) => {
+  try {
+    if (!isAdmin(req.user)) return res.status(403).json({ message: 'Only an admin can change this.' });
+    const id = tenantIdOf(req); if (!id) return res.status(400).json({ message: 'No company selected.' });
+    const t = await Tenant.findById(id).select('superAdmin.features.dailyTaskAlert companySettings.dailyAlert').lean();
+    if (!dailyAlertAllowed(t)) return res.status(403).json({ message: 'The daily task reminder is not switched on for your company. Please ask the platform owner.' });
+    const b = req.body || {}, cur = (t.companySettings && t.companySettings.dailyAlert) || {};
+    const next = { ...cur };
+    if (b.enabled !== undefined) { if (typeof b.enabled !== 'boolean') return res.status(400).json({ message: 'Choose on or off.' }); next.enabled = b.enabled; }
+    if (b.time !== undefined) {
+      if (!/^([01]?\d|2[0-3]):[0-5]\d$/.test(String(b.time))) return res.status(400).json({ message: 'The time must look like 08:30 (24-hour clock).' });
+      const [h, m] = String(b.time).split(':'); next.time = `${String(h).padStart(2, '0')}:${m}`;
+      // A new time today: allow it to go out today if that time is still to come
+      if (next.time !== cur.time) delete next.lastSentOn;
+    }
+    await Tenant.updateOne({ _id: id }, { $set: { 'companySettings.dailyAlert': next } });
+    res.json({ message: 'Saved.', dailyAlert: { available: true, enabled: next.enabled === true, time: next.time || '08:30' } });
+  } catch (e) { res.status(500).json({ message: 'Could not save.', error: e.message }); }
+};
+
+// POST /api/config/settings/daily-alert/test : send the reminder to the admin's own WhatsApp number now
+exports.testDailyAlert = async (req, res) => {
+  try {
+    if (!isAdmin(req.user)) return res.status(403).json({ message: 'Only an admin can do this.' });
+    const id = tenantIdOf(req); if (!id) return res.status(400).json({ message: 'No company selected.' });
+    const tenant = await Tenant.findById(id).select('companyName subdomain holidays weekends superAdmin.features.dailyTaskAlert').lean();
+    if (!dailyAlertAllowed(tenant)) return res.status(403).json({ message: 'The daily task reminder is not switched on for your company.' });
+    const Employee = require('../models/Employee');
+    const me = await Employee.findOne({ _id: req.user.id, tenantId: id }).select('name whatsappNumber workOnSunday').lean();
+    if (!me || !me.whatsappNumber) return res.status(400).json({ message: 'Your profile has no WhatsApp number.' });
+    const A = require('../utils/dailyTaskAlert');
+    const lists = await A.collectFor(tenant, me);
+    const { notifyTenant } = require('../utils/notify');
+    await notifyTenant(id, me.whatsappNumber, { templateName: A.TEMPLATE, variables: A.variablesFor(tenant, me, lists) });
+    res.json({ message: 'Sent to your WhatsApp number.', counts: { overdue: lists.overdue.length, today: lists.today.length, tomorrow: lists.tomorrow.length } });
+  } catch (e) { res.status(500).json({ message: 'Could not send the test.', error: e.message }); }
+};
+
 // GET /api/config/settings/effective  (any signed-in user): the on/off value of every switch
 exports.getEffective = async (req, res) => {
   try {
@@ -26,8 +68,10 @@ exports.getSettings = async (req, res) => {
     if (!isAdmin(req.user)) return res.status(403).json({ message: 'Only an admin can open these settings.' });
     const id = tenantIdOf(req);
     if (!id) return res.json({ switches: [], templates: [] });
-    const tenant = await Tenant.findById(id).select('companySettings superAdmin.hiddenSwitches superAdmin.features.menuControl superAdmin.customWhatsappKey whatsappConfig').lean();
+    const tenant = await Tenant.findById(id).select('companySettings superAdmin.hiddenSwitches superAdmin.features.menuControl superAdmin.features.dailyTaskAlert superAdmin.customWhatsappKey whatsappConfig').lean();
     const eff = effective(tenant), hidden = hiddenOf(tenant);
+    const alertOn = dailyAlertAllowed(tenant);
+    const da = (tenant && tenant.companySettings && tenant.companySettings.dailyAlert) || {};
     const saved = (tenant && tenant.companySettings && tenant.companySettings.whatsappTemplates) || {};
     let provider = 'doubletick';
     try { const raw = tenant?.superAdmin?.customWhatsappKey || tenant?.whatsappConfig?.apiKey; if (raw) provider = JSON.parse(raw).provider || 'doubletick'; } catch { /* a plain key = DoubleTick */ }
@@ -37,7 +81,8 @@ exports.getSettings = async (req, res) => {
       dateReasons: reasonsOf(tenant),
       dateReasonsAreDefault: !(tenant && tenant.companySettings && Array.isArray(tenant.companySettings.dateChangeReasons) && tenant.companySettings.dateChangeReasons.length),
       switches: SWITCHES.filter((s) => !hidden.includes(s.key)).map((s) => ({ key: s.key, group: s.group, label: s.label, help: s.help, default: s.default, value: eff[s.key] })),
-      templates: TEMPLATES.map((t) => ({ ...t, saved: saved[t.key] || null })),
+      templates: TEMPLATES.filter((t) => t.key !== 'daily_task_alert' || alertOn).map((t) => ({ ...t, saved: saved[t.key] || null })),
+      dailyAlert: { available: alertOn, enabled: alertOn && da.enabled === true, time: da.time || '08:30' },
     });
   } catch (e) { res.status(500).json({ message: 'Could not load settings.', error: e.message }); }
 };

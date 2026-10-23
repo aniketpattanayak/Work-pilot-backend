@@ -70,6 +70,12 @@ const MAYTAPI_TEMPLATES = {
   daily_morning_briefing: (v) =>
     `🌅 DAILY MISSION BRIEFING\n\nGood Morning ${v[0]}, here is your operational agenda for ${v[1]}:\n\n✅ TODAY'S TASKS: ${v[2]}\n⚠️ PENDING BACKLOG: ${v[3]}\n\nTotal Items Needing Action: ${v[4]}\n\nPlease ensure all safety protocols are followed. Synchronize your progress here: ${v[5]}\nThank you!!!`,
 
+  // The three task lists arrive on one line separated by " | " (template values cannot hold line breaks); plain text shows them as a list.
+  daily_task_alert: (v) => {
+    const list = (s) => String(s || 'None').split(' | ').map((x) => (x === 'None' ? 'None' : `- ${x}`)).join('\n');
+    return `Dear ${v[0]},\n\n*Daily Task Reminder:*\n\n*⚠️ Overdue Tasks:*\n${list(v[1])}\n\n*📅 Today (${v[2]}):*\n${list(v[3])}\n\n*⏭️ Tomorrow (${v[4]}):*\n${list(v[5])}\n\nLog in: ${v[6]}`;
+  },
+
   // password is a separate field on the data object (never part of the
   // shared variables array) — DoubleTick/WATI never see it, so a tenant's
   // own or the shared account's approved template is completely unaffected.
