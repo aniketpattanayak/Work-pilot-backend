@@ -2240,6 +2240,12 @@ exports.respondToTask = async (req, res) => {
       if (!isAdmin && !isAssigner && !isDoer && !isCoordinator && !isHelper && !isInForwardChain && !isBuddy) {
         return res.status(403).json({ message: "You do not have permission to respond to this task." });
       }
+      // Verifying a finished task (or sending it back) belongs to the person who gave it - not the doer,
+      // a coordinator, a buddy or a follower.
+      const isVerifyAction = status === 'Verified' || (status === 'Accepted' && task.status === 'Completed');
+      if (isVerifyAction && !isAdmin && !isAssigner && !isInForwardChain) {
+        return res.status(403).json({ message: "Only the person who assigned this task can verify it or send it back." });
+      }
     }
 
     // Finishing a task that is On hold ends the hold first, so the waiting time is not counted against the doer
