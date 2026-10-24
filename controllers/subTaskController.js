@@ -65,6 +65,11 @@ exports.createSubTask = async (req, res) => {
     if (String(parent.tenantId) !== String(req.user.tenantId)) return res.status(403).json({ message: 'Not allowed.' });
     if (parent.doerId !== me) return res.status(403).json({ message: 'You can only split a task that is assigned to you.' });
     if (!parent.open) return res.status(400).json({ message: 'The main task is already finished.' });
+    // Sub tasks only for tasks scheduled today or later (Indian date)
+    if (b.parentType !== 'FMS' && parent.deadline) {
+      const istDay = (d) => new Date(new Date(d).getTime() + 19800000).toISOString().slice(0, 10);
+      if (istDay(parent.deadline) < istDay(new Date())) return res.status(400).json({ message: 'This task is scheduled for a past date, so a sub task cannot be added to it.' });
+    }
 
     if (!(creator.managedDoers || []).map(String).includes(String(b.receiverId))) return res.status(403).json({ message: 'You can only give a sub task to people in your Doer Mapping.' });
     if (String(b.receiverId) === me) return res.status(400).json({ message: 'Choose someone other than yourself.' });

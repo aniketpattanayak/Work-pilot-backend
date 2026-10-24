@@ -2248,6 +2248,13 @@ exports.respondToTask = async (req, res) => {
       if (isVerifyAction && !isAdmin && !isAssigner && !isInForwardChain) {
         return res.status(403).json({ message: "Only the person who assigned this task can verify it or send it back." });
       }
+      // A task can be finished on its date or later, never before it (Indian date).
+      if (status === 'Completed' && task.status !== 'Completed' && task.deadline && !isAdmin) {
+        const istDay = (d) => new Date(new Date(d).getTime() + 19800000).toISOString().slice(0, 10);
+        if (istDay(task.deadline) > istDay(new Date())) {
+          return res.status(400).json({ message: "This task is scheduled for a later date. You can complete it on or after its scheduled date." });
+        }
+      }
     }
 
     // Finishing a task that is On hold ends the hold first, so the waiting time is not counted against the doer
