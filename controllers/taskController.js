@@ -234,8 +234,11 @@ exports.getAuthorizedStaff = async (req, res) => {
 
     if (!requester) return res.status(404).json({ message: "User not found" });
 
+    // mappedOnly=1 (Assign Onward / Sub task forms): everybody, Admin included, sees only the people mapped to them
+    const mappedOnly = String(req.query.mappedOnly || '') === '1';
+
     // LOGIC: Admins AND Managers now see everyone in their factory
-    if (requester.roles.includes('Admin') || requester.roles.includes('Manager')) {
+    if (!mappedOnly && (requester.roles.includes('Admin') || requester.roles.includes('Manager'))) {
       const allStaff = await Employee.find({ tenantId: requester.tenantId })
         .select('name roles department');
       return res.status(200).json({ doers: allStaff });
