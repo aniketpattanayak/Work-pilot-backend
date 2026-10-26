@@ -129,9 +129,16 @@ exports.getAllTickets = async (req, res) => {
 // D. Resolve Ticket (Admin Action with Proof)
 exports.resolveTicket = async (req, res) => {
   try {
-    const { ticketId, adminRemarks } = req.body;
+    const { ticketId } = req.body || {};
+    const adminRemarks = String((req.body && req.body.adminRemarks) || '').trim();
+    if (!mongoose.Types.ObjectId.isValid(ticketId)) return res.status(400).json({ message: "Invalid ticket id." });
+    if (!adminRemarks) return res.status(400).json({ message: "Please write how the issue was resolved." });
+    if (adminRemarks.length > 3000) return res.status(400).json({ message: "The resolution note is too long (3000 characters at most)." });
     const ticket = await SupportTicket.findById(ticketId).populate('reporterId');
     if (!ticket) return res.status(404).json({ message: "Ticket not found" });
+    if (ticket.status === 'Resolved' || ticket.status === 'Closed') {
+      return res.status(409).json({ message: "This ticket is already marked Done." });
+    }
 
     // Process Resolution Proof (Images)
     let proofFiles = [];
@@ -155,14 +162,33 @@ exports.resolveTicket = async (req, res) => {
 
     await ticket.save();
 
-    // Notify User of Resolution via WhatsApp
-    if (ticket.reporterId?.whatsappNumber) {
-        const msg = `✅ *Ticket Resolved*\n\nHi ${ticket.reporterName}, your issue "${ticket.title}" has been fixed.\n\n*Solution:* ${adminRemarks}`;
+    // Notify User of Resolution via WhatsApp (a failed message never undoes the resolution)
+    try {
+      if (ticket.reporterId?.whatsappNumber) {
+        const msg = `✅ *Ticket Done*\n\nHi ${ticket.reporterName}, your issue "${ticket.title}" has been fixed.\n\n*Solution:* ${adminRemarks}`;
         await notifyTenant(ticket.tenantId, ticket.reporterId.whatsappNumber, msg);
-    }
+      }
+    } catch (e) { console.error('Ticket resolve notify failed:', e.message); }
 
-    res.status(200).json({ message: "Ticket marked as Resolved", ticket });
+    res.status(200).json({ message: "Ticket marked as Done", ticket });
   } catch (error) {
     res.status(500).json({ message: "Resolution failed", error: error.message });
+  }
+};
+
+// E. Start work on a ticket: Open -> In-Progress (Super Admin)
+exports.startTicket = async (req, res) => {
+  try {
+    const { ticketId } = req.body || {};
+    if (!mongoose.Types.ObjectId.isValid(ticketId)) return res.status(400).json({ message: "Invalid ticket id." });
+    const ticket = await SupportTicket.findById(ticketId);
+    if (!ticket) return res.status(404).json({ message: "Ticket not found" });
+    if (ticket.status !== 'Open') return res.status(409).json({ message: "Only an Open ticket can be started (this one is " + ticket.status + ")." });
+    ticket.status = 'In-Progress';
+    ticket.history.push({ action: 'In-Progress', performedBy: 'Super Admin', timestamp: new Date(), remarks: 'Support started working on this ticket.' });
+    await ticket.save();
+    res.status(200).json({ message: "Ticket is now In-Progress", ticket });
+  } catch (error) {
+    res.status(500).json({ message: "Could not start the ticket", error: error.message });
   }
 };
