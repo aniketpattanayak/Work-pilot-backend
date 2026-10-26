@@ -1,22 +1,23 @@
 // server/controllers/taskController.js
 const DelegationTask = require('../models/DelegationTask');
-const _Employee       = require('../models/Employee');
-const _Tenant         = require('../models/Tenant');
-const _ChecklistTask  = require('../models/ChecklistTask');
-const mongoose        = require('mongoose');
+const _Employee = require('../models/Employee');
+const _Tenant = require('../models/Tenant');
+const _ChecklistTask = require('../models/ChecklistTask');
+const mongoose = require('mongoose');
 const { isViewerOnly } = require('../middleware/auth');
 const { notifyTenant } = require('../utils/notify');
-const moment          = require('moment');
+const moment = require('moment');
 const { calculateNextDate } = require('../utils/scheduler');
+const { loadActiveDefs, cleanCustomFields } = require('../utils/customFields');
 const { getReqModels } = require('../utils/reqModels');
 
 async function M(req) {
   const m = await getReqModels(req);
   return {
     DelegationTask: m.DelegationTask || _DelegationTask,
-    Employee:       m.Employee       || _Employee,
-    Tenant:         m.Tenant         || _Tenant,
-    ChecklistTask:  m.ChecklistTask  || _ChecklistTask,
+    Employee: m.Employee || _Employee,
+    Tenant: m.Tenant || _Tenant,
+    ChecklistTask: m.ChecklistTask || _ChecklistTask,
   };
 }
 
@@ -24,16 +25,16 @@ async function M(req) {
 // ─── Per-tenant DB model getter ───────────────────────────────────────────────
 function safeModel(db, name, fallback) {
   if (!db) return fallback;
-  try { return db.model(name); } catch(e) { return fallback; }
+  try { return db.model(name); } catch (e) { return fallback; }
 }
 function getModels(req) {
   const db = req?.db || null;
   return {
     DelegationTask: safeModel(db, 'DelegationTask', require('../models/DelegationTask')),
-    Employee:       safeModel(db, 'Employee',       require('../models/Employee')),
-    Tenant:         require('../models/Tenant'), // Tenant records are platform metadata — always shared, never per-tenant-DB
-    ChecklistTask:  safeModel(db, 'ChecklistTask',  require('../models/ChecklistTask')),
-    FlowInstance:   safeModel(db, 'FlowInstance',   require('../models/FlowInstance')),
+    Employee: safeModel(db, 'Employee', require('../models/Employee')),
+    Tenant: require('../models/Tenant'), // Tenant records are platform metadata — always shared, never per-tenant-DB
+    ChecklistTask: safeModel(db, 'ChecklistTask', require('../models/ChecklistTask')),
+    FlowInstance: safeModel(db, 'FlowInstance', require('../models/FlowInstance')),
   };
 }
 
@@ -47,6 +48,15 @@ function getModels(req) {
 // SECURITY: auth = only the employeeId themselves, or an Admin/superAdmin, same
 // pattern as other subject-scoped endpoints (e.g. getEmployeeDeepDive). Must also be
 // same-tenant - mirrors getTaskById/respondToTask elsewhere in this file.
+// Everyone who FOLLOWS a task: the proper followers list (coworkers) plus anyone saved by the
+// old "helper" box (helperDoers), which the New Task form used for its Followers picker.
+const followersOf = (t) => {
+  const seen = new Set(); const out = [];
+  (t.coworkers || []).forEach((c) => { const id = String((c && c._id) || c || ''); if (id && !seen.has(id)) { seen.add(id); out.push({ _id: (c && c._id) || c, name: (c && c.name) || '' }); } });
+  (t.helperDoers || []).forEach((h) => { const id = String((h && h.helperId && h.helperId._id) || (h && h.helperId) || ''); if (id && !seen.has(id)) { seen.add(id); out.push({ _id: (h.helperId && h.helperId._id) || h.helperId, name: (h && h.name) || (h.helperId && h.helperId.name) || '' }); } });
+  return out;
+};
+
 exports.getFollowingTasks = async (req, res) => {
   try {
     const { DelegationTask, Employee } = getModels(req);
@@ -69,7 +79,7 @@ exports.getFollowingTasks = async (req, res) => {
       return res.status(403).json({ message: "Forbidden." });
     }
 
-    const tasks = await DelegationTask.find({ coworkers: employeeId, tenantId: employee.tenantId })
+    const tasks = await DelegationTask.find({ $or: [{ coworkers: employeeId }, { 'helperDoers.helperId': employeeId }], tenantId: employee.tenantId })
       .populate('assignerId', 'name')
       .populate('doerId', 'name')
       .populate('coordinatorId', 'name')
@@ -91,10 +101,14 @@ exports.getFollowingTasks = async (req, res) => {
       assignerId: t.assignerId ? { _id: t.assignerId._id, name: t.assignerId.name } : null,
       doerId: t.doerId ? { _id: t.doerId._id, name: t.doerId.name } : null,
       coordinatorId: t.coordinatorId ? { _id: t.coordinatorId._id, name: t.coordinatorId.name } : null,
-      followers: (t.coworkers || []).filter(c => c && c._id).map(c => ({ _id: c._id, name: c.name })),
+      followers: followersOf(t),
       history: t.history || [],
       files: t.files || [],
       isFollowing: true,
+      followersCanChangeDate: false, // followers only follow up; the doer changes the date
+      pendingDateRequest: t.pendingDateRequest && t.pendingDateRequest.byId ? t.pendingDateRequest : null,
+      onHold: t.onHold || null,
+      parentTask: t.parentTask || null,
     }));
 
     res.status(200).json(result);
@@ -133,6 +147,7 @@ exports.getDoerTasks = async (req, res) => {
       $or: [
         { doerId: doerId },
         { "helperDoers.helperId": doerId },
+        { coworkers: doerId }, // tasks I follow (view only, shown in a different colour)
         { doerId: { $in: buddyForIds } },
         // My Tasks only: also return tasks I passed on, so I can still follow them
         ...(req.query.includePassedOn === '1' ? [{ 'forwardChain.employeeId': doerId }] : [])
@@ -190,7 +205,16 @@ exports.getDoerTasks = async (req, res) => {
     // without touching the existing `coworkers` field anything else may read.
     const withFollowers = filteredTasks.map(t => {
       const obj = t.toObject ? t.toObject() : t;
-      obj.followers = (obj.coworkers || []).filter(c => c && c._id).map(c => ({ _id: c._id, name: c.name }));
+      obj.followers = followersOf(obj);
+      // How this task relates to ME: doer (mine, or covering as buddy), passedOn (I handed it on) or follower (view only)
+      const ownerId = String((obj.doerId && obj.doerId._id) || obj.doerId || '');
+      const inChain = (obj.forwardChain || []).some(c => String((c.employeeId && c.employeeId._id) || c.employeeId || '') === String(doerId));
+      const follows = obj.followers.some(f => String(f._id) === String(doerId));
+      obj.myRole = ownerId === String(doerId) ? 'doer'
+        : buddyForIds.some(id => String(id) === ownerId) ? 'doer'
+          : inChain ? 'passedOn'
+            : follows ? 'follower'
+              : 'doer';
       return obj;
     });
 
@@ -210,8 +234,11 @@ exports.getAuthorizedStaff = async (req, res) => {
 
     if (!requester) return res.status(404).json({ message: "User not found" });
 
+    // mappedOnly=1 (Assign Onward / Sub task forms): everybody, Admin included, sees only the people mapped to them
+    const mappedOnly = String(req.query.mappedOnly || '') === '1';
+
     // LOGIC: Admins AND Managers now see everyone in their factory
-    if (requester.roles.includes('Admin') || requester.roles.includes('Manager')) {
+    if (!mappedOnly && (requester.roles.includes('Admin') || requester.roles.includes('Manager'))) {
       const allStaff = await Employee.find({ tenantId: requester.tenantId })
         .select('name roles department');
       return res.status(200).json({ doers: allStaff });
@@ -251,7 +278,7 @@ exports.getAssignerTasks = async (req, res) => {
     // Additive "followers" alias (see getDoerTasks) - existing `coworkers` field untouched.
     const withFollowers = (tasks || []).map(t => {
       const obj = t.toObject ? t.toObject() : t;
-      obj.followers = (obj.coworkers || []).filter(c => c && c._id).map(c => ({ _id: c._id, name: c.name }));
+      obj.followers = followersOf(obj);
       return obj;
     });
 
@@ -512,9 +539,9 @@ exports.getTaskById = async (req, res) => {
     const isOwner = idOf(task.assignerId) === uid || idOf(task.coordinatorId) === uid ||
       (task.forwardChain || []).some(f => idOf(f.employeeId) === uid);
     const isDoerSide = idOf(task.doerId) === uid ||
-      (task.helperDoers || []).some(h => idOf(h.helperId) === uid) ||
       idOf(task.doerId?.leaveStatus?.buddyId) === uid;
-    const isCoworker = (task.coworkers || []).some(c => idOf(c) === uid);
+    const isCoworker = (task.coworkers || []).some(c => idOf(c) === uid) ||
+      (task.helperDoers || []).some(h => idOf(h.helperId) === uid);
 
     if (!isAdminCaller && !isOwner && !isDoerSide && !isCoworker) {
       return res.status(403).json({ message: "You are not part of this task." });
@@ -535,7 +562,7 @@ exports.getTaskById = async (req, res) => {
       doerId: task.doerId ? { _id: task.doerId._id, name: task.doerId.name } : null,
       // Followers (watch-only; see utils/followerValidation.js). Additive field -
       // every existing field above is unchanged.
-      followers: (task.coworkers || []).filter(c => c && c._id).map(c => ({ _id: c._id, name: c.name })),
+      followers: followersOf(task),
     });
   } catch (err) {
     console.error('[Task] getTaskById error:', err.message);
@@ -566,6 +593,7 @@ exports.updateTask = async (req, res) => {
 
     const { title, description, doerId, deadline, priority, coworkers } = req.body;
     const changes = [];
+    let dateChangeInfo = null; // set when the deadline moves (recorded after every check has passed)
 
     if (typeof title === 'string' && title.trim() && title.trim() !== task.title) {
       task.title = title.trim();
@@ -599,7 +627,13 @@ exports.updateTask = async (req, res) => {
       if (newDay !== oldIso.slice(0, 10)) {
         const d = new Date(newDay + 'T' + oldIso.slice(11));
         if (isNaN(d.getTime())) return res.status(400).json({ message: "Invalid deadline." });
-        task.deadline = d;
+        const DC = require('../utils/dateChanges');
+        const tenantDoc = await _Tenant.findById(task.tenantId).lean();
+        const lock = DC.blockedReason(task, tenantDoc);
+        if (lock) return res.status(400).json({ message: lock });
+        const rs = DC.checkReason(tenantDoc, req.body);
+        if (rs.error) return res.status(400).json({ message: rs.error });
+        dateChangeInfo = { d, rs, tenantDoc };
         changes.push('deadline');
       }
     }
@@ -627,6 +661,21 @@ exports.updateTask = async (req, res) => {
       }
     }
 
+    if (req.body.customFields !== undefined) {
+      const cfDefs = await loadActiveDefs(req, 'delegation', task.tenantId);
+      const cf = cleanCustomFields(cfDefs, req.body.customFields, { mode: 'update' });
+      if (cf.errors.length) return res.status(400).json({ message: cf.errors[0], errors: cf.errors });
+      let cfChanged = false;
+      if (!task.customFields) task.customFields = {};
+      for (const [k, v] of Object.entries(cf.values)) {
+        const cur = task.customFields.get(k);
+        if ((cur === undefined ? null : cur) === v) continue;
+        if (v === null) task.customFields.delete(k); else task.customFields.set(k, v);
+        cfChanged = true;
+      }
+      if (cfChanged) changes.push('extra fields');
+    }
+
     if (changes.length === 0) {
       return res.status(200).json({ message: "No changes to save.", task });
     }
@@ -643,8 +692,37 @@ exports.updateTask = async (req, res) => {
     if (!task.history) task.history = [];
     task.history.push(entry);
 
+    let moved = null;
+    if (dateChangeInfo) {
+      const DC = require('../utils/dateChanges');
+      const { Employee: Emp } = getModels(req);
+      let actorName = 'Admin';
+      try { const me = await Emp.findById(req.user.id).select('name').lean(); if (me?.name) actorName = me.name; } catch (e) { /* keep default */ }
+      const isAsg = String(task.assignerId) === String(req.user?.id);
+      moved = DC.applyDateChange(task, {
+        actor: { id: mongoose.Types.ObjectId.isValid(req.user?.id) ? req.user.id : undefined, name: actorName },
+        newDeadline: dateChangeInfo.d, reason: dateChangeInfo.rs.reason, reasonNote: dateChangeInfo.rs.reasonNote,
+        byRole: isAsg ? 'assigner' : 'admin',
+      });
+      if (task.pendingDateRequest && task.pendingDateRequest.byId) task.pendingDateRequest = undefined;
+    }
+
     await task.save();
-    res.status(200).json({ message: "Task updated successfully", task });
+
+    let warnings = [];
+    if (moved) {
+      try {
+        const DC = require('../utils/dateChanges');
+        const { Employee: Emp } = getModels(req);
+        const doerDoc = await Emp.findById(task.doerId).select('name whatsappNumber').lean();
+        warnings = await DC.dateWarnings({ tenant: dateChangeInfo.tenantDoc, doerId: task.doerId, date: moved.newDeadline, models: { LeaveRequest: (req.db && (() => { try { return req.db.model('LeaveRequest'); } catch (e) { return null; } })()) || require('../models/LeaveRequest') } });
+        if (require('../utils/settingsRegistry').isOn(dateChangeInfo.tenantDoc, 'dates_notifyDoer') && String(task.doerId) !== String(req.user?.id) && doerDoc?.whatsappNumber) {
+          const last = task.dateChanges[task.dateChanges.length - 1] || {};
+          await notifyTenant(task.tenantId, doerDoc.whatsappNumber, { templateName: 'task_deadline_changed', variables: [doerDoc.name, task.title, DC.fmt(moved.oldDeadline), DC.fmt(moved.newDeadline), last.byName || 'Admin', [last.reason, last.reasonNote].filter(Boolean).join(' - ') || 'Not given', `https://${dateChangeInfo.tenantDoc?.subdomain || 'portal'}.lrbcloud.ai/dashboard/my-tasks`].map(String) });
+        }
+      } catch (e) { console.error('Deadline change notify error:', e.message); }
+    }
+    res.status(200).json({ message: "Task updated successfully", task, warnings });
   } catch (error) {
     console.error("❌ updateTask error:", error.message);
     res.status(500).json({ message: "Failed to update task", error: error.message });
@@ -710,8 +788,8 @@ exports.completeChecklistTask = async (req, res) => {
 
     task.history.push({
       action: "Completed",
-      timestamp: now, 
-      instanceDate: new Date(targetDate), 
+      timestamp: now,
+      instanceDate: new Date(targetDate),
       remarks: remarks || (instanceDate ? `Backlog catch-up for ${targetDate.toDateString()}` : "Daily routine finished."),
       attachmentUrl: req.file ? (req.file.location || req.file.path) : null,
       completedBy: completedBy || task.doerId
@@ -731,7 +809,7 @@ exports.completeChecklistTask = async (req, res) => {
         holidays,
         new Date(targetDate),
         false,
-        tenant.weekends || [0] 
+        tenant.weekends || [0]
       );
     }
 
@@ -776,7 +854,7 @@ exports.completeChecklistTask = async (req, res) => {
         if (admin?.whatsappNumber) {
           await notifyTenant(tenant._id, admin.whatsappNumber, payload);
         }
-        
+
         // C. Notify Quality Coordinator (If Assigned)
         if (task.coordinatorId) {
           const coordinator = await Employee.findById(task.coordinatorId);
@@ -846,7 +924,7 @@ exports.updateChecklistTask = async (req, res) => {
      * Added 'description' to the destructuring to ensure it is captured 
      * from the high-density grid's edit mode.
      */
-    const { taskName, description, doerId, status, frequency, frequencyConfig , createdAt, startDate } = req.body;
+    const { taskName, description, doerId, status, frequency, frequencyConfig, createdAt, startDate } = req.body;
 
     /**
      * 2. SMART RE-CALCULATION GUARD
@@ -894,18 +972,18 @@ exports.updateChecklistTask = async (req, res) => {
 
       // Use the scheduler's calculateNextDate to find the very next valid mission
       // Anchor from today to ensure the new schedule starts fresh
-      
-      
-      
+
+
+
       //const anchor = new Date();
 
 
       const anchor = newStart
         ? new Date(newStart)
         : (existingTask.startDate
-            ? new Date(existingTask.startDate)
-            : (createdAt ? new Date(createdAt) : new Date(existingTask.createdAt)));
-anchor.setHours(0, 0, 0, 0);  
+          ? new Date(existingTask.startDate)
+          : (createdAt ? new Date(createdAt) : new Date(existingTask.createdAt)));
+      anchor.setHours(0, 0, 0, 0);
 
 
       //anchor.setHours(0, 0, 0, 0);
@@ -923,17 +1001,28 @@ anchor.setHours(0, 0, 0, 0);
     /**
      * 3. EXECUTE ATOMIC UPDATE
      */
+    // Company-defined extra fields (only when sent)
+    const cfSet = {}; const cfUnset = {};
+    if (req.body.customFields !== undefined) {
+      const cfDefsU = await loadActiveDefs(req, 'task', existingTask.tenantId);
+      const cfU = cleanCustomFields(cfDefsU, req.body.customFields, { mode: 'update' });
+      if (cfU.errors.length) return res.status(400).json({ message: cfU.errors[0], errors: cfU.errors });
+      for (const [k, v] of Object.entries(cfU.values)) { if (v === null) cfUnset['customFields.' + k] = ''; else cfSet['customFields.' + k] = v; }
+    }
+
     const updatedTask = await ChecklistTask.findByIdAndUpdate(
       id,
       {
+        ...(Object.keys(cfUnset).length ? { $unset: cfUnset } : {}),
         $set: {
+          ...cfSet,
           taskName,
           description: description || "",
           doerId,
           status,
           frequency,
           frequencyConfig,
-          nextDueDate: finalNextDueDate ,
+          nextDueDate: finalNextDueDate,
           createdAt: createdAt || existingTask.createdAt,
           ...(newStart ? { startDate: newStart } : {}),
         }
@@ -1001,19 +1090,19 @@ exports.createChecklistTask = async (req, res) => {
 
 
     // Example for weekly
-if (frequency === "Weekly") {
-  const selectedDays = frequencyConfig.daysOfWeek || [];
-  const weekends = tenant.weekends || [0];
+    if (frequency === "Weekly") {
+      const selectedDays = frequencyConfig.daysOfWeek || [];
+      const weekends = tenant.weekends || [0];
 
-  const conflictDays = selectedDays.filter(day => weekends.includes(day));
+      const conflictDays = selectedDays.filter(day => weekends.includes(day));
 
-  if (conflictDays.length > 0) {
-    return res.status(400).json({
-      message: "Invalid configuration: Selected working day falls on employee off day",
-      conflictDays
-    });
-  }
-}
+      if (conflictDays.length > 0) {
+        return res.status(400).json({
+          message: "Invalid configuration: Selected working day falls on employee off day",
+          conflictDays
+        });
+      }
+    }
 
 
 
@@ -1027,8 +1116,16 @@ if (frequency === "Weekly") {
     );
 
 
+    // Company-defined extra fields for checklist tasks (none defined = nothing changes)
+    const cfDefs = await loadActiveDefs(req, 'task', tenantId);
+    const cfClean = cleanCustomFields(cfDefs, req.body.customFields, { mode: 'create' });
+    if (cfClean.errors.length) return res.status(400).json({ message: cfClean.errors[0], errors: cfClean.errors });
+
+    const planIdOk = await require('./plannerController').validPlanFor(req, req.body.planId);
     const newChecklist = new ChecklistTask({
       tenantId,
+      ...(planIdOk ? { planId: planIdOk } : {}),
+      customFields: Object.fromEntries(Object.entries(cfClean.values).filter(([, v]) => v !== null)),
       taskName,
       description: description || "",
       doerId,
@@ -1139,7 +1236,7 @@ exports.coordinatorForceDone = async (req, res) => {
         : "N/A";
 
       // MAP SUPPORT TEAM NAMES AND FETCH NUMBERS
-      const helperIds = Array.isArray(task.helperDoers) ? task.helperDoers.map(h => h.helperId) : [];
+      const helperIds = [...(Array.isArray(task.helperDoers) ? task.helperDoers.map(h => h.helperId) : []), ...(Array.isArray(task.coworkers) ? task.coworkers.map(c => (c && c._id) || c) : [])];
       const helpers = helperIds.length > 0 ? await Employee.find({ _id: { $in: helperIds } }) : [];
       const helperNames = helpers.map(h => h.name).join(", ") || "None";
 
@@ -1243,109 +1340,109 @@ exports.getEmployeeDeepDive = async (req, res) => {
     });
 
     // 4. Process Checklist instances that fall within the range
-   
-   
+
+
+
+    /*  checklists.forEach(t => {
+        const rangeHistory = t.history?.filter(h =>
+          new Date(h.timestamp) >= new Date(startDate) && new Date(h.timestamp) <= new Date(endDate)
+        ) || [];
   
-  /*  checklists.forEach(t => {
-      const rangeHistory = t.history?.filter(h =>
-        new Date(h.timestamp) >= new Date(startDate) && new Date(h.timestamp) <= new Date(endDate)
-      ) || [];
+        rangeHistory.forEach(h => {
+          const instanceDate = h.instanceDate || h.timestamp;
+  
+          // LEAVE FILTERING: Skip if instanceDate falls inside leave period
+          if (hasLeave) {
+            const leaveStart = new Date(employee.leaveStatus.startDate);
+            const leaveEnd = new Date(employee.leaveStatus.endDate);
+            const iDate = new Date(instanceDate).setHours(0, 0, 0, 0);
+            const sDate = new Date(leaveStart).setHours(0, 0, 0, 0);
+            const eDate = new Date(leaveEnd).setHours(23, 59, 59, 999);
+            if (iDate >= sDate && iDate <= eDate) return;
+          }
+  
+          const isLate = new Date(h.timestamp).toDateString() !== new Date(instanceDate).toDateString();
+  
+          detailedRows.push({
+            id: t._id,
+            name: t.taskName,
+            type: 'Checklist',
+            deadline: instanceDate,
+            completedAt: h.timestamp,
+            status: isLate ? 'LATE' : 'COMPLETED',
+            remarks: h.remarks
+          });
+        });
+      });
+      
+      
+      
+      */
 
-      rangeHistory.forEach(h => {
-        const instanceDate = h.instanceDate || h.timestamp;
 
-        // LEAVE FILTERING: Skip if instanceDate falls inside leave period
+    // 4. Process Checklist instances (INCLUDING PENDING)
+    checklists.forEach(t => {
+      const start = new Date(startDate);
+      const end = new Date(endDate);
+
+      let pointer = new Date(t.nextDueDate);
+      pointer.setHours(0, 0, 0, 0);
+
+      let loop = 0;
+
+      while (pointer <= end && loop < 50) {
+        loop++;
+
+        const instanceDate = new Date(pointer);
+
+        // Check if completed
+        const done = t.history?.find(h => {
+          const hDate = new Date(h.instanceDate || h.timestamp);
+          return h.action === 'Completed' &&
+            hDate.toDateString() === instanceDate.toDateString();
+        });
+
+        // LEAVE FILTERING
         if (hasLeave) {
           const leaveStart = new Date(employee.leaveStatus.startDate);
           const leaveEnd = new Date(employee.leaveStatus.endDate);
-          const iDate = new Date(instanceDate).setHours(0, 0, 0, 0);
+
+          const iDate = instanceDate.setHours(0, 0, 0, 0);
           const sDate = new Date(leaveStart).setHours(0, 0, 0, 0);
           const eDate = new Date(leaveEnd).setHours(23, 59, 59, 999);
-          if (iDate >= sDate && iDate <= eDate) return;
+
+          if (iDate >= sDate && iDate <= eDate) {
+            pointer.setDate(pointer.getDate() + 1);
+            continue;
+          }
         }
 
-        const isLate = new Date(h.timestamp).toDateString() !== new Date(instanceDate).toDateString();
+        let status = "PENDING";
+
+        if (done) {
+          const isLate = new Date(done.timestamp).toDateString() !== instanceDate.toDateString();
+          status = isLate ? "LATE" : "COMPLETED";
+        } else if (instanceDate < new Date()) {
+          status = "OVERDUE";
+        }
 
         detailedRows.push({
           id: t._id,
           name: t.taskName,
           type: 'Checklist',
           deadline: instanceDate,
-          completedAt: h.timestamp,
-          status: isLate ? 'LATE' : 'COMPLETED',
-          remarks: h.remarks
+          completedAt: done?.timestamp || null,
+          status,
+          remarks: done?.remarks || "",
+          isChecklistInstance: true   // ⭐ IMPORTANT FLAG
         });
-      });
-    });
-    
-    
-    
-    */
 
-
-    // 4. Process Checklist instances (INCLUDING PENDING)
-checklists.forEach(t => {
-  const start = new Date(startDate);
-  const end = new Date(endDate);
-
-  let pointer = new Date(t.nextDueDate);
-  pointer.setHours(0,0,0,0);
-
-  let loop = 0;
-
-  while (pointer <= end && loop < 50) {
-    loop++;
-
-    const instanceDate = new Date(pointer);
-
-    // Check if completed
-    const done = t.history?.find(h => {
-      const hDate = new Date(h.instanceDate || h.timestamp);
-      return h.action === 'Completed' &&
-             hDate.toDateString() === instanceDate.toDateString();
-    });
-
-    // LEAVE FILTERING
-    if (hasLeave) {
-      const leaveStart = new Date(employee.leaveStatus.startDate);
-      const leaveEnd = new Date(employee.leaveStatus.endDate);
-
-      const iDate = instanceDate.setHours(0,0,0,0);
-      const sDate = new Date(leaveStart).setHours(0,0,0,0);
-      const eDate = new Date(leaveEnd).setHours(23,59,59,999);
-
-      if (iDate >= sDate && iDate <= eDate) {
-        pointer.setDate(pointer.getDate() + 1);
-        continue;
+        // Move pointer
+        if (t.frequency === 'Daily') pointer.setDate(pointer.getDate() + 1);
+        else if (t.frequency === 'Weekly') pointer.setDate(pointer.getDate() + 7);
+        else break;
       }
-    }
-
-    let status = "PENDING";
-
-    if (done) {
-      const isLate = new Date(done.timestamp).toDateString() !== instanceDate.toDateString();
-      status = isLate ? "LATE" : "COMPLETED";
-    } else if (instanceDate < new Date()) {
-      status = "OVERDUE";
-    }
-
-    detailedRows.push({
-      id: t._id,
-      name: t.taskName,
-      type: 'Checklist',
-      deadline: instanceDate,
-      completedAt: done?.timestamp || null,
-      status,
-      remarks: done?.remarks || "",
-      isChecklistInstance: true   // ⭐ IMPORTANT FLAG
     });
-
-    // Move pointer
-    if (t.frequency === 'Daily') pointer.setDate(pointer.getDate() + 1);
-    else if (t.frequency === 'Weekly') pointer.setDate(pointer.getDate() + 7);
-    else break;
-  }
-});
 
 
 
@@ -1525,9 +1622,9 @@ exports.dispatchDailyBriefings = async () => {
 
       for (const employee of employees) {
         // 2. Fetch Tasks for this specific employee
-        const tasks = await DelegationTask.find({ 
-          doerId: employee._id, 
-          status: { $in: ['Pending', 'Accepted', 'Revision Requested'] } 
+        const tasks = await DelegationTask.find({
+          doerId: employee._id,
+          status: { $in: ['Pending', 'Accepted', 'Revision Requested'] }
         });
 
         // 3. Categorize: Today vs Backlog
@@ -1637,7 +1734,7 @@ exports.getCoordinatorTasks = async (req, res) => {
     const normalizedDelegations = (delegationTasks || []).map(t => ({
       ...t,
       taskType: 'Delegation',
-      followers: (t.coworkers || []).filter(c => c && c._id).map(c => ({ _id: c._id, name: c.name })),
+      followers: followersOf(t),
     }));
 
     // 5. Merge and Sort by chronological deadline
@@ -1674,7 +1771,7 @@ exports.handleRevision = async (req, res) => {
     const moment = require('moment'); // Ensure moment is available
     const formattedDeadline = moment(newDeadline || task.deadline).format('DD MMM YYYY, hh:mm A');
 
-    const helperIds = Array.isArray(task.helperDoers) ? task.helperDoers.map(h => h.helperId) : [];
+    const helperIds = [...(Array.isArray(task.helperDoers) ? task.helperDoers.map(h => h.helperId) : []), ...(Array.isArray(task.coworkers) ? task.coworkers.map(c => (c && c._id) || c) : [])];
     const helpers = helperIds.length > 0 ? await Employee.find({ _id: { $in: helperIds } }) : [];
     const helperNames = helpers.map(h => h.name).join(", ") || "None";
 
@@ -1826,8 +1923,8 @@ exports.handleRevision = async (req, res) => {
       }
       const isOwner = idOf(g.assignerId) === uid || idOf(g.coordinatorId) === uid ||
         (g.forwardChain || []).some(f => idOf(f.employeeId) === uid);
+      // Only the doer (or the person covering for them) may ask for more time. Followers only follow up.
       const isDoerSide = idOf(g.doerId) === uid ||
-        (g.helperDoers || []).some(h => idOf(h.helperId) === uid) ||
         idOf(g.doerId?.leaveStatus?.buddyId) === uid;
       const allowed = isAdminCaller || (action === 'Request' ? (isDoerSide || isOwner) : isOwner);
       if (!allowed) {
@@ -1843,20 +1940,29 @@ exports.handleRevision = async (req, res) => {
 
     const tenant = await Tenant.findById(task.tenantId);
 
+    // A finished task keeps its deadline (stops scores from changing quietly afterwards)
+    if (['Request', 'Approve'].includes(action)) {
+      const lock = require('../utils/dateChanges').blockedReason(task, tenant);
+      if (lock) return res.status(400).json({ message: lock });
+    }
+
     const companySubdomain = tenant?.subdomain || "portal";
     const loginLink = `https://${companySubdomain}.lrbcloud.ai/login`;
 
     const moment = require('moment');
 
-    const helperIds = Array.isArray(task.helperDoers) ? task.helperDoers.map(h => h.helperId) : [];
+    const helperIds = [...(Array.isArray(task.helperDoers) ? task.helperDoers.map(h => h.helperId) : []), ...(Array.isArray(task.coworkers) ? task.coworkers.map(c => (c && c._id) || c) : [])];
     const helpers = helperIds.length > 0 ? await Employee.find({ _id: { $in: helperIds } }) : [];
     const helperNames = helpers.map(h => h.name).join(", ") || "None";
 
     const fileLinks = task.files && task.files.length > 0
       ? task.files.map((f, i) => `\n📎 Ref ${i + 1}: ${f.fileUrl}`).join("")
       : "\nNo attachments provided.";
-    
+
     if (action === 'Request') {
+      if (await settingOff(req, 'delegation_doerRevise')) {
+        return res.status(403).json({ message: "Your company has switched off deadline changes by doers. Please ask the person who gave you the task." });
+      }
       // A revision can only be requested before the deadline has passed.
       if (task.deadline && new Date() > new Date(task.deadline)) {
         return res.status(400).json({ message: "The deadline has passed, so a revision can no longer be requested for this task." });
@@ -1887,6 +1993,11 @@ exports.handleRevision = async (req, res) => {
         const f = (d) => moment(d).utcOffset(330).format('DD MMM YYYY');
         task.originalDeadline = task.originalDeadline || oldDeadline;
         task.deadline = newDeadline2;
+        {
+          const DC = require('../utils/dateChanges');
+          const chosen = DC.checkReason({ companySettings: { switches: { dates_requireReason: false } } }, { reason: req.body.reason, reasonNote: reasonText });
+          DC.pushDateChange(task, { actor: { id: req.user?.id, name: task.doerId?.name || 'Doer' }, oldDeadline, newDeadline: newDeadline2, reason: chosen.error ? '' : chosen.reason, reasonNote: reasonText, byRole: 'doer' });
+        }
         task.revisedAt = new Date();
         task.revisedByDoerId = task.doerId?._id || task.doerId;
         task.status = 'Accepted';
@@ -1947,10 +2058,10 @@ exports.handleRevision = async (req, res) => {
       }
     }
 
-    
+
     if (action === 'Approve') {
 
-      
+
       const finalDeadline = newDeadline || task.proposedDeadline || task.deadline;
       if (isNaN(new Date(finalDeadline).getTime())) {
         return res.status(400).json({ message: "Invalid deadline date." });
@@ -1961,6 +2072,12 @@ exports.handleRevision = async (req, res) => {
         task.originalDeadline = task.deadline;
         task.revisedAt = new Date();
         task.revisedByDoerId = task.doerId?._id || task.doerId;
+      }
+      {
+        const DC = require('../utils/dateChanges');
+        if (task.deadline && new Date(finalDeadline).getTime() !== new Date(task.deadline).getTime()) {
+          DC.pushDateChange(task, { actor: { id: req.user?.id, name: task.assignerId?.name || 'Assigner' }, oldDeadline: task.deadline, newDeadline: finalDeadline, reason: '', reasonNote: task.remarks || 'Approved the doer\'s request', byRole: 'approved' });
+        }
       }
       task.deadline = new Date(finalDeadline);
       task.status = 'Accepted';
@@ -2122,12 +2239,30 @@ exports.respondToTask = async (req, res) => {
       const isAssigner = String(task.assignerId?._id || task.assignerId) === uid;
       const isDoer = String(task.doerId?._id || task.doerId) === uid;
       const isCoordinator = task.coordinatorId && String(task.coordinatorId?._id || task.coordinatorId) === uid;
-      const isHelper = (task.helperDoers || []).some((h) => String(h.helperId?._id || h.helperId) === uid);
+      const isHelper = false; // followers (old "helpers") can only watch: they cannot complete, verify or send back
       const isInForwardChain = (task.forwardChain || []).some((f) => String(f.employeeId?._id || f.employeeId) === uid);
       const isBuddy = String(task.doerId?.leaveStatus?.buddyId || '') === uid;
       if (!isAdmin && !isAssigner && !isDoer && !isCoordinator && !isHelper && !isInForwardChain && !isBuddy) {
         return res.status(403).json({ message: "You do not have permission to respond to this task." });
       }
+      // Verifying a finished task (or sending it back) belongs to the person who gave it - not the doer,
+      // a coordinator, a buddy or a follower.
+      const isVerifyAction = status === 'Verified' || (status === 'Accepted' && task.status === 'Completed');
+      if (isVerifyAction && !isAdmin && !isAssigner && !isInForwardChain) {
+        return res.status(403).json({ message: "Only the person who assigned this task can verify it or send it back." });
+      }
+      // A task can be finished on its date or later, never before it (Indian date).
+      if (status === 'Completed' && task.status !== 'Completed' && task.deadline && !isAdmin) {
+        const istDay = (d) => new Date(new Date(d).getTime() + 19800000).toISOString().slice(0, 10);
+        if (istDay(task.deadline) > istDay(new Date())) {
+          return res.status(400).json({ message: "This task is scheduled for a later date. You can complete it on or after its scheduled date." });
+        }
+      }
+    }
+
+    // Finishing a task that is On hold ends the hold first, so the waiting time is not counted against the doer
+    if ((status === 'Completed' || status === 'Verified') && task.onHold && task.onHold.isOn) {
+      try { require('./dateController').endHold(task, { id: mongoose.Types.ObjectId.isValid(req.user?.id) ? req.user.id : undefined, name: 'Doer' }); } catch (e) { console.error('endHold error:', e.message); }
     }
 
     // --- PRESERVE: POINTS & ACHIEVEMENT ENGINE ---
@@ -2378,6 +2513,12 @@ exports.createTask = async (req, res) => {
     // otherwise tasks for tenants with a dedicated DB are saved where the app never reads.
     const { DelegationTask, Employee, Tenant } = getModels(req);
     const taskData = { ...req.body };
+    // Made from a Planner step? Keep the tag only for the caller's own plan.
+    {
+      const pid = await require('./plannerController').validPlanFor(req, taskData.planId);
+      if (pid) taskData.planId = pid; else { delete taskData.planId; }
+      delete taskData.planStepId;
+    }
 
     // --- PARSE HELPER DOERS ---
     if (taskData.helperDoers && typeof taskData.helperDoers === 'string') {
@@ -2386,6 +2527,24 @@ exports.createTask = async (req, res) => {
       } catch (e) {
         taskData.helperDoers = [];
       }
+    }
+
+    // The Followers picker on New Task sends its list as helperDoers: save them as FOLLOWERS (watch only),
+    // never as helpers, so they cannot complete or change the date of the task.
+    if (Array.isArray(taskData.helperDoers) && taskData.helperDoers.length) {
+      const fromPicker = taskData.helperDoers.map(h => (h && (h.helperId || h._id)) || h).filter(Boolean);
+      let existing = taskData.coworkers;
+      if (typeof existing === 'string') { try { existing = JSON.parse(existing); } catch (e) { existing = []; } }
+      taskData.coworkers = [...(Array.isArray(existing) ? existing : []), ...fromPicker];
+    }
+    taskData.helperDoers = [];
+
+    // --- COMPANY-DEFINED EXTRA FIELDS (none defined = nothing changes) ---
+    {
+      const cfDefs = await loadActiveDefs(req, 'delegation', req.user?.tenantId || taskData.tenantId);
+      const cf = cleanCustomFields(cfDefs, taskData.customFields, { mode: 'create' });
+      if (cf.errors.length) return res.status(400).json({ message: cf.errors[0], errors: cf.errors });
+      taskData.customFields = Object.fromEntries(Object.entries(cf.values).filter(([, v]) => v !== null));
     }
 
     // --- BULLETPROOF FILE PROCESSING ---
@@ -2434,11 +2593,14 @@ exports.createTask = async (req, res) => {
       taskData.maxExtensionDays = Math.min(ext, 90);
     }
 
+    // Followers only follow up: they cannot change the date (only the doer, the assigner or an Admin can)
+    taskData.followersCanChangeDate = false;
+
     // --- SAVE TO DATABASE ---
     // Tasks are auto-accepted on creation: the doer no longer has to press "Accept".
     taskData.status = 'Accepted';
     const newTask = new DelegationTask(taskData);
-    
+
     newTask.history = [{
       action: "Task Created",
       performedBy: taskData.assignerId,
@@ -2452,9 +2614,9 @@ exports.createTask = async (req, res) => {
     // --- WHATSAPP NOTIFICATIONS ---
     try {
 
-      const assigner = taskData.assignerId ? await Employee.findById(taskData.assignerId).catch(()=>null) : null;
-      const doer = taskData.doerId ? await Employee.findById(taskData.doerId).catch(()=>null) : null;
-      const tenant = taskData.tenantId ? await Tenant.findById(taskData.tenantId).catch(()=>null) : null;
+      const assigner = taskData.assignerId ? await Employee.findById(taskData.assignerId).catch(() => null) : null;
+      const doer = taskData.doerId ? await Employee.findById(taskData.doerId).catch(() => null) : null;
+      const tenant = taskData.tenantId ? await Tenant.findById(taskData.tenantId).catch(() => null) : null;
 
       const companySubdomain = tenant?.subdomain || "portal";
       const briefingLink = `https://${companySubdomain}.lrbcloud.ai/dashboard/my-tasks`;
@@ -2464,12 +2626,12 @@ exports.createTask = async (req, res) => {
         const payload = {
           templateName: "new_task_delegation_v2",
           variables: [
-            doer.name,                  
-            newTask.title,              
-            assigner?.name || "Admin",  
-            formattedDeadline,          
+            doer.name,
+            newTask.title,
+            assigner?.name || "Admin",
+            formattedDeadline,
             newTask.priority || "Normal",
-            briefingLink                
+            briefingLink
           ]
         };
 
@@ -3074,10 +3236,12 @@ exports.getReviewAnalytics = async (req, res) => {
       Employee.find({ tenantId }).select('name department location weeklyLateTarget lateTargetHistory'),
       DelegationTask.find({ tenantId, deadline: { $gte: rc.startDate, $lte: rc.endDate } }),
       ChecklistTask.find({ tenantId, status: 'Active' }),
-      FlowInstance.find({ tenantId, $or: [
-        { status: 'completed', completedAt: { $gte: rc.startDate, $lte: rc.endDate } },
-        { status: 'active' }
-      ]}).lean()
+      FlowInstance.find({
+        tenantId, $or: [
+          { status: 'completed', completedAt: { $gte: rc.startDate, $lte: rc.endDate } },
+          { status: 'active' }
+        ]
+      }).lean()
     ]);
 
     const ctx = { ...rc, delegations, checklists, fmsInstances, cfg };
@@ -3183,10 +3347,12 @@ exports.getUserDashboard = async (req, res) => {
     const [delegations, checklists, fmsInstances, openCandidates] = await Promise.all([
       DelegationTask.find({ tenantId, doerId: emp._id, deadline: { $gte: rc.startDate, $lte: rc.endDate } }),
       ChecklistTask.find({ tenantId, doerId: emp._id, status: 'Active' }),
-      FlowInstance.find({ tenantId, $or: [
-        { status: 'completed', completedAt: { $gte: rc.startDate, $lte: rc.endDate }, 'nodeHistory.assignedToId': empIdStr },
-        { status: 'active', 'activeStep.assignedToId': empIdStr }
-      ]}).lean(),
+      FlowInstance.find({
+        tenantId, $or: [
+          { status: 'completed', completedAt: { $gte: rc.startDate, $lte: rc.endDate }, 'nodeHistory.assignedToId': empIdStr },
+          { status: 'active', 'activeStep.assignedToId': empIdStr }
+        ]
+      }).lean(),
       DelegationTask.find({ tenantId, doerId: emp._id, deadline: { $lt: new Date(now.getTime() + 7 * dayMs) } }).sort({ deadline: 1 }).limit(300).lean()
     ]);
 
@@ -3240,11 +3406,24 @@ exports.getUserDashboard = async (req, res) => {
 // ─── ASSIGN A RECEIVED TASK ONWARD ───────────────────────────────────────────
 // The current doer (must hold the Assigner role) passes the task to someone mapped under them.
 // Same task record: chain = assignerId -> forwardChain[] -> doerId. The new doer completes it.
+// True when the company has switched this function off in Settings (default = on, as before)
+async function settingOff(req, key) {
+  try {
+    const id = req.user && req.user.tenantId;
+    if (!id) return false;
+    const t = await require('../models/Tenant').findById(id).select('companySettings.switches').lean();
+    return !require('../utils/settingsRegistry').isOn(t, key);
+  } catch { return false; }
+}
+
 exports.assignOnward = async (req, res) => {
   try {
     const { DelegationTask, Employee, Tenant } = getModels(req);
     const { taskId, newDoerId, remarks } = req.body || {};
     const me = String(req.user?.id || '');
+    if (await settingOff(req, 'delegation_assignOnward')) {
+      return res.status(403).json({ message: 'Your company has switched off passing a task to someone else.' });
+    }
 
     if (!mongoose.Types.ObjectId.isValid(taskId) || !mongoose.Types.ObjectId.isValid(newDoerId)) {
       return res.status(400).json({ message: 'Invalid task or person selected.' });
