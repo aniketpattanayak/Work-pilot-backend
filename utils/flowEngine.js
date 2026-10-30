@@ -191,7 +191,7 @@ function calculateDeadline(node, prevCompletedAt, rawSheetData, wh) {
 // connection timing issues or Mongoose model registration order.
 const _empCache = {};
 
-async function preCacheEmployees(template) {
+async function preCacheEmployees(template, EmpModel = Employee) {
   const ids = (template.nodes || [])
     .map(n => n.assignedTo?.value)
     .filter(v => v && v.trim() && v.length === 24);
@@ -200,7 +200,7 @@ async function preCacheEmployees(template) {
   if (unique.length === 0) return;
 
   try {
-    const emps = await Employee.find({ _id: { $in: unique } }).select('_id name').lean();
+    const emps = await EmpModel.find({ _id: { $in: unique } }).select('_id name').lean();
     emps.forEach(e => {
       _empCache[e._id.toString()] = e.name;
     });
@@ -212,7 +212,7 @@ async function preCacheEmployees(template) {
 
 // ─── RESOLVE ASSIGNEE ─────────────────────────────────────────────────────────
 
-async function resolveAssignee(node, rawSheetData) {
+async function resolveAssignee(node, rawSheetData, EmpModel = Employee) {
   // Safety check — if assignedTo is missing entirely
   if (!node.assignedTo) {
     console.warn('[resolveAssignee] node.assignedTo is undefined for node:', node.name);
@@ -227,7 +227,7 @@ async function resolveAssignee(node, rawSheetData) {
   if (type === 'sheetColumn') {
     const raw = rawSheetData?.[value];
     if (!raw) return { id: null, name: 'Unassigned' };
-    const emp = await Employee.findOne({ $or: [{ email: raw }, { name: raw }] }).select('_id name').lean();
+    const emp = await EmpModel.findOne({ $or: [{ email: raw }, { name: raw }] }).select('_id name').lean();
     if (emp) return { id: emp._id.toString(), name: emp.name };
     return { id: null, name: String(raw) };
   }
@@ -246,7 +246,7 @@ async function resolveAssignee(node, rawSheetData) {
     try {
       const mongoose = require('mongoose');
       if (mongoose.Types.ObjectId.isValid(trimmed)) {
-        const emp = await Employee.findById(trimmed).select('_id name').lean();
+        const emp = await EmpModel.findById(trimmed).select('_id name').lean();
         if (emp) {
           _empCache[trimmed] = emp.name; // store in cache
           console.log(`[resolveAssignee] ✅ Found by ID: "${emp.name}" (${emp._id})`);
@@ -260,7 +260,7 @@ async function resolveAssignee(node, rawSheetData) {
 
     // Method 2: findOne with _id as string comparison
     try {
-      const emp = await Employee.findOne({ _id: value }).select('_id name').lean();
+      const emp = await EmpModel.findOne({ _id: value }).select('_id name').lean();
       if (emp) {
         console.log(`[resolveAssignee] ✅ Found by findOne _id: "${emp.name}"`);
         return { id: emp._id.toString(), name: emp.name };
@@ -269,7 +269,7 @@ async function resolveAssignee(node, rawSheetData) {
 
     // Method 3: by name if value looks like a name
     try {
-      const emp = await Employee.findOne({ name: new RegExp(trimmed, 'i') }).select('_id name').lean();
+      const emp = await EmpModel.findOne({ name: new RegExp(trimmed, 'i') }).select('_id name').lean();
       if (emp) {
         console.log(`[resolveAssignee] ✅ Found by name: "${emp.name}"`);
         return { id: emp._id.toString(), name: emp.name };
@@ -443,12 +443,12 @@ async function completeStep(instanceId, employeeId, employeeName, decision, inpu
  * Activates the first step of a newly created FlowInstance.
  * Called immediately after FlowInstance is created from a sheet push.
  */
-async function startInstance(instance, template) {
+async function startInstance(instance, template, EmpModel = Employee) {
   const startNode = template.nodes.find(n => n.id === template.startNodeId);
   if (!startNode) throw new Error('Start node not found in template');
 
   // Pre-cache all employee IDs from the template nodes so resolveAssignee never fails
-  await preCacheEmployees(template);
+  await preCacheEmployees(template, EmpModel);
 
   // Start node itself has no deadline or assignee — immediately activate its next node
   const firstNodeId = startNode.nextNodeId;
@@ -462,7 +462,7 @@ async function startInstance(instance, template) {
   if (!firstNode) throw new Error(`First node "${firstNodeId}" not found`);
 
   const deadline = calculateDeadline(firstNode, new Date(), instance.rawSheetData, template.workingHours);
-  const assignee = await resolveAssignee(firstNode, instance.rawSheetData);
+  const assignee = await resolveAssignee(firstNode, instance.rawSheetData, EmpModel);
 
   instance.activeStep = {
     nodeId:          firstNode.id,

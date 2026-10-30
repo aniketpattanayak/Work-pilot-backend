@@ -4,6 +4,8 @@ const _Employee     = require('../models/Employee');
 const axios         = require('axios');
 const { completeStep, startInstance } = require('../utils/flowEngine');
 const { getReqModels } = require('../utils/reqModels');
+const { getTenantConnection } = require('../utils/tenantDb');
+const TenantModel = require('../models/Tenant');
 const { isUnrestrictedFmsViewer, buildMappingIds, buildInvolvedOrClause, instanceInvolvesAnyOf, canQuerySubject } = require('../utils/fmsScope');
 
 // Helper — get correct models for this request's tenant DB
@@ -224,6 +226,47 @@ exports.getSheetColumns = async (req, res) => {
   }
 };
 
+// templateId -> tenantId whose own database holds it (so the scan below runs only once per flow)
+const _pushTemplateHome = {};
+
+/**
+ * Finds a flow template for a push from Apps Script: first in the shared database, then in the
+ * own databases of companies that have one. Returns { template, FlowInstance, Employee } for the database it was found in.
+ */
+async function findTemplateForPush(templateId) {
+  const shared = await FlowTemplate.findById(templateId);
+  if (shared) return { template: shared, FlowInstance, Employee: _Employee };
+
+  const tryTenant = async (tenantId, uri) => {
+    const conn = await getTenantConnection(String(tenantId), uri);
+    // Only the three models this push needs (kept separate from reqModels so one missing model file cannot break it)
+    const reg = (name, base) => conn.models[name] || conn.model(name, base.schema);
+    const TemplateM = reg('FlowTemplate', FlowTemplate);
+    const InstanceM = reg('FlowInstance', FlowInstance);
+    const EmployeeM = reg('Employee', _Employee);
+    const t = await TemplateM.findById(templateId);
+    return t ? { template: t, FlowInstance: InstanceM, Employee: EmployeeM } : null;
+  };
+
+  if (_pushTemplateHome[templateId]) {
+    const t = await TenantModel.findById(_pushTemplateHome[templateId]).select('superAdmin.customMongoUri').lean();
+    const uri = t && t.superAdmin && t.superAdmin.customMongoUri;
+    if (uri) { const hit = await tryTenant(_pushTemplateHome[templateId], uri); if (hit) return hit; }
+  }
+
+  const tenants = await TenantModel.find({ 'superAdmin.customMongoUri': { $exists: true, $nin: [null, ''] } })
+    .select('_id superAdmin.customMongoUri').lean();
+  for (const t of tenants) {
+    try {
+      const hit = await tryTenant(t._id, t.superAdmin.customMongoUri);
+      if (hit) { _pushTemplateHome[templateId] = String(t._id); return hit; }
+    } catch (e) {
+      console.error('[FMS push] could not search tenant', String(t._id), e.message);
+    }
+  }
+  return null;
+}
+
 /**
  * POST /api/fms2/push-sync
  * Called by the Google Apps Script onEdit trigger when a new row is added.
@@ -232,15 +275,17 @@ exports.getSheetColumns = async (req, res) => {
  */
 exports.pushSync = async (req, res) => {
   try {
-    const { FlowTemplate, FlowInstance, Employee } = getModels(req);
     const { templateId, rowData } = req.body;
 
     if (!templateId || !rowData) {
       return res.status(400).json({ message: 'Missing templateId or rowData' });
     }
 
-    const template = await FlowTemplate.findById(templateId);
-    if (!template) return res.status(404).json({ message: 'Template not found' });
+    // This call comes from Google Apps Script (no login), so work out which database the flow lives in.
+    // Companies with their own database (customMongoUri) keep their flows there, not in the shared one.
+    const found = await findTemplateForPush(templateId);
+    if (!found) return res.status(404).json({ message: 'Template not found' });
+    const { template, FlowInstance, Employee } = found;
 
     // Extract the Order ID
     const orderId = String(rowData[template.uniqueIdColumn] || '').trim();
@@ -265,7 +310,7 @@ exports.pushSync = async (req, res) => {
     });
 
     // Start the flow — activate first step
-    const result = await startInstance(instance, template);
+    const result = await startInstance(instance, template, Employee);
 
     console.log(`[FMS] New instance started: ${orderId} in "${template.name}"`);
 
