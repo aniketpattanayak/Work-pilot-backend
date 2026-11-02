@@ -2251,13 +2251,42 @@ exports.respondToTask = async (req, res) => {
       if (isVerifyAction && !isAdmin && !isAssigner && !isInForwardChain) {
         return res.status(403).json({ message: "Only the person who assigned this task can verify it or send it back." });
       }
-      // A task can be finished on its date or later, never before it (Indian date).
-      if (status === 'Completed' && task.status !== 'Completed' && task.deadline && !isAdmin) {
-        const istDay = (d) => new Date(new Date(d).getTime() + 19800000).toISOString().slice(0, 10);
-        if (istDay(task.deadline) > istDay(new Date())) {
-          return res.status(400).json({ message: "This task is scheduled for a later date. You can complete it on or after its scheduled date." });
-        }
+      // A delegation task can be completed at any time, also before its deadline. It is recorded with the real
+      // completion time (history and the early-finish points), so there is no date restriction here.
+    }
+
+    // VERIFY: the assigner confirms the finished work. The task stays "Completed" - verifying never changes the status
+    // (it only changes when someone sends the task back / rejects it). The verification is recorded in the history,
+    // and no points or completion messages are sent again (they were handled when the doer completed it).
+    if (status === 'Verified') {
+      if (!['Completed', 'Verified'].includes(task.status)) {
+        return res.status(400).json({ message: "Only a completed task can be verified." });
       }
+      const hist = task.history || [];
+      let lastDone = -1;
+      hist.forEach((h, i) => { if (h && h.action === 'Completed') lastDone = i; });
+      // verified already = a "Verified" entry after the latest completion (or an older task that was saved as Verified)
+      const alreadyVerified = task.status === 'Verified' || hist.some((h, i) => h && h.action === 'Verified' && i > lastDone);
+      if (!alreadyVerified) {
+        const actor = mongoose.Types.ObjectId.isValid(req.user?.id) ? req.user.id : (doerId || task.doerId);
+        const proof = evidenceFiles.map((f) => ({
+          fileName: `Proof: ${f.originalname}`, fileUrl: f.location || f.path, uploadedAt: new Date(), uploadedBy: actor, stage: 'Verified',
+        }));
+        for (const fr of proof) task.files.push(fr);
+        task.history.push({
+          action: 'Verified',
+          performedBy: actor,
+          timestamp: new Date(),
+          remarks: (remarks && String(remarks).trim()) || 'Work verified.',
+          files: proof.map((fr) => ({ fileName: fr.fileName, fileUrl: fr.fileUrl })),
+        });
+        await task.save();
+      }
+      const verifiedTask = await DelegationTask.findById(task._id)
+        .populate('assignerId doerId coordinatorId')
+        .populate('history.performedBy', 'name')
+        .populate('files.uploadedBy', 'name');
+      return res.status(200).json({ message: alreadyVerified ? "This task was already verified." : "Task verified. It stays Completed.", task: verifiedTask });
     }
 
     // Finishing a task that is On hold ends the hold first, so the waiting time is not counted against the doer
