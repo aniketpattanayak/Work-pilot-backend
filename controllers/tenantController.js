@@ -829,7 +829,7 @@ exports.superAdminLogin = async (req, res) => {
       const token = jwt.sign(
         { id: 'MASTER_ID', roles: ['Admin'], isSuperAdmin: true },
         process.env.JWT_SECRET,
-        { expiresIn: '7d' }
+        { expiresIn: process.env.JWT_EXPIRES_IN || '18h' }
       );
 
       return res.status(200).json({
@@ -906,7 +906,7 @@ exports.loginEmployee = async (req, res) => {
         tenantId: tenant._id
       },
       process.env.JWT_SECRET || 'your_secret_key',
-      { expiresIn: process.env.JWT_EXPIRES_IN || '15d' }
+      { expiresIn: process.env.JWT_EXPIRES_IN || '18h' }
     );
 
     // Log login activity
