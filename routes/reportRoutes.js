@@ -74,6 +74,15 @@ const activityReport = require('../controllers/activityReport');
 router.get('/activity/:tenantId', authMiddleware, subscriptionGuard, tenantDbMiddleware, sameTenantOnly, activityReport.getActivityLog);
 router.get('/activity/:tenantId/download', authMiddleware, subscriptionGuard, tenantDbMiddleware, sameTenantOnly, activityReport.downloadActivityLog);
 
+// 3c. Excel downloads for Manage Delegation / Manage Checklist / My Tasks (scope + filters in the query) and Manage Employee (Admin only)
+const excelReport = require('../controllers/excelReportController');
+router.get('/excel/tasks', authMiddleware, subscriptionGuard, tenantDbMiddleware, excelReport.downloadTasks);
+router.get('/excel/employees', authMiddleware, subscriptionGuard, tenantDbMiddleware, excelReport.downloadEmployees);
+// Same downloads as POST, so a long list of ticked / filtered records fits. The body is sent as plain text (JSON inside) so the global 100 KB JSON limit does not apply.
+const textBody = express.text({ type: '*/*', limit: '8mb' });
+router.post('/excel/tasks', authMiddleware, subscriptionGuard, tenantDbMiddleware, textBody, excelReport.downloadTasks);
+router.post('/excel/employees', authMiddleware, subscriptionGuard, tenantDbMiddleware, textBody, excelReport.downloadEmployees);
+
 // 4. Send test email report
 router.post('/send-test', authMiddleware, subscriptionGuard, tenantDbMiddleware, async (req, res) => {
   try {

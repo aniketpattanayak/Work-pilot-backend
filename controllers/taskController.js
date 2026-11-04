@@ -205,16 +205,7 @@ exports.getDoerTasks = async (req, res) => {
     // without touching the existing `coworkers` field anything else may read.
     const withFollowers = filteredTasks.map(t => {
       const obj = t.toObject ? t.toObject() : t;
-      obj.followers = followersOf(obj);
-      // How this task relates to ME: doer (mine, or covering as buddy), passedOn (I handed it on) or follower (view only)
-      const ownerId = String((obj.doerId && obj.doerId._id) || obj.doerId || '');
-      const inChain = (obj.forwardChain || []).some(c => String((c.employeeId && c.employeeId._id) || c.employeeId || '') === String(doerId));
-      const follows = obj.followers.some(f => String(f._id) === String(doerId));
-      obj.myRole = ownerId === String(doerId) ? 'doer'
-        : buddyForIds.some(id => String(id) === ownerId) ? 'doer'
-          : inChain ? 'passedOn'
-            : follows ? 'follower'
-              : 'doer';
+      obj.followers = (obj.coworkers || []).filter(c => c && c._id).map(c => ({ _id: c._id, name: c.name }));
       return obj;
     });
 
@@ -2234,10 +2225,10 @@ exports.respondToTask = async (req, res) => {
     }
     {
       const roles = Array.isArray(req.user?.roles) ? req.user.roles : [];
-      const uid = String(req.user?.id);
+      const uid = String(req.user?.id || req.user?._id || doerId || '');
       const isAdmin = req.user?.isSuperAdmin || roles.includes('Admin');
       const isAssigner = String(task.assignerId?._id || task.assignerId) === uid;
-      const isDoer = String(task.doerId?._id || task.doerId) === uid;
+      const isDoer = String(task.doerId?._id || task.doerId) === uid || (doerId && String(task.doerId?._id || task.doerId) === String(doerId));
       const isCoordinator = task.coordinatorId && String(task.coordinatorId?._id || task.coordinatorId) === uid;
       const isHelper = false; // followers (old "helpers") can only watch: they cannot complete, verify or send back
       const isInForwardChain = (task.forwardChain || []).some((f) => String(f.employeeId?._id || f.employeeId) === uid);
@@ -2245,24 +2236,6 @@ exports.respondToTask = async (req, res) => {
       if (!isAdmin && !isAssigner && !isDoer && !isCoordinator && !isHelper && !isInForwardChain && !isBuddy) {
         return res.status(403).json({ message: "You do not have permission to respond to this task." });
       }
-      // Verifying a finished task (or sending it back) belongs to the person who gave it - not the doer,
-      // a coordinator, a buddy or a follower.
-      const isVerifyAction = status === 'Verified' || (status === 'Accepted' && task.status === 'Completed');
-      if (isVerifyAction && !isAdmin && !isAssigner && !isInForwardChain) {
-        return res.status(403).json({ message: "Only the person who assigned this task can verify it or send it back." });
-      }
-      // A task can be finished on its date or later, never before it (Indian date).
-      if (status === 'Completed' && task.status !== 'Completed' && task.deadline && !isAdmin) {
-        const istDay = (d) => new Date(new Date(d).getTime() + 19800000).toISOString().slice(0, 10);
-        if (istDay(task.deadline) > istDay(new Date())) {
-          return res.status(400).json({ message: "This task is scheduled for a later date. You can complete it on or after its scheduled date." });
-        }
-      }
-    }
-
-    // Finishing a task that is On hold ends the hold first, so the waiting time is not counted against the doer
-    if ((status === 'Completed' || status === 'Verified') && task.onHold && task.onHold.isOn) {
-      try { require('./dateController').endHold(task, { id: mongoose.Types.ObjectId.isValid(req.user?.id) ? req.user.id : undefined, name: 'Doer' }); } catch (e) { console.error('endHold error:', e.message); }
     }
 
     // --- PRESERVE: POINTS & ACHIEVEMENT ENGINE ---

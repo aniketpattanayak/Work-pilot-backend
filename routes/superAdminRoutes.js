@@ -30,6 +30,8 @@ router.put('/tenants/:tenantId/ai-assistant', authMiddleware, superAdminOnly, c.
 // Voice AI module (beta) - Superadmin only
 router.get('/tenants/:tenantId/voice',                       authMiddleware, superAdminOnly, c.getVoiceSettings);
 router.put('/tenants/:tenantId/voice',                       authMiddleware, superAdminOnly, c.setVoiceModule);
+router.get('/tenants/:tenantId/switch-access', authMiddleware, superAdminOnly, require('../controllers/settingsController').getSwitchAccess);
+router.put('/tenants/:tenantId/switch-access', authMiddleware, superAdminOnly, require('../controllers/settingsController').setSwitchAccess);
 router.put('/tenants/:tenantId/voice/users/:employeeId',     authMiddleware, superAdminOnly, c.setVoiceUser);
 
 module.exports = router;

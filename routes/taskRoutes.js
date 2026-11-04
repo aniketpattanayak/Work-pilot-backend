@@ -81,6 +81,20 @@ router.put('/company/:id/resume', authMiddleware, resumeSubscription);
 
 // Profile
 router.get('/auth/me', authMiddleware, subscriptionGuard, tenantDbMiddleware, getProfile);
+// ─── PLANNER (private plans made of ordered steps; switched on per company by the platform owner) ─────
+const plannerController = require('../controllers/plannerController');
+const plannerBase = [authMiddleware, subscriptionGuard, tenantDbMiddleware, plannerController.requireEnabled];
+router.get('/planner', ...plannerBase, plannerController.list);
+router.post('/planner', ...plannerBase, plannerController.create);
+router.put('/planner/reorder', ...plannerBase, plannerController.reorderPlans);
+router.put('/planner/:id', ...plannerBase, plannerController.update);
+router.delete('/planner/:id', ...plannerBase, plannerController.remove);
+router.post('/planner/:id/steps', ...plannerBase, plannerController.addStep);
+router.put('/planner/:id/steps/reorder', ...plannerBase, plannerController.reorderSteps);
+router.put('/planner/:id/steps/:stepId', ...plannerBase, plannerController.updateStep);
+router.delete('/planner/:id/steps/:stepId', ...plannerBase, plannerController.removeStep);
+router.post('/planner/:id/steps/:stepId/link', ...plannerBase, plannerController.linkStep);
+
 // ─── PERSONAL TASKS (private to-do / checklist; never counted anywhere) ─────
 const personalTaskController = require('../controllers/personalTaskController');
 const personalBase = [authMiddleware, subscriptionGuard, tenantDbMiddleware, personalTaskController.requireEnabled];
@@ -241,6 +255,19 @@ router.post('/create-task', authMiddleware, subscriptionGuard, tenantDbMiddlewar
 );
 router.delete('/:taskId', authMiddleware, subscriptionGuard, tenantDbMiddleware, taskController.deleteTask);
 router.post('/handle-revision', authMiddleware, subscriptionGuard, tenantDbMiddleware, taskController.handleRevision);
+// Deadline rules (see controllers/dateController.js)
+const dateCtl = require('../controllers/dateController');
+const subCtl = require('../controllers/subTaskController');
+router.post('/sub-task', authMiddleware, subscriptionGuard, tenantDbMiddleware, subCtl.createSubTask);
+router.get('/sub-tasks', authMiddleware, subscriptionGuard, tenantDbMiddleware, subCtl.listSubTasks);
+router.post('/sub-tasks/summary', authMiddleware, subscriptionGuard, tenantDbMiddleware, subCtl.summary);
+router.get('/date-reasons', authMiddleware, subscriptionGuard, tenantDbMiddleware, dateCtl.getReasons);
+router.post('/date-check', authMiddleware, subscriptionGuard, tenantDbMiddleware, dateCtl.checkDate);
+router.get('/date-changes-report', authMiddleware, subscriptionGuard, tenantDbMiddleware, dateCtl.report);
+router.post('/:taskId/change-date', authMiddleware, subscriptionGuard, tenantDbMiddleware, dateCtl.changeDate);
+router.post('/:taskId/date-request', authMiddleware, subscriptionGuard, tenantDbMiddleware, dateCtl.decideRequest);
+router.post('/:taskId/hold', authMiddleware, subscriptionGuard, tenantDbMiddleware, dateCtl.putOnHold);
+router.post('/:taskId/resume', authMiddleware, subscriptionGuard, tenantDbMiddleware, dateCtl.resumeTask);
 router.post('/assign-onward', authMiddleware, subscriptionGuard, tenantDbMiddleware, taskController.assignOnward);
 router.post('/coordinator-force-done', authMiddleware, subscriptionGuard, tenantDbMiddleware, taskController.coordinatorForceDone);
 router.put('/coordinator-force-done', authMiddleware, subscriptionGuard, tenantDbMiddleware, taskController.coordinatorForceDone);

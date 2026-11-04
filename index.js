@@ -71,6 +71,17 @@ app.use(express.urlencoded({ extended: true }));
 // Serve locally uploaded files (used when S3 is not configured)
 const path = require('path');
 app.use('/uploads', require('express').static(path.join(__dirname, 'uploads')));
+// A file that is no longer on this server: show a plain, friendly page instead of
+// the raw JSON "Route not found" message (the person opening it is not a developer).
+app.use('/uploads', (req, res) => {
+  res.status(404).type('html').send(
+    '<!doctype html><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">' +
+    '<title>File not available</title>' +
+    '<body style="font-family:system-ui,sans-serif;max-width:480px;margin:15vh auto;padding:0 20px;text-align:center;color:#101828">' +
+    '<h2>This file is no longer available</h2>' +
+    '<p style="color:#667085;line-height:1.6">It was removed from our storage. Please ask the person who sent it to upload it again.</p></body>'
+  );
+});
 
 // 6. REGISTER ROUTES
 app.use('/api/tenants', tenantRoutes);     // tenant auth + management
@@ -83,6 +94,7 @@ app.use('/api/tickets', ticketRoutes);
 app.use('/api/reports', reportRoutes);
 app.use('/api/tasks', taskRoutes);
 app.use('/api/ai-assistant', aiAssistantRoutes); // Phase 4 AI assistant (default OFF per-tenant)
+app.use('/api/config', require('./routes/configRoutes')); // custom fields + table column preferences
 app.use('/api/voice', voiceRoutes);               // Voice AI module (beta; gated per company by the Superadmin)
 
 // Catch-all 404
@@ -115,6 +127,9 @@ mongoose.connect(process.env.MONGO_URI)
     scheduleBriefings().then(() => {
       console.log('🌅 LRBC Daily Briefing Engine Active (per-tenant scheduling).');
     });
+
+    // Daily task reminder on WhatsApp (only for companies the platform owner switched it on for)
+    require('./utils/dailyTaskAlert').startDailyTaskAlert();
 
     // FIX B-2: FMS sync now starts AFTER the DB is open
     const runFmsSync = require('./utils/fmsScheduler');

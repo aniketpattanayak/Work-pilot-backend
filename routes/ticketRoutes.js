@@ -31,6 +31,9 @@ router.put('/resolve',
   ticketController.resolveTicket
 );
 
+// 4b. Start work on a ticket (SuperAdmin only): Open -> In-Progress
+router.put('/start', authMiddleware, superAdminOnly, ticketController.startTicket);
+
 // 5. Reporter: edit / delete own ticket
 router.put('/:ticketId', authMiddleware, subscriptionGuard, ticketController.updateTicket);
 router.delete('/:ticketId', authMiddleware, subscriptionGuard, ticketController.deleteTicket);

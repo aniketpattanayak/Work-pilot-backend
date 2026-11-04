@@ -8,6 +8,9 @@ const ChecklistTaskSchema = new mongoose.Schema({
   tenantId: { type: mongoose.Schema.Types.ObjectId, ref: 'Tenant', required: true },
   taskName: { type: String, required: true },
   description: { type: String },
+  // Set when the checklist was made from a step of a Planner plan (it is then shown under the Planner tab)
+  planId:      { type: mongoose.Schema.Types.ObjectId },
+  planStepId:  { type: mongoose.Schema.Types.ObjectId },
   doerId: { type: mongoose.Schema.Types.ObjectId, ref: 'Employee', required: true },
   // Who set this checklist up (shown as "Assigned by"). Empty on checklists created before this field existed.
   createdBy: { type: mongoose.Schema.Types.ObjectId, ref: 'Employee' },
@@ -45,7 +48,13 @@ const ChecklistTaskSchema = new mongoose.Schema({
       instanceDate:  Date, // Tracks exactly which day was completed in backlog
     },
   ],
+  // Company-defined extra fields (see CustomFieldDefinition). Old records simply have an empty map.
+  customFields: { type: Map, of: mongoose.Schema.Types.Mixed, default: () => ({}) },
   createdAt: { type: Date, default: Date.now },
+}, {
+  // Map values (customFields) must come out as plain objects, also from toObject()
+  toObject: { flattenMaps: true },
+  toJSON:   { flattenMaps: true },
 });
 
 // ─── INDEXES ─────────────────────────────────────────────────────────────────

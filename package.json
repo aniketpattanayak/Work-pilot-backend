@@ -6,7 +6,8 @@
     "start": "node index.js",
     "dev": "nodemon index.js",
     "test": "echo \"Error: no test specified\" && exit 1",
-    "test:voice": "node --test tests/voice/*.test.js"
+    "test:voice": "node --test tests/voice/*.test.js",
+    "test:config": "node --test tests/config/*.test.js"
   },
   "keywords": [],
   "author": "",

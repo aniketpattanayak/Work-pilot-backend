@@ -141,6 +141,17 @@ const TenantSchema = new mongoose.Schema({
     default: null // Stores the AWS S3 URL or local path
   },
 
+  // Company-chosen settings: on/off switches and WhatsApp message overrides.
+  // Nothing saved here = today's behaviour (see utils/settingsRegistry.js).
+  companySettings: {
+    switches:          { type: mongoose.Schema.Types.Mixed, default: {} },   // { 'delegation.doerRevise': false }
+    dateChangeReasons: { type: [String], default: undefined },           // the list people pick a deadline-change reason from
+    formLayouts:       { type: mongoose.Schema.Types.Mixed, default: {} },   // { employee: { fields: { name: { label, required, hidden } }, order: [] } }
+    masterLists:       { type: mongoose.Schema.Types.Mixed, default: undefined }, // [{ key, label, items: [] }] lists a dropdown can be linked to
+    whatsappTemplates: { type: mongoose.Schema.Types.Mixed, default: {} },   // { new_task_delegation_v2: { enabled, body, providerTemplate, senderPhoneId } }
+    dailyAlert:        { type: mongoose.Schema.Types.Mixed, default: {} }    // { enabled, time: 'HH:MM', lastSentOn: 'YYYY-MM-DD' } Daily task reminder (platform owner must allow it)
+  },
+
   // WhatsApp Configuration (Stored per client)
   whatsappConfig: {
     isActive: { type: Boolean, default: false },
@@ -219,6 +230,9 @@ const TenantSchema = new mongoose.Schema({
     // Custom database URI (optional — if set, tenant uses their own MongoDB)
     customMongoUri:    { type: String, default: '' },
 
+    // Switches the company admin may NOT see (the platform owner decides). Empty = admin sees all.
+    hiddenSwitches: { type: [String], default: [] },
+
     // Custom WhatsApp API key (optional — if set, overrides global DoubleTick key)
     customWhatsappKey: { type: String, default: '' },
 
@@ -245,6 +259,11 @@ const TenantSchema = new mongoose.Schema({
       rewards:      { type: Boolean, default: true },  // Rewards Log
       // Settings
       settings:     { type: Boolean, default: true },  // Settings tab
+      // Things the platform owner must switch ON for a company (off until then)
+      formDesigner: { type: Boolean, default: false }, // Settings > Form designer (rename / hide / reorder fields, new field types)
+      menuControl:  { type: Boolean, default: false }, // Settings > Functions > Menu (switch side-menu sections off)
+      planner: { type: Boolean, default: false },       // Planner tab (plans made of ordered steps that become tasks; off until switched on for a company)
+      dailyTaskAlert: { type: Boolean, default: false }, // Daily WhatsApp reminder: overdue / today / tomorrow tasks (off until switched on for a company)
     },
 
     // Voice AI calling module (BETA). Default OFF; only the Superadmin can switch it on

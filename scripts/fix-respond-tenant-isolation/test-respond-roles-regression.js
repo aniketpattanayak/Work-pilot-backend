@@ -143,11 +143,11 @@ async function j(base, method, p, body, token) {
   r = await j(BASE, 'PUT', '/tasks/respond', { taskId, status: 'Verified', doerId: coordinator.id }, coordinator.token);
   check('the COORDINATOR can act on the task (quality reviewer role)', r.status === 200, r);
 
-  // --- Case: a HELPER DOER (buddy/cover) can act -----------------------------
+  // --- Case: an old-style HELPER is now only a FOLLOWER: watch only, cannot complete ---
   taskId = await makeTask('Helper doer role check');
   await setRelationships(taskId, { helperIds: [helper.id] });
   r = await j(BASE, 'PUT', '/tasks/respond', { taskId, status: 'Completed', doerId: helper.id }, helper.token);
-  check('a HELPER DOER (buddy/cover) can complete the task on the primary doer\'s behalf', r.status === 200, r);
+  check('an old-style HELPER (now a follower) cannot complete the task: only the doer can', r.status === 403, r);
 
   // --- Case: a FORWARD-CHAIN member can act -----------------------------------
   taskId = await makeTask('Forward chain role check');

@@ -17,7 +17,9 @@ const isViewerOnly = (user) =>
   user.roles.every((r) => String(r).toLowerCase() === 'viewer');
 
 const SAFE_METHODS = ['GET', 'HEAD', 'OPTIONS'];
-const VIEWER_WRITE_ALLOWLIST = [/\/tickets\/create\/?$/];
+// A view-only person may still save how THEIR OWN table columns are arranged.
+// The Excel report links take POST only to carry a long list of record ids; they read data and change nothing.
+const VIEWER_WRITE_ALLOWLIST = [/\/tickets\/create\/?$/, /\/config\/table-preferences\/[a-z0-9_]+\/?$/, /\/reports\/excel\/(tasks|employees)\/?$/];
 
 const authMiddleware = (req, res, next) => {
   const authHeader = req.headers.authorization;

@@ -8,19 +8,23 @@ const cleanPhone = (phone) => {
   return p;
 };
 
+// A company's own template may use the values in another order (e.g. 2,1,3)
+const ordered = (vars, order) => (Array.isArray(vars) && Array.isArray(order) && order.length) ? order.map((n) => vars[n - 1]) : vars;
+
 const sendViaDoubleTick = async (toPhone, data, apiKey) => {
   const phone = cleanPhone(toPhone);
   const templateName = data.templateName || 'api_otp_';
+  const lang = data.language || 'en';
   const placeholders = Array.isArray(data.variables)
-    ? data.variables.map(v => String(v ?? ''))
+    ? ordered(data.variables, data.variableOrder).map(v => String(v ?? ''))
     : [String(data ?? '')];
 
   const payload = {
     messages: [{
       to: `+${phone}`,
       templateName,
-      language: 'en',
-      content: { templateName, language: 'en', templateData: { body: { placeholders } } }
+      language: lang,
+      content: { templateName, language: lang, templateData: { body: { placeholders } } }
     }]
   };
 
@@ -32,7 +36,7 @@ const sendViaDoubleTick = async (toPhone, data, apiKey) => {
   } catch {
     const fallback = {
       messages: [{
-        to: `+${phone}`, templateName, language: 'en',
+        to: `+${phone}`, templateName, language: lang,
         components: [{ type: 'body', parameters: placeholders.map(text => ({ type: 'text', text })) }]
       }]
     };
@@ -66,6 +70,12 @@ const MAYTAPI_TEMPLATES = {
   daily_morning_briefing: (v) =>
     `🌅 DAILY MISSION BRIEFING\n\nGood Morning ${v[0]}, here is your operational agenda for ${v[1]}:\n\n✅ TODAY'S TASKS: ${v[2]}\n⚠️ PENDING BACKLOG: ${v[3]}\n\nTotal Items Needing Action: ${v[4]}\n\nPlease ensure all safety protocols are followed. Synchronize your progress here: ${v[5]}\nThank you!!!`,
 
+  // The three task lists arrive on one line separated by " | " (template values cannot hold line breaks); plain text shows them as a list.
+  daily_task_alert: (v) => {
+    const list = (s) => String(s || 'None').split(' | ').map((x) => (x === 'None' ? 'None' : `- ${x}`)).join('\n');
+    return `Dear ${v[0]},\n\n*Daily Task Reminder:*\n\n*⚠️ Overdue Tasks:*\n${list(v[1])}\n\n*📅 Today (${v[2]}):*\n${list(v[3])}\n\n*⏭️ Tomorrow (${v[4]}):*\n${list(v[5])}\n\nLog in: ${v[6]}`;
+  },
+
   // password is a separate field on the data object (never part of the
   // shared variables array) — DoubleTick/WATI never see it, so a tenant's
   // own or the shared account's approved template is completely unaffected.
@@ -92,10 +102,17 @@ MAYTAPI_TEMPLATES.fms_overdue_manager = (v) =>
 
 const sendViaMaytapi = async (toPhone, data, config) => {
   const phone = cleanPhone(toPhone);
-  const { productId, token, phoneId } = config;
+  const { productId, token } = config;
+  const phoneId = data.senderPhoneId || config.phoneId; // a template may send from another of the company's numbers
   const variables = Array.isArray(data.variables) ? data.variables : [];
-  const renderer = MAYTAPI_TEMPLATES[data.templateName];
-  const message = renderer ? renderer(variables, data) : (variables.join('\n') || data.templateName || String(data));
+  const renderer = MAYTAPI_TEMPLATES[data.originalTemplateName || data.templateName];
+  // A company-edited wording wins; otherwise the built-in wording below.
+  const message = data.customBody
+    ? require('./notificationRegistry').render(data.customBody, variables)
+    : (renderer ? renderer(variables, data) : (() => {
+        const def = require('./notificationRegistry').BY_KEY[data.originalTemplateName || data.templateName];
+        return def ? require('./notificationRegistry').render(def.body, variables) : (variables.join('\n') || data.templateName || String(data));
+      })());
 
   const res = await axios.post(
     `https://api.maytapi.com/api/${productId}/${phoneId}/sendMessage`,
@@ -111,7 +128,7 @@ const sendViaWati = async (toPhone, data, config) => {
   const { apiEndpoint, apiKey } = config;
   const templateName = data.templateName || 'api_otp_';
   const parameters = Array.isArray(data.variables)
-    ? data.variables.map((v, i) => ({ name: String(i + 1), value: String(v ?? '') }))
+    ? ordered(data.variables, data.variableOrder).map((v, i) => ({ name: String(i + 1), value: String(v ?? '') }))
     : [];
 
   const res = await axios.post(
