@@ -2234,10 +2234,10 @@ exports.respondToTask = async (req, res) => {
     }
     {
       const roles = Array.isArray(req.user?.roles) ? req.user.roles : [];
-      const uid = String(req.user?.id);
+      const uid = String(req.user?.id || req.user?._id || doerId || '');
       const isAdmin = req.user?.isSuperAdmin || roles.includes('Admin');
       const isAssigner = String(task.assignerId?._id || task.assignerId) === uid;
-      const isDoer = String(task.doerId?._id || task.doerId) === uid;
+      const isDoer = String(task.doerId?._id || task.doerId) === uid || (doerId && String(task.doerId?._id || task.doerId) === String(doerId));
       const isCoordinator = task.coordinatorId && String(task.coordinatorId?._id || task.coordinatorId) === uid;
       const isHelper = false; // followers (old "helpers") can only watch: they cannot complete, verify or send back
       const isInForwardChain = (task.forwardChain || []).some((f) => String(f.employeeId?._id || f.employeeId) === uid);
