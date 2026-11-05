@@ -332,6 +332,7 @@ router.get('/following/:employeeId', authMiddleware, subscriptionGuard, tenantDb
 
 // Edit a task. Kept LAST so every fixed PUT path above (respond, update-mapping, ...) matches first.
 router.put('/:taskId', authMiddleware, subscriptionGuard, tenantDbMiddleware, taskController.updateTask);
+router.post('/:taskId/add-files', authMiddleware, subscriptionGuard, tenantDbMiddleware, ...useUpload(_upload.array('taskFiles', 10)), taskController.addTaskFiles);
 
 // Fetch a single task (used by the chat task-thread details card). Kept LAST
 // for the same reason as the PUT above - every fixed GET path must match first.
