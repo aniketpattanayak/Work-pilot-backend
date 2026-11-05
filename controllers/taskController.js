@@ -619,7 +619,36 @@ exports.updateTask = async (req, res) => {
         changes.push('priority');
       }
     }
-    if (deadline) {
+    // Exact new deadline (date AND time), sent by the Edit Task form as an ISO string.
+    // Older callers that only send `deadline` (a date) keep working exactly as before.
+    const deadlineAtRaw = req.body.deadlineAt;
+    const deadlineAt = deadlineAtRaw ? new Date(deadlineAtRaw) : null;
+    if (deadlineAtRaw && (!deadlineAt || isNaN(deadlineAt.getTime()))) {
+      return res.status(400).json({ message: "Invalid deadline." });
+    }
+    if (deadlineAt && task.deadline) {
+      const istDay = (d) => new Date(new Date(d).getTime() + 19800000).toISOString().slice(0, 10);
+      const sameDay = istDay(deadlineAt) === istDay(task.deadline);
+      const timeMoved = Math.abs(deadlineAt.getTime() - new Date(task.deadline).getTime()) >= 60000;
+      if (!sameDay) {
+        const DC = require('../utils/dateChanges');
+        const tenantDoc = await _Tenant.findById(task.tenantId).lean();
+        const lock = DC.blockedReason(task, tenantDoc);
+        if (lock) return res.status(400).json({ message: lock });
+        const rs = DC.checkReason(tenantDoc, req.body);
+        if (rs.error) return res.status(400).json({ message: rs.error });
+        dateChangeInfo = { d: deadlineAt, rs, tenantDoc };
+        changes.push('deadline');
+      } else if (timeMoved) {
+        // Same day, different time: only the time of day changes.
+        const DC = require('../utils/dateChanges');
+        const tenantDoc = await _Tenant.findById(task.tenantId).lean();
+        const lock = DC.blockedReason(task, tenantDoc);
+        if (lock) return res.status(400).json({ message: lock });
+        task.deadline = deadlineAt;
+        changes.push('deadline time');
+      }
+    } else if (deadline) {
       // The form only sends a date (YYYY-MM-DD). Keep the task's original time of day so
       // saving without touching the date never moves the deadline.
       const newDay = String(deadline).slice(0, 10);
@@ -658,6 +687,22 @@ exports.updateTask = async (req, res) => {
       if (before !== after) {
         task.coworkers = followers;
         changes.push('followers');
+      }
+    }
+
+    // "Allow deadline change" + how many days the doer may extend (same rules as New Task)
+    if (req.body.isRevisionAllowed !== undefined || req.body.maxExtensionDays !== undefined) {
+      const allowRev = !(req.body.isRevisionAllowed === false || req.body.isRevisionAllowed === 'false');
+      let ext = parseInt(req.body.maxExtensionDays, 10);
+      if (!allowRev || !Number.isInteger(ext) || ext < 1) ext = 0;
+      ext = Math.min(ext, 90);
+      if (allowRev && ext === 0) {
+        return res.status(400).json({ message: "Deadline change is allowed, so please enter how many days the doer may extend (1 to 90)." });
+      }
+      if (ext !== (task.maxExtensionDays || 0) || allowRev !== (task.isRevisionAllowed !== false)) {
+        task.maxExtensionDays = ext;
+        task.isRevisionAllowed = allowRev;
+        changes.push('deadline change settings');
       }
     }
 
@@ -726,6 +771,44 @@ exports.updateTask = async (req, res) => {
   } catch (error) {
     console.error("❌ updateTask error:", error.message);
     res.status(500).json({ message: "Failed to update task", error: error.message });
+  }
+};
+
+// Add attachments to an existing delegation task (Edit Task form). Same permission as editing.
+exports.addTaskFiles = async (req, res) => {
+  try {
+    const { DelegationTask } = getModels(req);
+    const { taskId } = req.params;
+    if (!mongoose.Types.ObjectId.isValid(taskId)) return res.status(400).json({ message: "Invalid task ID." });
+    const task = await DelegationTask.findById(taskId);
+    if (!task) return res.status(404).json({ message: "Task not found." });
+    if (!req.user?.isSuperAdmin && String(task.tenantId) !== String(req.user?.tenantId)) {
+      return res.status(403).json({ message: "Forbidden." });
+    }
+    const roles = Array.isArray(req.user?.roles) ? req.user.roles : [];
+    if (!req.user?.isSuperAdmin && !roles.includes('Admin') && String(task.assignerId) !== String(req.user?.id)) {
+      return res.status(403).json({ message: "Only the assigner or an admin can edit this task." });
+    }
+    const picked = Array.isArray(req.files) ? req.files : [];
+    if (!picked.length) return res.status(400).json({ message: "No files were received." });
+    const added = picked.map((file) => ({
+      fileName: file.originalname,
+      fileUrl: file.location || file.path,
+      uploadedAt: new Date(),
+      uploadedBy: mongoose.Types.ObjectId.isValid(req.user?.id) ? req.user.id : task.assignerId,
+      stage: 'Task Edited',
+    }));
+    if (!task.files) task.files = [];
+    task.files.push(...added);
+    const entry = { action: "Task Edited", remarks: `Added ${added.length} file(s)`, timestamp: new Date(), files: added.map((f) => ({ fileName: f.fileName, fileUrl: f.fileUrl })) };
+    if (mongoose.Types.ObjectId.isValid(req.user?.id)) entry.performedBy = req.user.id;
+    if (!task.history) task.history = [];
+    task.history.push(entry);
+    await task.save();
+    res.status(200).json({ message: "Files added.", files: task.files });
+  } catch (error) {
+    console.error("addTaskFiles error:", error.message);
+    res.status(500).json({ message: "Failed to add files", error: error.message });
   }
 };
 
