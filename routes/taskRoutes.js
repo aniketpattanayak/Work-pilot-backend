@@ -54,11 +54,11 @@ router.get('/verify/:subdomain', async (req, res) => {
     const tenant = await Tenant.findOne({ subdomain: req.params.subdomain.toLowerCase() });
     if (!tenant) return res.status(404).json({ message: 'Tenant not found' });
     res.json({
-      companyName:    tenant.companyName,
-      id:             tenant._id,
+      companyName: tenant.companyName,
+      id: tenant._id,
       whatsappActive: tenant.whatsappConfig ? tenant.whatsappConfig.isActive : false,
       // Include subscription status so frontend can redirect paused companies on load
-      subscription:   tenant.subscription || { status: 'active' },
+      subscription: tenant.subscription || { status: 'active' },
     });
   } catch (error) {
     res.status(500).json({ message: 'Server error' });
@@ -74,7 +74,7 @@ router.post('/master-login', superAdminLogin);
 router.post('/create-company', authMiddleware, superAdminOnly, ...useUpload(_upload.single('logo')), createTenant);
 router.get('/all-companies', authMiddleware, superAdminOnly, getAllCompanies);
 router.delete('/company/:id', authMiddleware, superAdminOnly, deleteCompany);
-router.put('/company/:id/pause',  authMiddleware, pauseSubscription);
+router.put('/company/:id/pause', authMiddleware, pauseSubscription);
 router.put('/company/:id/resume', authMiddleware, resumeSubscription);
 
 // ─── AUTHENTICATED ROUTES ────────────────────────────────────────────────────
@@ -121,9 +121,9 @@ router.get('/employees', authMiddleware, subscriptionGuard, tenantDbMiddleware, 
     res.status(500).json({ message: 'Failed to fetch employees', error: err.message });
   }
 });
-router.post('/add-employee',   authMiddleware, subscriptionGuard, tenantDbMiddleware, adminOfSameCompany, addEmployee);
+router.post('/add-employee', authMiddleware, subscriptionGuard, tenantDbMiddleware, adminOfSameCompany, addEmployee);
 router.post('/bulk-employees', authMiddleware, subscriptionGuard, tenantDbMiddleware, adminOfSameCompany, bulkAddEmployees);
-router.post('/bulk-tasks',     authMiddleware, subscriptionGuard, tenantDbMiddleware, bulkAddTasks);
+router.post('/bulk-tasks', authMiddleware, subscriptionGuard, tenantDbMiddleware, bulkAddTasks);
 router.post('/bulk-checklist', authMiddleware, subscriptionGuard, tenantDbMiddleware, bulkAddChecklists);
 router.put('/employees/:id', authMiddleware, subscriptionGuard, tenantDbMiddleware, adminOfSameCompany, updateEmployee);
 router.delete('/employees/:id', authMiddleware, subscriptionGuard, tenantDbMiddleware, adminOfSameCompany, deleteEmployee);
@@ -237,14 +237,14 @@ router.get('/settings/:tenantId', authMiddleware, subscriptionGuard, tenantDbMid
 // Tasks
 router.post('/create-task', authMiddleware, subscriptionGuard, tenantDbMiddleware,
   ...useUpload(_upload.fields([
-    { name: 'files',     maxCount: 10 },
+    { name: 'files', maxCount: 10 },
     { name: 'taskFiles', maxCount: 10 },
   ])),
   // Normalize: merge taskFiles into files so controller always reads req.files.files
   (req, res, next) => {
     if (req.files) {
       const all = [
-        ...(req.files['files']     || []),
+        ...(req.files['files'] || []),
         ...(req.files['taskFiles'] || []),
       ];
       req.files = all; // flatten to array like upload.array() does
@@ -331,7 +331,23 @@ router.get('/user-dashboard/:employeeId', authMiddleware, subscriptionGuard, ten
 router.get('/following/:employeeId', authMiddleware, subscriptionGuard, tenantDbMiddleware, taskController.getFollowingTasks);
 
 // Edit a task. Kept LAST so every fixed PUT path above (respond, update-mapping, ...) matches first.
-router.put('/:taskId', authMiddleware, subscriptionGuard, tenantDbMiddleware, taskController.updateTask);
+router.put('/:taskId', authMiddleware, subscriptionGuard, tenantDbMiddleware,
+  ...useUpload(_upload.fields([
+    { name: 'files', maxCount: 10 },
+    { name: 'taskFiles', maxCount: 10 },
+  ])),
+  (req, res, next) => {
+    if (req.files) {
+      const all = [
+        ...(req.files['files'] || []),
+        ...(req.files['taskFiles'] || []),
+      ];
+      req.files = all;
+    }
+    next();
+  },
+  taskController.updateTask
+);
 
 // Fetch a single task (used by the chat task-thread details card). Kept LAST
 // for the same reason as the PUT above - every fixed GET path must match first.
