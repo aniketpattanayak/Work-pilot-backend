@@ -3024,7 +3024,14 @@ const readReviewConfig = (raw) => {
   const dbn = rc.driftBands || {};
   let g = n(dbn.greenMax, 10, 0, 100000); let y = n(dbn.yellowMax, 50, 0, 100000); let o = n(dbn.orangeMax, 100, 0, 100000);
   if (!(g < y && y < o)) { g = 10; y = 50; o = 100; }
-  return { period: REVIEW_PERIODS.includes(rc.period) ? rc.period : 'Monthly', weights, overrides, thresholds: { red, orange }, driftBands: { greenMax: g, yellowMax: y, orangeMax: o } };
+  return {
+    period: REVIEW_PERIODS.includes(rc.period) ? rc.period : 'Monthly',
+    weights,
+    overrides,
+    thresholds: { red, orange },
+    driftBands: { greenMax: g, yellowMax: y, orangeMax: o },
+    dynamicColors: rc.dynamicColors || null
+  };
 };
 
 // The late target that was in force at a given moment (from the saved change history).

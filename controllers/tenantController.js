@@ -241,7 +241,42 @@ function sanitizeReviewConfig(rc) {
   const dor = num(db.orangeMax === undefined ? 100 : db.orangeMax, 0, 100000);
   if (dg === null || dy === null || dor === null || ![dg, dy, dor].every(Number.isInteger)) return { error: 'Drift day limits must be whole numbers of days.' };
   if (!(dg < dy && dy < dor)) return { error: 'Drift limits must go up: green end < yellow end < orange end.' };
-  return { value: { period: rc.period, weights, overrides, thresholds: { red, orange }, driftBands: { greenMax: dg, yellowMax: dy, orangeMax: dor } } };
+
+  const cleanDynamicColors = (dc) => {
+    if (!dc || typeof dc !== 'object') return null;
+    const isHex = (h) => typeof h === 'string' && /^#([0-9a-f]{3}|[0-9a-f]{6})$/i.test(h.trim());
+    const ranges = Array.isArray(dc.ranges) ? dc.ranges : [];
+    if (ranges.length < 3) return null;
+    const outRanges = [];
+    for (const r of ranges) {
+      if (!r || typeof r !== 'object') return null;
+      const min = Number(r.min);
+      const max = Number(r.max);
+      if (!Number.isFinite(min) || !Number.isFinite(max) || min < 0 || max > 100 || min > max) return null;
+      if (!isHex(r.startColor) || !isHex(r.endColor)) return null;
+      outRanges.push({
+        id: String(r.id || ''),
+        name: String(r.name || ''),
+        min,
+        max,
+        startColor: r.startColor.trim(),
+        endColor: r.endColor.trim()
+      });
+    }
+    return { enabled: dc.enabled !== false, ranges: outRanges };
+  };
+  const dynamicColors = cleanDynamicColors(rc.dynamicColors);
+
+  return {
+    value: {
+      period: rc.period,
+      weights,
+      overrides,
+      thresholds: { red, orange },
+      driftBands: { greenMax: dg, yellowMax: dy, orangeMax: dor },
+      ...(dynamicColors ? { dynamicColors } : {})
+    }
+  };
 }
 
 // Company-configurable WhatsApp country-code list (Settings -> Country codes).
