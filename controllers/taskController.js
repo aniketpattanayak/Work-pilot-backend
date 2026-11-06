@@ -3541,3 +3541,297 @@ exports.assignOnward = async (req, res) => {
     res.status(500).json({ message: 'Could not assign the task onward.' });
   }
 };
+
+// ─── COMPREHENSIVE TASK DETAILS (GLOBAL VIEW & LEDGER POPUP) ────────────────
+exports.getDetailedTaskView = async (req, res) => {
+  try {
+    const { DelegationTask, ChecklistTask, FlowInstance, Employee } = getModels(req);
+    const { taskId } = req.params;
+    const taskType = String(req.query.type || 'Delegation').trim().toLowerCase();
+
+    if (!taskId || !mongoose.Types.ObjectId.isValid(taskId)) {
+      return res.status(400).json({ message: "Invalid task ID format." });
+    }
+
+    const tenantId = req.user?.tenantId;
+
+    if (taskType === 'delegation') {
+      const task = await DelegationTask.findById(taskId)
+        .populate('assignerId', 'name email department whatsappNumber role roles')
+        .populate('doerId', 'name email department whatsappNumber role roles leaveStatus')
+        .populate('coordinatorId', 'name email department')
+        .populate('coworkers', 'name email department')
+        .populate('forwardChain.employeeId', 'name email department')
+        .populate('files.uploadedBy', 'name')
+        .populate('history.performedBy', 'name')
+        .lean();
+
+      if (!task) return res.status(404).json({ message: "Delegation task not found." });
+      if (!req.user?.isSuperAdmin && String(task.tenantId) !== String(tenantId)) {
+        return res.status(403).json({ message: "Forbidden." });
+      }
+
+      // Query linked subtasks
+      const subTasks = await DelegationTask.find({
+        tenantId: task.tenantId,
+        'parentTask.type': 'Delegation',
+        'parentTask.taskId': String(taskId)
+      })
+        .populate('doerId', 'name email department')
+        .populate('assignerId', 'name email')
+        .sort({ createdAt: 1 })
+        .lean();
+
+      const history = task.history || [];
+      const completedEntry = history.slice().reverse().find(h => h && (h.action === 'Completed' || h.action === 'Verified'));
+      const verifiedEntry = history.slice().reverse().find(h => h && h.action === 'Verified');
+      const rejectionEntries = history.filter(h => h && (h.action === 'Revision Requested' || h.action === 'Sent Back' || h.action === 'Rejected'));
+
+      const followers = followersOf(task);
+
+      return res.status(200).json({
+        type: 'Delegation',
+        _id: task._id,
+        title: task.title || task.taskName || 'Untitled Task',
+        description: task.description || '',
+        priority: task.priority || 'Medium',
+        department: task.department || task.assignerId?.department || task.doerId?.department || '',
+        status: task.status,
+        deadline: task.deadline,
+        originalDeadline: task.originalDeadline || null,
+        revisedAt: task.revisedAt || null,
+        createdAt: task.createdAt,
+        updatedAt: task.updatedAt,
+        assigner: task.assignerId ? {
+          _id: task.assignerId._id,
+          name: task.assignerId.name,
+          email: task.assignerId.email,
+          department: task.assignerId.department
+        } : null,
+        doer: task.doerId ? {
+          _id: task.doerId._id,
+          name: task.doerId.name,
+          email: task.doerId.email,
+          department: task.doerId.department
+        } : null,
+        coordinator: task.coordinatorId ? {
+          _id: task.coordinatorId._id,
+          name: task.coordinatorId.name
+        } : null,
+        followers,
+        forwardChain: (task.forwardChain || []).map(f => ({
+          employee: f.employeeId ? { _id: f.employeeId._id, name: f.employeeId.name, department: f.employeeId.department } : null,
+          forwardedAt: f.forwardedAt
+        })),
+        customFields: task.customFields || {},
+        files: task.files || [],
+        subTasks: subTasks.map(st => ({
+          _id: st._id,
+          title: st.title,
+          description: st.description || '',
+          priority: st.priority,
+          status: st.status,
+          deadline: st.deadline,
+          createdAt: st.createdAt,
+          doer: st.doerId ? { _id: st.doerId._id, name: st.doerId.name } : null,
+          assigner: st.assignerId ? { _id: st.assignerId._id, name: st.assignerId.name } : null,
+          isCompleted: ['Completed', 'Verified'].includes(st.status)
+        })),
+        completion: completedEntry ? {
+          completedAt: completedEntry.timestamp,
+          completedBy: completedEntry.performedBy?.name || task.doerId?.name || 'Doer',
+          remarks: completedEntry.remarks || '',
+          files: completedEntry.files || []
+        } : null,
+        verification: verifiedEntry ? {
+          verifiedAt: verifiedEntry.timestamp,
+          verifiedBy: verifiedEntry.performedBy?.name || task.assignerId?.name || 'Assigner',
+          remarks: verifiedEntry.remarks || ''
+        } : null,
+        rejections: rejectionEntries.map(r => ({
+          action: r.action,
+          timestamp: r.timestamp,
+          by: r.performedBy?.name || 'Assigner',
+          remarks: r.remarks || ''
+        })),
+        history: history.map(h => ({
+          action: h.action,
+          timestamp: h.timestamp,
+          performedBy: h.performedBy?.name || 'System',
+          remarks: h.remarks || '',
+          files: h.files || []
+        }))
+      });
+    }
+
+    if (taskType === 'checklist') {
+      const task = await ChecklistTask.findById(taskId)
+        .populate('doerId', 'name email department')
+        .populate('createdBy', 'name email department')
+        .populate('assignerId', 'name email department')
+        .lean();
+
+      if (!task) return res.status(404).json({ message: "Checklist task not found." });
+      if (!req.user?.isSuperAdmin && String(task.tenantId) !== String(tenantId)) {
+        return res.status(403).json({ message: "Forbidden." });
+      }
+
+      // Query linked subtasks
+      const subTasks = await DelegationTask.find({
+        tenantId: task.tenantId,
+        'parentTask.type': 'Checklist',
+        'parentTask.taskId': String(taskId)
+      })
+        .populate('doerId', 'name email department')
+        .populate('assignerId', 'name email')
+        .sort({ createdAt: 1 })
+        .lean();
+
+      const history = task.history || [];
+      const completedEntries = history.filter(h => h && (h.action === 'Completed' || h.action === 'Administrative Completion'));
+      const targetInstanceDate = req.query.instanceDate ? new Date(req.query.instanceDate) : null;
+      let matchedEntry = null;
+      if (targetInstanceDate && !isNaN(targetInstanceDate.getTime())) {
+        const targetStr = targetInstanceDate.toDateString();
+        matchedEntry = completedEntries.find(h => {
+          const d = new Date(h.instanceDate || h.timestamp);
+          return d.toDateString() === targetStr;
+        });
+      }
+      const latestDone = matchedEntry || (completedEntries.length ? completedEntries[completedEntries.length - 1] : null);
+
+      return res.status(200).json({
+        type: 'Checklist',
+        _id: task._id,
+        title: task.taskName || task.title || 'Untitled Checklist',
+        description: task.description || '',
+        frequency: task.frequency || 'Daily',
+        frequencyConfig: task.frequencyConfig || {},
+        status: task.status || 'Active',
+        startDate: task.startDate,
+        nextDueDate: task.nextDueDate,
+        lastCompleted: task.lastCompleted,
+        createdAt: task.createdAt,
+        department: task.doerId?.department || '',
+        assigner: task.createdBy ? {
+          _id: task.createdBy._id,
+          name: task.createdBy.name,
+          email: task.createdBy.email
+        } : (task.assignerId ? {
+          _id: task.assignerId._id,
+          name: task.assignerId.name,
+          email: task.assignerId.email
+        } : { name: 'Admin' }),
+        doer: task.doerId ? {
+          _id: task.doerId._id,
+          name: task.doerId.name,
+          email: task.doerId.email,
+          department: task.doerId.department
+        } : null,
+        customFields: task.customFields || {},
+        files: [],
+        subTasks: subTasks.map(st => ({
+          _id: st._id,
+          title: st.title,
+          description: st.description || '',
+          priority: st.priority,
+          status: st.status,
+          deadline: st.deadline,
+          createdAt: st.createdAt,
+          doer: st.doerId ? { _id: st.doerId._id, name: st.doerId.name } : null,
+          assigner: st.assignerId ? { _id: st.assignerId._id, name: st.assignerId.name } : null,
+          isCompleted: ['Completed', 'Verified'].includes(st.status)
+        })),
+        completion: latestDone ? {
+          completedAt: latestDone.timestamp,
+          completedBy: task.doerId?.name || 'Doer',
+          remarks: latestDone.remarks || '',
+          files: latestDone.attachmentUrl ? [{ fileName: 'Evidence', fileUrl: latestDone.attachmentUrl }] : []
+        } : null,
+        verification: null,
+        rejections: [],
+        history: history.map(h => ({
+          action: h.action,
+          timestamp: h.timestamp,
+          instanceDate: h.instanceDate,
+          performedBy: task.doerId?.name || 'Staff',
+          remarks: h.remarks || '',
+          files: h.attachmentUrl ? [{ fileName: 'Evidence', fileUrl: h.attachmentUrl }] : []
+        }))
+      });
+    }
+
+    if (taskType === 'fms') {
+      const instance = await FlowInstance.findById(taskId).lean();
+      if (!instance) return res.status(404).json({ message: "Flow instance not found." });
+      if (!req.user?.isSuperAdmin && String(instance.tenantId) !== String(tenantId)) {
+        return res.status(403).json({ message: "Forbidden." });
+      }
+
+      const subTasks = await DelegationTask.find({
+        tenantId: instance.tenantId,
+        'parentTask.type': 'FMS',
+        'parentTask.taskId': String(taskId)
+      })
+        .populate('doerId assignerId', 'name email')
+        .sort({ createdAt: 1 })
+        .lean();
+
+      const history = instance.nodeHistory || [];
+      const isCompleted = instance.status === 'completed';
+      const lastStep = history.length ? history[history.length - 1] : null;
+
+      return res.status(200).json({
+        type: 'FMS',
+        _id: instance._id,
+        title: `${instance.templateName || 'FMS'} #${instance.orderIdentifier}`,
+        description: `Flow Template: ${instance.templateName || 'FMS'} · Order Identifier: #${instance.orderIdentifier}`,
+        status: isCompleted ? 'Completed' : (instance.status || 'Active'),
+        startedAt: instance.startedAt,
+        completedAt: instance.completedAt,
+        createdAt: instance.startedAt || instance.createdAt,
+        deadline: isCompleted ? (instance.completedAt || (lastStep && lastStep.plannedDeadline)) : (instance.activeStep && instance.activeStep.plannedDeadline),
+        activeStep: instance.activeStep,
+        subTasks: subTasks.map(st => ({
+          _id: st._id,
+          title: st.title,
+          status: st.status,
+          deadline: st.deadline,
+          doer: st.doerId ? { name: st.doerId.name } : null,
+          isCompleted: ['Completed', 'Verified'].includes(st.status)
+        })),
+        steps: history.map(h => ({
+          nodeName: h.nodeName,
+          assignedToName: h.assignedToName || '',
+          completedByName: h.completedByName || '',
+          decision: h.decision || null,
+          plannedDeadline: h.plannedDeadline || null,
+          completedAt: h.completedAt || null,
+          onTime: h.onTime !== false,
+          delayMinutes: h.delayMinutes || 0,
+          inputs: h.inputs || {}
+        })),
+        completion: isCompleted ? {
+          completedAt: instance.completedAt,
+          completedBy: (lastStep && (lastStep.completedByName || lastStep.assignedToName)) || 'System',
+          remarks: lastStep && lastStep.decision ? `Decision: ${lastStep.decision}` : 'Flow execution finalized.',
+          files: []
+        } : null,
+        verification: null,
+        rejections: [],
+        history: history.map(h => ({
+          action: h.nodeName,
+          timestamp: h.completedAt || h.plannedDeadline,
+          performedBy: h.completedByName || h.assignedToName || 'System',
+          remarks: h.decision ? `Decision: ${h.decision}` : (h.onTime !== false ? 'Completed on time' : `Delayed by ${h.delayMinutes || 0} mins`),
+          files: []
+        }))
+      });
+    }
+
+    return res.status(400).json({ message: "Unsupported task type." });
+  } catch (err) {
+    console.error("getDetailedTaskView error:", err);
+    res.status(500).json({ message: "Failed to load task details.", error: err.message });
+  }
+};
