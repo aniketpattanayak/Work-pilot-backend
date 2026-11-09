@@ -3074,7 +3074,9 @@ const resolveReviewPeriod = (view, referenceDate) => {
   if (view === 'Daily') {
     startDate = at(y, m, d); endDate = before(at(y, m, d + 1));
   } else if (view === 'Weekly') {
-    startDate = at(y, m, d - day + (day === 0 ? -6 : 1)); endDate = before(new Date(startDate.getTime() + 7 * 24 * 60 * 60 * 1000));
+    const daysSinceMonday = day === 0 ? 6 : (day === 1 ? 7 : day - 1);
+    startDate = at(y, m, d - daysSinceMonday);
+    endDate = before(at(y, m, d + 1));
   } else if (view === 'TwiceMonthly') {
     if (d <= 15) { startDate = at(y, m, 1); endDate = before(at(y, m, 16)); }
     else { startDate = at(y, m, 16); endDate = before(at(y, m + 1, 1)); }
@@ -3265,7 +3267,7 @@ exports.getReviewAnalytics = async (req, res) => {
       if (ce.getTime() - cs.getTime() > 366 * 24 * 60 * 60 * 1000) return res.status(400).json({ message: 'Please choose a range of at most one year.' });
       custom = { startDate: cs, endDate: ce };
     }
-    const view = custom ? 'Custom' : (REVIEW_PERIODS.includes(requestedView) ? requestedView : cfg.period);
+    const view = (custom && requestedView !== 'Weekly') ? 'Custom' : (REVIEW_PERIODS.includes(requestedView) ? requestedView : (custom ? 'Custom' : cfg.period));
     const rc = reviewContext(view, date, custom);
     const todayStart = istStartOfDay(rc.now);
     const todayEnd = new Date(todayStart.getTime() + 24 * 60 * 60 * 1000 - 1);
@@ -3320,7 +3322,7 @@ exports.getReviewAnalytics = async (req, res) => {
     }
 
     res.status(200).json({
-      view, startDate: rc.startDate, endDate: rc.endDate, report,
+      view, startDate: rc.startDate, endDate: calcEndDate, fullCycleEndDate: rc.endDate, report,
       config: { period: cfg.period, thresholds: cfg.thresholds, weights: cfg.weights, driftBands: cfg.driftBands }
     });
   } catch (error) {
@@ -3376,7 +3378,7 @@ exports.getUserDashboard = async (req, res) => {
     const requestedView = String(req.query.view || '');
     const range = readCustomRange(req.query);
     if (range.error) return res.status(400).json({ message: range.error });
-    const view = range.custom ? 'Custom' : (REVIEW_PERIODS.includes(requestedView) ? requestedView : cfg.period);
+    const view = range.custom ? 'Custom' : (REVIEW_PERIODS.includes(requestedView) ? requestedView : 'Monthly');
     const rc = reviewContext(view, date, range.custom);
     const now = rc.now;
     const dayMs = 24 * 60 * 60 * 1000;
@@ -3428,7 +3430,7 @@ exports.getUserDashboard = async (req, res) => {
         leaveStatus: emp.leaveStatus || null
       },
       isSelf: String(caller.id) === empIdStr,
-      view, startDate: rc.startDate, endDate: rc.endDate,
+      view, startDate: rc.startDate, endDate: calcEndDate, fullCycleEndDate: rc.endDate,
       config: { period: cfg.period, thresholds: cfg.thresholds },
       stats,
       overdue: { count: overdueList.length, truncated: openCandidates.length >= 300, items: overdueList.slice(0, 15).map(pick) },
@@ -3556,7 +3558,7 @@ exports.getDetailedTaskView = async (req, res) => {
     const tenantId = req.user?.tenantId;
 
     if (taskType === 'delegation') {
-      const task = await DelegationTask.findById(taskId)
+      let task = await DelegationTask.findById(taskId)
         .populate('assignerId', 'name email department whatsappNumber role roles')
         .populate('doerId', 'name email department whatsappNumber role roles leaveStatus')
         .populate('coordinatorId', 'name email department')
@@ -3566,8 +3568,22 @@ exports.getDetailedTaskView = async (req, res) => {
         .populate('history.performedBy', 'name')
         .lean();
 
+      if (!task && req.db) {
+        try {
+          task = await require('../models/DelegationTask').findById(taskId)
+            .populate('assignerId', 'name email department whatsappNumber role roles')
+            .populate('doerId', 'name email department whatsappNumber role roles leaveStatus')
+            .populate('coordinatorId', 'name email department')
+            .populate('coworkers', 'name email department')
+            .populate('forwardChain.employeeId', 'name email department')
+            .populate('files.uploadedBy', 'name')
+            .populate('history.performedBy', 'name')
+            .lean();
+        } catch (e) { }
+      }
+
       if (!task) return res.status(404).json({ message: "Delegation task not found." });
-      if (!req.user?.isSuperAdmin && String(task.tenantId) !== String(tenantId)) {
+      if (!req.user?.isSuperAdmin && tenantId && task.tenantId && String(task.tenantId) !== String(tenantId)) {
         return res.status(403).json({ message: "Forbidden." });
       }
 
@@ -3665,14 +3681,22 @@ exports.getDetailedTaskView = async (req, res) => {
     }
 
     if (taskType === 'checklist') {
-      const task = await ChecklistTask.findById(taskId)
+      let task = await ChecklistTask.findById(taskId)
         .populate('doerId', 'name email department')
         .populate('createdBy', 'name email department')
-        .populate('assignerId', 'name email department')
         .lean();
 
+      if (!task && req.db) {
+        try {
+          task = await require('../models/ChecklistTask').findById(taskId)
+            .populate('doerId', 'name email department')
+            .populate('createdBy', 'name email department')
+            .lean();
+        } catch (e) { }
+      }
+
       if (!task) return res.status(404).json({ message: "Checklist task not found." });
-      if (!req.user?.isSuperAdmin && String(task.tenantId) !== String(tenantId)) {
+      if (!req.user?.isSuperAdmin && tenantId && task.tenantId && String(task.tenantId) !== String(tenantId)) {
         return res.status(403).json({ message: "Forbidden." });
       }
 
@@ -3717,11 +3741,7 @@ exports.getDetailedTaskView = async (req, res) => {
           _id: task.createdBy._id,
           name: task.createdBy.name,
           email: task.createdBy.email
-        } : (task.assignerId ? {
-          _id: task.assignerId._id,
-          name: task.assignerId.name,
-          email: task.assignerId.email
-        } : { name: 'Admin' }),
+        } : { name: 'Admin' },
         doer: task.doerId ? {
           _id: task.doerId._id,
           name: task.doerId.name,
