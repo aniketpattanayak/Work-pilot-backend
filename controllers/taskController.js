@@ -139,20 +139,10 @@ exports.getDoerTasks = async (req, res) => {
     const buddyForIds = staffWhoAssignedMeAsBuddy.map(s => s._id);
 
     /**
-     * 2. UPDATED QUERY:
-     * Find tasks where the user is the Lead Doer OR a Follower (Helper)
-     * OR where the user is a Buddy for someone on leave.
+     * 2. STRICT DOER QUERY:
+     * Only tasks assigned to the logged-in user are returned.
      */
-    const tasks = await DelegationTask.find({
-      $or: [
-        { doerId: doerId },
-        { "helperDoers.helperId": doerId },
-        { coworkers: doerId }, // tasks I follow (view only, shown in a different colour)
-        { doerId: { $in: buddyForIds } },
-        // My Tasks only: also return tasks I passed on, so I can still follow them
-        ...(req.query.includePassedOn === '1' ? [{ 'forwardChain.employeeId': doerId }] : [])
-      ]
-    })
+    const tasks = await DelegationTask.find({ doerId: doerId })
       .populate('assignerId', 'name email shadowName')
       .populate('forwardChain.employeeId', 'name')
       .populate('doerId', 'name leaveStatus') // Populate leaveStatus to check per-task
@@ -263,8 +253,8 @@ exports.getAssignerTasks = async (req, res) => {
       return res.status(400).json({ message: "Invalid Assigner ID format provided." });
     }
 
-    const isAdminUser = ((Array.isArray(req.user?.roles) && req.user.roles.includes('Admin')) || isViewerOnly(req.user)) && req.user?.tenantId;
-    const assignerFilter = isAdminUser ? { tenantId: req.user.tenantId } : { $or: [{ assignerId: assignerId }, { 'forwardChain.employeeId': assignerId }] };
+    // Strict role-independent filter: only tasks assigned by this assigner
+    const assignerFilter = { assignerId: assignerId };
     const tasks = await DelegationTask.find(assignerFilter)
       .populate('doerId', 'name department roles email') // Populate Doer info
       .populate('coordinatorId', 'name')                 // Populate Coordinator info
@@ -893,8 +883,12 @@ exports.getAllChecklists = async (req, res) => {
       return res.status(400).json({ message: "Invalid Tenant ID format" });
     }
 
-    // 2. Fetch checklists for the entire company/tenant
-    const checklists = await ChecklistTask.find({ tenantId })
+    // 2. Fetch checklists for the tenant (filtered by assignerId / createdBy if provided)
+    const query = { tenantId };
+    if (req.query.assignerId) {
+      query.createdBy = req.query.assignerId;
+    }
+    const checklists = await ChecklistTask.find(query)
       .populate('doerId', 'name department')
       .populate('createdBy', 'name')
       .sort({ createdAt: -1 });
@@ -2754,15 +2748,14 @@ exports.getChecklistTasks = async (req, res) => {
     }).select('_id name leaveStatus');
 
     const authorizedIdList = [
-      doerId,
-      ...staffWhoAssignedMeAsBuddy.map(s => s._id.toString())
+      doerId
     ];
 
     /**
-     * 3. FETCH TASKS FOR ALL AUTHORIZED IDs
+     * 3. FETCH TASKS STRICTLY FOR LOGGED-IN DOER
      */
     const tasks = await ChecklistTask.find({
-      doerId: { $in: authorizedIdList },
+      doerId: doerId,
       status: 'Active'
     }).populate('doerId', 'name workOnSunday leaveStatus').populate('createdBy', 'name');
 
@@ -3267,7 +3260,7 @@ exports.getReviewAnalytics = async (req, res) => {
       if (ce.getTime() - cs.getTime() > 366 * 24 * 60 * 60 * 1000) return res.status(400).json({ message: 'Please choose a range of at most one year.' });
       custom = { startDate: cs, endDate: ce };
     }
-    const view = (custom && requestedView !== 'Weekly') ? 'Custom' : (REVIEW_PERIODS.includes(requestedView) ? requestedView : (custom ? 'Custom' : cfg.period));
+    const view = custom ? 'Custom' : (REVIEW_PERIODS.includes(requestedView) ? requestedView : cfg.period);
     const rc = reviewContext(view, date, custom);
     const todayStart = istStartOfDay(rc.now);
     const todayEnd = new Date(todayStart.getTime() + 24 * 60 * 60 * 1000 - 1);
@@ -3378,7 +3371,7 @@ exports.getUserDashboard = async (req, res) => {
     const requestedView = String(req.query.view || '');
     const range = readCustomRange(req.query);
     if (range.error) return res.status(400).json({ message: range.error });
-    const view = range.custom ? 'Custom' : (REVIEW_PERIODS.includes(requestedView) ? requestedView : 'Monthly');
+    const view = range.custom ? 'Custom' : (REVIEW_PERIODS.includes(requestedView) ? requestedView : cfg.period);
     const rc = reviewContext(view, date, range.custom);
     const now = rc.now;
     const dayMs = 24 * 60 * 60 * 1000;
