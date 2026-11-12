@@ -253,8 +253,58 @@ exports.getAssignerTasks = async (req, res) => {
       return res.status(400).json({ message: "Invalid Assigner ID format provided." });
     }
 
-    // Strict role-independent filter: only tasks assigned by this assigner
-    const assignerFilter = { assignerId: assignerId };
+    let assignerEmp = await Employee.findById(assignerId).select('name roles role tenantId');
+    if (!assignerEmp && req.db) {
+      assignerEmp = await require('../models/Employee').findById(assignerId).select('name roles role tenantId');
+    }
+    const empRoles = Array.isArray(assignerEmp?.roles) ? assignerEmp.roles : (assignerEmp?.role ? [assignerEmp.role] : []);
+    const callerRoles = Array.isArray(req.user?.roles) ? req.user.roles : (req.user?.role ? [req.user.role] : []);
+    const allRoles = [...callerRoles, ...empRoles];
+    const isAdminUser = allRoles.some(r => r && r.toLowerCase() === 'admin') || !!req.user?.isSuperAdmin;
+    const currentTenantId = assignerEmp?.tenantId || req.user?.tenantId;
+
+    const assignerObjId = new mongoose.Types.ObjectId(assignerId);
+    const assignerName = (assignerEmp?.name || req.user?.name || '').trim();
+
+    const tenantObjId = currentTenantId && mongoose.Types.ObjectId.isValid(currentTenantId)
+      ? new mongoose.Types.ObjectId(currentTenantId)
+      : currentTenantId;
+
+    let assignerFilter;
+    if (isAdminUser) {
+      // Admin: Only tasks assigned by this logged-in Admin user
+      // (matches their ID, their name, or legacy unassigned admin tasks in this tenant).
+      // Tasks assigned by other staff/assigners are NOT visible.
+      const orConditions = [
+        { assignerId: assignerObjId },
+        { 'forwardChain.employeeId': assignerObjId },
+        { assignerId: null },
+        { assignerId: { $exists: false } },
+        { assignerName: /^admin$/i }
+      ];
+      if (assignerName) {
+        const escapedName = assignerName.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+        orConditions.push({ assignerName: new RegExp(`^${escapedName}$`, 'i') });
+      }
+      assignerFilter = { $or: orConditions };
+      if (currentTenantId) {
+        assignerFilter.tenantId = { $in: [currentTenantId, tenantObjId] };
+      }
+    } else {
+      // Non-admin: ONLY tasks assigned by this logged-in user
+      const orConditions = [
+        { assignerId: assignerObjId },
+        { 'forwardChain.employeeId': assignerObjId }
+      ];
+      if (assignerName) {
+        const escapedName = assignerName.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+        orConditions.push({ assignerName: new RegExp(`^${escapedName}$`, 'i') });
+      }
+      assignerFilter = { $or: orConditions };
+      if (currentTenantId) {
+        assignerFilter.tenantId = { $in: [currentTenantId, tenantObjId] };
+      }
+    }
     const tasks = await DelegationTask.find(assignerFilter)
       .populate('doerId', 'name department roles email') // Populate Doer info
       .populate('coordinatorId', 'name')                 // Populate Coordinator info
@@ -883,10 +933,33 @@ exports.getAllChecklists = async (req, res) => {
       return res.status(400).json({ message: "Invalid Tenant ID format" });
     }
 
-    // 2. Fetch checklists for the tenant (filtered by assignerId / createdBy if provided)
-    const query = { tenantId };
-    if (req.query.assignerId) {
-      query.createdBy = req.query.assignerId;
+    // 2. Fetch checklists for the tenant (strictly filtered: only checklists assigned by the logged-in user)
+    const tenantObjId = mongoose.Types.ObjectId.isValid(tenantId) ? new mongoose.Types.ObjectId(tenantId) : tenantId;
+    const query = { tenantId: { $in: [tenantId, tenantObjId] } };
+    if (req.query.assignerId && mongoose.Types.ObjectId.isValid(req.query.assignerId)) {
+      const assignerObjId = new mongoose.Types.ObjectId(req.query.assignerId);
+      let caller = await Employee.findById(req.query.assignerId).select('name roles role');
+      if (!caller && req.db) {
+        caller = await require('../models/Employee').findById(req.query.assignerId).select('name roles role');
+      }
+      const cRoles = [
+        ...(Array.isArray(caller?.roles) ? caller.roles : (caller?.role ? [caller.role] : [])),
+        ...(Array.isArray(req.user?.roles) ? req.user.roles : (req.user?.role ? [req.user.role] : []))
+      ];
+      const isCallerAdmin = cRoles.some(r => r && r.toLowerCase() === 'admin') || !!req.user?.isSuperAdmin;
+
+      if (isCallerAdmin) {
+        // Admin: Only checklists assigned/created by this logged-in Admin user
+        // OR legacy unassigned checklists in this tenant
+        query.$or = [
+          { createdBy: assignerObjId },
+          { createdBy: null },
+          { createdBy: { $exists: false } }
+        ];
+      } else {
+        // Non-admin: ONLY checklists created by this logged-in assigner
+        query.createdBy = assignerObjId;
+      }
     }
     const checklists = await ChecklistTask.find(query)
       .populate('doerId', 'name department')
@@ -1123,7 +1196,9 @@ exports.createChecklistTask = async (req, res) => {
       taskName,
       description: description || "",
       doerId,
-      createdBy: mongoose.Types.ObjectId.isValid(req.user?.id) ? req.user.id : undefined,
+      createdBy: (req.body.createdBy && mongoose.Types.ObjectId.isValid(req.body.createdBy))
+        ? req.body.createdBy
+        : (mongoose.Types.ObjectId.isValid(req.user?.id) ? req.user.id : (mongoose.Types.ObjectId.isValid(req.user?._id) ? req.user._id : undefined)),
       frequency,
       /**
        * Persisting the full config object to enable iterative repeat logic
@@ -1661,7 +1736,10 @@ exports.getCoordinatorTasks = async (req, res) => {
     const { coordinatorId } = req.params;
 
     // 1. Find the Coordinator
-    const coordinator = await Employee.findById(coordinatorId);
+    let coordinator = await Employee.findById(coordinatorId);
+    if (!coordinator && req.db) {
+      coordinator = await require('../models/Employee').findById(coordinatorId);
+    }
     if (!coordinator) return res.status(404).json({ message: "Coordinator not found" });
 
     let delegationQuery = {};
@@ -1704,7 +1782,7 @@ exports.getCoordinatorTasks = async (req, res) => {
     }
 
     // 3. Parallel Fetch from Delegation and Checklist collections
-    const [delegationTasks, checklistTasks] = await Promise.all([
+    let [delegationTasks, checklistTasks, tenantAdmin] = await Promise.all([
       DelegationTask.find(delegationQuery)
         .populate('assignerId', 'name role')
         .populate('doerId', 'name role whatsappNumber department')
@@ -1714,22 +1792,65 @@ exports.getCoordinatorTasks = async (req, res) => {
       ChecklistTask.find(checklistQuery)
         .populate('doerId', 'name department whatsappNumber')
         .populate('createdBy', 'name')
-        .lean()
+        .lean(),
+
+      Employee.findOne({
+        tenantId: coordinator.tenantId,
+        $or: [
+          { roles: 'Admin' },
+          { roles: { $in: ['Admin', 'admin'] } },
+          { role: /^admin$/i }
+        ]
+      }).select('name').lean()
     ]);
 
-    // 4. Normalization (Ensures frontend UI components don't crash)
-    const normalizedChecklists = (checklistTasks || []).map(t => ({
-      ...t,
-      title: t.taskName || "Untitled Checklist",
-      deadline: t.nextDueDate || new Date(),
-      taskType: 'Checklist'
-    }));
+    if (!tenantAdmin && req.db) {
+      tenantAdmin = await require('../models/Employee').findOne({
+        tenantId: coordinator.tenantId,
+        $or: [
+          { roles: 'Admin' },
+          { roles: { $in: ['Admin', 'admin'] } },
+          { role: /^admin$/i }
+        ]
+      }).select('name').lean();
+    }
 
-    const normalizedDelegations = (delegationTasks || []).map(t => ({
-      ...t,
-      taskType: 'Delegation',
-      followers: followersOf(t),
-    }));
+    const defaultAdminName = (tenantAdmin?.name && tenantAdmin.name.trim().toLowerCase() !== 'admin')
+      ? tenantAdmin.name
+      : (coordinator?.roles?.includes('Admin') && coordinator?.name?.trim()?.toLowerCase() !== 'admin'
+          ? coordinator.name
+          : (req.user?.name && req.user.name.trim().toLowerCase() !== 'admin' ? req.user.name : ''));
+
+    // 4. Normalization (Ensures frontend UI components don't crash)
+    const normalizedChecklists = (checklistTasks || []).map(t => {
+      let creator = t.createdBy;
+      if (!creator || !creator.name || creator.name.trim().toLowerCase() === 'admin') {
+        creator = defaultAdminName ? { name: defaultAdminName } : null;
+      }
+      return {
+        ...t,
+        title: t.taskName || "Untitled Checklist",
+        deadline: t.nextDueDate || new Date(),
+        taskType: 'Checklist',
+        createdBy: creator,
+        assignerId: creator,
+        assignerName: creator?.name || defaultAdminName || ''
+      };
+    });
+
+    const normalizedDelegations = (delegationTasks || []).map(t => {
+      let assigner = t.assignerId;
+      if (!assigner || !assigner.name || assigner.name.trim().toLowerCase() === 'admin') {
+        assigner = defaultAdminName ? { name: defaultAdminName } : assigner;
+      }
+      return {
+        ...t,
+        assignerId: assigner,
+        assignerName: assigner?.name || defaultAdminName || '',
+        taskType: 'Delegation',
+        followers: followersOf(t),
+      };
+    });
 
     // 5. Merge and Sort by chronological deadline
     const allTasks = [...normalizedDelegations, ...normalizedChecklists].sort(

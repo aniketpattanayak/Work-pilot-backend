@@ -234,6 +234,9 @@ router.get('/settings/:tenantId', authMiddleware, subscriptionGuard, tenantDbMid
   }
 });
 
+// Employee list shortcut for dashboard and task views
+router.get('/employees/:tenantId', authMiddleware, subscriptionGuard, tenantDbMiddleware, sameTenantOnly, getEmployeeList);
+
 // Tasks
 router.post('/create-task', authMiddleware, subscriptionGuard, tenantDbMiddleware,
   ...useUpload(_upload.fields([
