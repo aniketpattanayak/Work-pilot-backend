@@ -139,10 +139,21 @@ exports.getDoerTasks = async (req, res) => {
     const buddyForIds = staffWhoAssignedMeAsBuddy.map(s => s._id);
 
     /**
-     * 2. STRICT DOER QUERY:
-     * Only tasks assigned to the logged-in user are returned.
+     * 2. DOER & FOLLOWER QUERY:
+     * Returns tasks assigned to the logged-in user, tasks where the user is a follower/coworker,
+     * tasks forwarded through the user, or tasks covered as a buddy.
      */
-    const tasks = await DelegationTask.find({ doerId: doerId })
+    const doerObjId = mongoose.Types.ObjectId.isValid(doerId) ? new mongoose.Types.ObjectId(doerId) : doerId;
+    const idList = [doerObjId, String(doerId)].filter(Boolean);
+    const tasks = await DelegationTask.find({
+      $or: [
+        { doerId: { $in: idList } },
+        { coworkers: { $in: idList } },
+        { 'helperDoers.helperId': { $in: idList } },
+        { 'forwardChain.employeeId': { $in: idList } },
+        ...(buddyForIds.length > 0 ? [{ doerId: { $in: buddyForIds } }] : [])
+      ]
+    })
       .populate('assignerId', 'name email shadowName')
       .populate('forwardChain.employeeId', 'name')
       .populate('doerId', 'name leaveStatus') // Populate leaveStatus to check per-task
@@ -174,6 +185,13 @@ exports.getDoerTasks = async (req, res) => {
 
       const isOwner = taskOwner._id.toString() === doerId;
       const isBuddySlot = buddyForIds.some(id => id.toString() === taskOwner._id.toString());
+      const isFollower = followersOf(task).some(f => String((f && f._id) || f) === String(doerId));
+      const inChain = (task.forwardChain || []).some(c => String((c.employeeId && c.employeeId._id) || c.employeeId || '') === String(doerId));
+
+      // Followers and passed-on users are watch-only viewers, not affected by primary owner's leave hiding
+      if ((isFollower || inChain) && !isOwner) {
+        return true;
+      }
 
       const ownerOnLeave = getIsOnLeave(taskOwner, task.deadline);
       const requesterOnLeave = getIsOnLeave(requester, task.deadline);
@@ -199,7 +217,7 @@ exports.getDoerTasks = async (req, res) => {
       // How this task relates to ME: doer (mine, or covering as buddy), passedOn (I handed it on) or follower (view only)
       const ownerId = String((obj.doerId && obj.doerId._id) || obj.doerId || '');
       const inChain = (obj.forwardChain || []).some(c => String((c.employeeId && c.employeeId._id) || c.employeeId || '') === String(doerId));
-      const follows = obj.followers.some(f => String(f._id) === String(doerId));
+      const follows = obj.followers.some(f => String((f && f._id) || f) === String(doerId));
       obj.myRole = ownerId === String(doerId) ? 'doer'
         : buddyForIds.some(id => String(id) === ownerId) ? 'doer'
           : inChain ? 'passedOn'
@@ -2722,7 +2740,7 @@ exports.createTask = async (req, res) => {
         rawFollowers: taskData.coworkers,
         doerId: taskData.doerId,
         assignerId: taskData.assignerId,
-        tenantId: taskData.tenantId,
+        tenantId: taskData.tenantId || req.user?.tenantId,
         Employee,
       });
       if (errors.length) console.warn('[Task] follower validation:', errors.join(' '));

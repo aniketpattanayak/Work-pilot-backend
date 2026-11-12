@@ -10,6 +10,7 @@
 // follower input through, so a tenant-mismatched or doer/assigner id can
 // never be smuggled into coworkers via the API.
 
+const mongoose = require('mongoose');
 const MAX_FOLLOWERS = 20;
 
 /**
@@ -36,7 +37,7 @@ async function validateFollowers({ rawFollowers, doerId, assignerId, tenantId, E
   const seen = new Set();
   const candidateIds = [];
   for (const raw of rawFollowers) {
-    const id = String((raw && raw._id) || raw || '').trim();
+    const id = String((raw && (raw.helperId || raw._id)) || raw || '').trim();
     if (!id) continue;
     if (seen.has(id)) continue;
     if (id === doer) {
@@ -57,7 +58,9 @@ async function validateFollowers({ rawFollowers, doerId, assignerId, tenantId, E
   // as the task - otherwise a caller could add an employee from another
   // tenant (or a garbage id) as a "follower" and leak task visibility across
   // tenant boundaries.
-  const found = await Employee.find({ _id: { $in: candidateIds }, tenantId }).select('_id');
+  const tId = tenantId && mongoose.Types.ObjectId.isValid(tenantId) ? new mongoose.Types.ObjectId(tenantId) : tenantId;
+  const tenantFilter = tenantId ? { tenantId: { $in: [tenantId, tId] } } : {};
+  const found = await Employee.find({ _id: { $in: candidateIds }, ...tenantFilter }).select('_id');
   const validSet = new Set(found.map(e => String(e._id)));
 
   const followers = [];
