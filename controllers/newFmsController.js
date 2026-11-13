@@ -418,7 +418,7 @@ exports.completeStep = async (req, res) => {
     if (!template) return res.status(404).json({ message: 'Template not found' });
 
     const { instance: updated, next } = await completeStep(
-      instanceId, employeeId, performerName, decision, inputs || {}, template
+      instanceId, employeeId, performerName, decision, inputs || {}, template, FlowInstance
     );
 
     res.json({

@@ -380,8 +380,8 @@ async function activateNextNode(instance, template, decision, completedNode, com
  * @param {Object} template - FlowTemplate document
  * @returns {{ instance, nextNode, assignee, deadline }}
  */
-async function completeStep(instanceId, employeeId, employeeName, decision, inputs, template) {
-  const instance = await FlowInstance.findById(instanceId);
+async function completeStep(instanceId, employeeId, employeeName, decision, inputs, template, InstanceModel = FlowInstance) {
+  const instance = await InstanceModel.findById(instanceId);
   if (!instance) throw new Error('Instance not found');
   if (instance.status !== 'active') throw new Error('Instance is not active');
 
