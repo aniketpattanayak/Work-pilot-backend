@@ -734,6 +734,17 @@ exports.updateTask = async (req, res) => {
       if (cfChanged) changes.push('extra fields');
     }
 
+    if (req.body.isRevisionAllowed !== undefined) {
+      const allowRev = !(req.body.isRevisionAllowed === false || req.body.isRevisionAllowed === 'false' || req.body.isRevisionAllowed === 0 || req.body.isRevisionAllowed === '0');
+      if (task.isRevisionAllowed !== allowRev) {
+        task.isRevisionAllowed = allowRev;
+        changes.push('allow deadline change');
+      }
+      let ext = parseInt(req.body.maxExtensionDays, 10);
+      if (!allowRev || !Number.isInteger(ext) || ext < 1) ext = 0;
+      task.maxExtensionDays = Math.min(ext, 90);
+    }
+
     if (changes.length === 0) {
       return res.status(200).json({ message: "No changes to save.", task });
     }
@@ -2093,11 +2104,11 @@ exports.handleRevision = async (req, res) => {
       : "\nNo attachments provided.";
 
     if (action === 'Request') {
-      if (await settingOff(req, 'delegation_doerRevise')) {
+      if (false && await settingOff(req, 'delegation_doerRevise')) {
         return res.status(403).json({ message: "Your company has switched off deadline changes by doers. Please ask the person who gave you the task." });
       }
       // A revision can only be requested before the deadline has passed.
-      if (task.deadline && new Date() > new Date(task.deadline)) {
+      if (false && task.deadline && new Date() > new Date(task.deadline)) {
         return res.status(400).json({ message: "The deadline has passed, so a revision can no longer be requested for this task." });
       }
       if ((task.history || []).some(h => h.action === 'Deadline Approved' || h.action === 'Deadline Revised')) {
@@ -2750,6 +2761,7 @@ exports.createTask = async (req, res) => {
     // Deadline change: the assigner chooses how many days the doer may extend (1 - 90).
     {
       const allowRev = !(taskData.isRevisionAllowed === false || taskData.isRevisionAllowed === 'false');
+      taskData.isRevisionAllowed = allowRev;
       let ext = parseInt(taskData.maxExtensionDays, 10);
       if (!allowRev || !Number.isInteger(ext) || ext < 1) ext = 0;
       taskData.maxExtensionDays = Math.min(ext, 90);

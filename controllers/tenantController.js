@@ -765,12 +765,20 @@ exports.bulkAddChecklists = async (req, res) => {
           tenant.weekends || [0]
         );
 
+        const assignerName = cl['Assigned By'] || cl.assignedBy || cl['Assigner'] || cl.assigner;
+        const customAssigner = assignerName ? findEmp(assignerName) : null;
+        const checklistCreator = customAssigner
+          ? customAssigner._id
+          : (mongoose.Types.ObjectId.isValid(req.body.assignerId)
+              ? req.body.assignerId
+              : (mongoose.Types.ObjectId.isValid(req.user?.id) ? req.user.id : undefined));
+
         await ChecklistTask.create({
           tenantId,
           taskName,
           description: cl['Description'] || cl.description || '',
           doerId: assignee._id,
-          createdBy: mongoose.Types.ObjectId.isValid(req.user?.id) ? req.user.id : undefined,
+          createdBy: checklistCreator,
           frequency,
           frequencyConfig,
           startDate: baseAnchorDate,

@@ -44,7 +44,7 @@ const FORMS = {
       F('deadline', 'Deadline', { fixedRequired: true }),
       F('attachments', 'Attachments'),
       F('followers', 'Followers'),
-      F('revision', 'Allow deadline change'),
+      F('revision', 'Allow Deadline Change', { canHide: false }),
     ],
   },
   checklist: {
