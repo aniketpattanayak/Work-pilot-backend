@@ -739,9 +739,22 @@ exports.cancelInstance = async (req, res) => {
  */
 exports.fixInstanceAssignee = async (req, res) => {
   try {
-    const { FlowTemplate, FlowInstance, Employee } = getModels(req);
     const { tenantId } = req.params;
-    const { employeeId, employeeName } = req.body;
+
+    // For tenants with a custom MongoDB URI, we must use their DB connection
+    // (this route has no tenantDbMiddleware, so req.db is null by default)
+    const TenantModel = require('../models/Tenant');
+    const tenantDoc = await TenantModel.findById(tenantId).select('superAdmin.customMongoUri').lean();
+    let FlowTemplate, FlowInstance, Employee;
+    if (tenantDoc?.superAdmin?.customMongoUri) {
+      const { getTenantConnection } = require('../utils/tenantDb');
+      const db = await getTenantConnection(tenantId, tenantDoc.superAdmin.customMongoUri);
+      FlowTemplate = db.model('FlowTemplate', require('../models/FlowTemplate').schema);
+      FlowInstance  = db.model('FlowInstance',  require('../models/FlowInstance').schema);
+      Employee      = db.model('Employee',       require('../models/Employee').schema);
+    } else {
+      ({ FlowTemplate, FlowInstance, Employee } = getModels(req));
+    }
 
     // Fix ALL active instances where assignedToName is missing/Unassigned
     // (whether assignedToId is null or set to a valid ID but name wasn't saved)
