@@ -743,23 +743,45 @@ exports.fixInstanceAssignee = async (req, res) => {
     const { tenantId } = req.params;
     const { employeeId, employeeName } = req.body;
 
-    // Find all active instances with Unassigned and fix them using the first node's assignee
+    // Fix ALL active instances where assignedToName is missing/Unassigned
+    // (whether assignedToId is null or set to a valid ID but name wasn't saved)
     const templates = await FlowTemplate.find({ tenantId }).lean();
-    const instances = await FlowInstance.find({ tenantId, status: 'active', 'activeStep.assignedToId': null }).lean();
+    const instances = await FlowInstance.find({
+      tenantId, status: 'active',
+      $or: [
+        { 'activeStep.assignedToId': null },
+        { 'activeStep.assignedToName': { $in: [null, '', 'Unassigned'] } },
+      ]
+    }).lean();
 
     let fixed = 0;
     for (const inst of instances) {
+      let empId = inst.activeStep?.assignedToId;
+
+      // If we already have an ID, try to resolve the name directly
+      if (empId) {
+        const emp = await Employee.findById(empId).select('_id name').lean();
+        if (emp) {
+          await FlowInstance.updateOne(
+            { _id: inst._id },
+            { $set: { 'activeStep.assignedToId': emp._id.toString(), 'activeStep.assignedToName': emp.name } }
+          );
+          console.log(`[Fix] ${inst.orderIdentifier} → name resolved from existing ID: ${emp.name}`);
+          fixed++;
+          continue;
+        }
+      }
+
+      // No ID or ID not found — resolve from template node
       const template = templates.find(t => t._id.toString() === inst.templateId?.toString());
       if (!template) continue;
 
-      // Find the node that matches the current active step
       const activeNode = template.nodes?.find(n => n.id === inst.activeStep?.nodeId);
       if (!activeNode) continue;
 
-      const empId = activeNode.assignedTo?.value;
+      empId = activeNode.assignedTo?.value;
       if (!empId) continue;
 
-      // Look up employee
       const emp = await Employee.findById(empId).select('_id name').lean();
       if (!emp) continue;
 
@@ -767,11 +789,11 @@ exports.fixInstanceAssignee = async (req, res) => {
         { _id: inst._id },
         { $set: { 'activeStep.assignedToId': emp._id.toString(), 'activeStep.assignedToName': emp.name } }
       );
-      console.log(`[Fix] ${inst.orderIdentifier} → ${emp.name} (${emp._id})`);
+      console.log(`[Fix] ${inst.orderIdentifier} → ${emp.name} (${emp._id}) from template node`);
       fixed++;
     }
 
-    res.json({ message: `Fixed ${fixed} instances`, fixed });
+    res.json({ message: `Fixed ${fixed} of ${instances.length} instances`, fixed, total: instances.length });
   } catch (err) {
     res.status(500).json({ message: err.message });
   }

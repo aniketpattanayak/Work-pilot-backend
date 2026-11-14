@@ -227,8 +227,24 @@ async function resolveAssignee(node, rawSheetData, EmpModel = Employee) {
   if (type === 'sheetColumn') {
     const raw = rawSheetData?.[value];
     if (!raw) return { id: null, name: 'Unassigned' };
-    const emp = await EmpModel.findOne({ $or: [{ email: raw }, { name: raw }] }).select('_id name').lean();
+    // Case-insensitive match on both email and name
+    const emp = await EmpModel.findOne({
+      $or: [
+        { email: raw.trim() },
+        { name: new RegExp(`^${raw.trim().replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}$`, 'i') },
+      ]
+    }).select('_id name').lean();
     if (emp) return { id: emp._id.toString(), name: emp.name };
+    // Fallback: try global model
+    if (EmpModel !== Employee) {
+      const empG = await Employee.findOne({
+        $or: [
+          { email: raw.trim() },
+          { name: new RegExp(`^${raw.trim().replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}$`, 'i') },
+        ]
+      }).select('_id name').lean();
+      if (empG) return { id: empG._id.toString(), name: empG.name };
+    }
     return { id: null, name: String(raw) };
   }
 
@@ -275,6 +291,26 @@ async function resolveAssignee(node, rawSheetData, EmpModel = Employee) {
         return { id: emp._id.toString(), name: emp.name };
       }
     } catch(e) {}
+
+    // Method 4: fallback to global Employee model (covers cases where EmpModel
+    // is a tenant-scoped connection that doesn't have this employee — e.g. the
+    // employee was saved to the shared DB while the node config was set before
+    // a custom-DB migration, or req.db resolved to null for a push-sync call).
+    if (EmpModel !== Employee) {
+      try {
+        const mongoose = require('mongoose');
+        if (mongoose.Types.ObjectId.isValid(trimmed)) {
+          const emp = await Employee.findById(trimmed).select('_id name').lean();
+          if (emp) {
+            _empCache[trimmed] = emp.name;
+            console.log(`[resolveAssignee] ✅ Found via global Employee model: "${emp.name}"`);
+            return { id: emp._id.toString(), name: emp.name };
+          }
+        }
+      } catch(e) {
+        console.error('[resolveAssignee] global fallback error:', e.message);
+      }
+    }
 
     console.error(`[resolveAssignee] ❌ All methods failed for value: "${value}"`);
   }
