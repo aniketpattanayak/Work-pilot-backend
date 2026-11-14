@@ -29,8 +29,9 @@ const NodeSchema = new mongoose.Schema({
   // type: 'employee' → value is an employee _id string
   // type: 'sheetColumn' → value is a column name in rawSheetData (dynamic per order)
   assignedTo: {
-    type:  { type: String, enum: ['employee', 'sheetColumn'], default: 'employee' },
-    value: { type: String, default: '' },
+    type:       { type: String, enum: ['employee', 'sheetColumn'], default: 'employee' },
+    value:      { type: String, default: '' },
+    cachedName: { type: String, default: '' }, // employee display name cached at save time
   },
 
   // Deadline configuration
